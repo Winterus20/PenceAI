@@ -1,0 +1,566 @@
+import Database from 'better-sqlite3';
+import path from 'path';
+import fs from 'fs';
+import * as sqliteVec from "sqlite-vec";
+import { logger } from '../utils/logger.js';
+
+/**
+ * SQLite veritabanı bağlantısı ve şema yönetimi.
+ */
+export class PenceDatabase {
+  private db: Database.Database;
+  private embeddingDimensions: number;
+
+  constructor(dbPath: string, embeddingDimensions: number = 1536) {
+    // data dizinini oluştur
+    const dir = path.dirname(dbPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    this.embeddingDimensions = embeddingDimensions;
+    this.db = new Database(dbPath);
+
+    // WAL modu ve optimizasyonlar
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('synchronous = NORMAL');
+    this.db.pragma('busy_timeout = 5000');
+    this.db.pragma('foreign_keys = ON');
+
+    // Load sqlite-vec extension
+    sqliteVec.load(this.db);
+
+    this.initSchema();
+
+    // Embedding boyut değişikliği kontrolü — mevcut DB farklı boyuttaysa uyarı ver
+    this.validateEmbeddingDimensions();
+  }
+
+  private initSchema(): void {
+    this.db.exec(`
+      -- Konuşmalar
+      CREATE TABLE IF NOT EXISTS conversations (
+        id TEXT PRIMARY KEY,
+        channel_type TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        user_name TEXT DEFAULT '',
+        title TEXT DEFAULT '',
+        summary TEXT DEFAULT '',
+        is_summarized INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Mesajlar
+      CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
+        content TEXT NOT NULL DEFAULT '',
+        tool_calls TEXT,      -- JSON
+        tool_results TEXT,    -- JSON
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+      );
+
+      -- Uzun vadeli bellekler
+      CREATE TABLE IF NOT EXISTS memories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        category TEXT DEFAULT 'general',
+        content TEXT NOT NULL,
+        importance INTEGER DEFAULT 5,
+        access_count INTEGER DEFAULT 0,
+        is_archived INTEGER DEFAULT 0,
+        last_accessed DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        provenance_source TEXT,
+        provenance_conversation_id TEXT,
+        provenance_message_id INTEGER,
+        confidence REAL DEFAULT 0.7,
+        review_profile TEXT DEFAULT 'standard',
+        memory_type TEXT DEFAULT 'semantic' CHECK(memory_type IN ('episodic', 'semantic'))
+      );
+
+      -- Yüklü skill'ler
+      CREATE TABLE IF NOT EXISTS skills (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        version TEXT DEFAULT '1.0.0',
+        enabled INTEGER DEFAULT 1,
+        config TEXT DEFAULT '{}',
+        installed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Zamanlanmış görevler
+      CREATE TABLE IF NOT EXISTS scheduled_tasks (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        cron_expression TEXT NOT NULL,
+        action TEXT NOT NULL,          -- JSON: ne yapılacak
+        enabled INTEGER DEFAULT 1,
+        last_run DATETIME,
+        next_run DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- FTS5 tam metin arama (bellekler için)
+      CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+        content,
+        category,
+        content=memories,
+        content_rowid=id
+      );
+
+      -- FTS5 tam metin arama (mesajlar için)
+      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+        content,
+        content=messages,
+        content_rowid=id
+      );
+
+      -- FTS tetikleyicileri
+      CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+        INSERT INTO memories_fts(rowid, content, category) VALUES (new.id, new.content, new.category);
+      END;
+      CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+        INSERT INTO memories_fts(memories_fts, rowid, content, category) VALUES('delete', old.id, old.content, old.category);
+      END;
+      CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+        INSERT INTO memories_fts(memories_fts, rowid, content, category) VALUES('delete', old.id, old.content, old.category);
+        INSERT INTO memories_fts(rowid, content, category) VALUES (new.id, new.content, new.category);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+        INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+      END;
+      CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+      END;
+      CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+        INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+      END;
+
+      -- Bellek embedding vektörleri (semantik benzerlik araması için sqlite-vec ile)
+      CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
+        embedding float[${this.embeddingDimensions}]
+      );
+
+      -- Mesaj embedding vektörleri (mesajlarda semantik arama için)
+      CREATE VIRTUAL TABLE IF NOT EXISTS message_embeddings USING vec0(
+        embedding float[${this.embeddingDimensions}]
+      );
+
+      -- Bellek entity'leri (kişi, teknoloji, proje, kavram vb.)
+      CREATE TABLE IF NOT EXISTS memory_entities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'concept',
+        normalized_name TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(normalized_name, type)
+      );
+
+      -- Bellek ilişkileri (bellekler arası graph edge'leri)
+      CREATE TABLE IF NOT EXISTS memory_relations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_memory_id INTEGER NOT NULL,
+        target_memory_id INTEGER NOT NULL,
+        relation_type TEXT NOT NULL DEFAULT 'related_to',
+        confidence REAL DEFAULT 0.5,
+        description TEXT DEFAULT '',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (source_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+        FOREIGN KEY (target_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+        UNIQUE(source_memory_id, target_memory_id, relation_type)
+      );
+
+      -- Bellek-entity bağlantı tablosu
+      CREATE TABLE IF NOT EXISTS memory_entity_links (
+        memory_id INTEGER NOT NULL,
+        entity_id INTEGER NOT NULL,
+        PRIMARY KEY (memory_id, entity_id),
+        FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+        FOREIGN KEY (entity_id) REFERENCES memory_entities(id) ON DELETE CASCADE
+      );
+
+      -- İndeksler
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_conv_role_id ON messages(conversation_id, role, id);
+      CREATE INDEX IF NOT EXISTS idx_memories_user ON memories(user_id);
+      CREATE INDEX IF NOT EXISTS idx_memories_archived ON memories(is_archived);
+      CREATE INDEX IF NOT EXISTS idx_conversations_channel ON conversations(channel_type, channel_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_relations_source ON memory_relations(source_memory_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_relations_target ON memory_relations(target_memory_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_entity_links_entity ON memory_entity_links(entity_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_entities_normalized ON memory_entities(normalized_name);
+      CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+      CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at);
+
+      -- Anahtar-değer ayarlar tablosu
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    this.migrate();
+  }
+
+  /**
+   * Veritabanı şemasını günceller (Migration).
+   */
+  private migrate(): void {
+    // Tablo bilgilerini cache-le (N+1 pragma sorgularını azalt)
+    const memoriesTableInfo = this.db.prepare("PRAGMA table_info(memories)").all() as any[];
+    const convTableInfo = this.db.prepare("PRAGMA table_info(conversations)").all() as any[];
+    const msgTableInfo = this.db.prepare("PRAGMA table_info(messages)").all() as any[];
+    const relTableInfo = this.db.prepare("PRAGMA table_info(memory_relations)").all() as any[];
+
+    const hasArchived = memoriesTableInfo.some(col => col.name === 'is_archived');
+
+    if (!hasArchived) {
+      logger.info('[Database] 🚀 Migrating: Adding is_archived column to memories table');
+      try {
+        this.db.exec("ALTER TABLE memories ADD COLUMN is_archived INTEGER DEFAULT 0");
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_memories_archived ON memories(is_archived)");
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (is_archived):');
+      }
+    }
+
+    // message_embeddings tablosunu oluştur (yoksa — eski DB'ler için)
+    const msgEmbedTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='message_embeddings'"
+    ).get();
+    if (!msgEmbedTable) {
+      logger.info('[Database] 🚀 Migrating: Creating message_embeddings table');
+      try {
+        this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS message_embeddings USING vec0(embedding float[${this.embeddingDimensions}])`);
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (message_embeddings):');
+      }
+    }
+
+    // conversations tablosuna summary ve is_summarized sütunlarını ekle (yoksa)
+    if (!convTableInfo.some(col => col.name === 'summary')) {
+      logger.info('[Database] 🚀 Migrating: Adding summary column to conversations table');
+      try {
+        this.db.exec("ALTER TABLE conversations ADD COLUMN summary TEXT DEFAULT ''");
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (summary):');
+      }
+    }
+    if (!convTableInfo.some((col: any) => col.name === 'is_summarized')) {
+      logger.info('[Database] 🚀 Migrating: Adding is_summarized column to conversations table');
+      try {
+        this.db.exec("ALTER TABLE conversations ADD COLUMN is_summarized INTEGER DEFAULT 0");
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (is_summarized):');
+      }
+    }
+
+    // Ebbinghaus Forgetting Curve kolonları — memories tablosuna ekle (yoksa)
+    if (!memoriesTableInfo.some(col => col.name === 'stability')) {
+      logger.info('[Database] 🚀 Migrating: Adding Ebbinghaus columns to memories table');
+      try {
+        this.db.exec("ALTER TABLE memories ADD COLUMN stability REAL DEFAULT 2.0");
+        this.db.exec("ALTER TABLE memories ADD COLUMN retrievability REAL DEFAULT 1.0");
+        this.db.exec("ALTER TABLE memories ADD COLUMN next_review_at INTEGER");
+        this.db.exec("ALTER TABLE memories ADD COLUMN review_count INTEGER DEFAULT 0");
+
+        // Mevcut kayıtlar için dinamik stability backfill: stability = importance * 2.0
+        // next_review_at: şu andan itibaren stability*0.357 gün sonra (R=0.7 eşiği)
+        // -ln(0.7) ≈ 0.3567
+        const now = Math.floor(Date.now() / 1000);
+        this.db.prepare(`
+          UPDATE memories
+          SET
+            stability = CAST(importance AS REAL) * 2.0,
+            retrievability = 1.0,
+            review_count = 0,
+            next_review_at = ? + CAST(CAST(importance AS REAL) * 2.0 * 0.3567 * 86400 AS INTEGER)
+          WHERE is_archived = 0
+        `).run(now);
+        logger.info('[Database] ✅ Ebbinghaus backfill tamamlandı');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (Ebbinghaus columns):');
+      }
+    }
+
+    // Memory Graph tabloları — memory_entities, memory_relations, memory_entity_links (yoksa oluştur)
+    const entityTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_entities'"
+    ).get();
+    if (!entityTable) {
+      logger.info('[Database] 🚀 Migrating: Creating memory graph tables (entities, relations, links)');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS memory_entities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'concept',
+            normalized_name TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(normalized_name, type)
+          );
+          CREATE TABLE IF NOT EXISTS memory_relations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_memory_id INTEGER NOT NULL,
+            target_memory_id INTEGER NOT NULL,
+            relation_type TEXT NOT NULL DEFAULT 'related_to',
+            confidence REAL DEFAULT 0.5,
+            description TEXT DEFAULT '',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (source_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+            UNIQUE(source_memory_id, target_memory_id, relation_type)
+          );
+          CREATE TABLE IF NOT EXISTS memory_entity_links (
+            memory_id INTEGER NOT NULL,
+            entity_id INTEGER NOT NULL,
+            PRIMARY KEY (memory_id, entity_id),
+            FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+            FOREIGN KEY (entity_id) REFERENCES memory_entities(id) ON DELETE CASCADE
+          );
+          CREATE INDEX IF NOT EXISTS idx_memory_relations_source ON memory_relations(source_memory_id);
+          CREATE INDEX IF NOT EXISTS idx_memory_relations_target ON memory_relations(target_memory_id);
+          CREATE INDEX IF NOT EXISTS idx_memory_entity_links_entity ON memory_entity_links(entity_id);
+          CREATE INDEX IF NOT EXISTS idx_memory_entities_normalized ON memory_entities(normalized_name);
+        `);
+        logger.info('[Database] ✅ Memory graph tabloları oluşturuldu');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (memory graph tables):');
+      }
+    }
+
+    // Archival Re-learning: max_importance kolonu — memories tablosuna ekle (yoksa)
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'max_importance')) {
+      logger.info('[Database] 🚀 Migrating: Adding max_importance column to memories table');
+      try {
+        this.db.exec("ALTER TABLE memories ADD COLUMN max_importance INTEGER");
+        // Backfill: max_importance = mevcut importance
+        this.db.prepare(`UPDATE memories SET max_importance = importance WHERE max_importance IS NULL`).run();
+        logger.info('[Database] ✅ max_importance kolonu eklendi');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (max_importance):');
+      }
+    }
+
+    // Provenance + confidence + review profile kolonları — kontrollü orta vadeli genişletme
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'provenance_source')) {
+      logger.info('[Database] 🚀 Migrating: Adding provenance_source column to memories table');
+      try {
+        this.db.exec("ALTER TABLE memories ADD COLUMN provenance_source TEXT");
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (provenance_source):');
+      }
+    }
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'provenance_conversation_id')) {
+      logger.info('[Database] 🚀 Migrating: Adding provenance_conversation_id column to memories table');
+      try {
+        this.db.exec("ALTER TABLE memories ADD COLUMN provenance_conversation_id TEXT");
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (provenance_conversation_id):');
+      }
+    }
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'provenance_message_id')) {
+      logger.info('[Database] 🚀 Migrating: Adding provenance_message_id column to memories table');
+      try {
+        this.db.exec("ALTER TABLE memories ADD COLUMN provenance_message_id INTEGER");
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (provenance_message_id):');
+      }
+    }
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'confidence')) {
+      logger.info('[Database] 🚀 Migrating: Adding confidence column to memories table');
+      try {
+        this.db.exec("ALTER TABLE memories ADD COLUMN confidence REAL DEFAULT 0.7");
+        this.db.prepare(`UPDATE memories SET confidence = 0.7 WHERE confidence IS NULL`).run();
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (confidence):');
+      }
+    }
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'review_profile')) {
+      logger.info('[Database] 🚀 Migrating: Adding review_profile column to memories table');
+      try {
+        this.db.exec("ALTER TABLE memories ADD COLUMN review_profile TEXT DEFAULT 'standard'");
+        this.db.prepare(`UPDATE memories SET review_profile = 'standard' WHERE review_profile IS NULL OR review_profile = ''`).run();
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (review_profile):');
+      }
+    }
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'memory_type')) {
+      logger.info('[Database] 🚀 Migrating: Adding memory_type column to memories table');
+      try {
+        this.db.exec("ALTER TABLE memories ADD COLUMN memory_type TEXT DEFAULT 'semantic'");
+        this.db.prepare(`
+          UPDATE memories
+          SET memory_type = CASE
+            WHEN lower(COALESCE(category, '')) IN ('follow_up', 'followup', 'event', 'timeline', 'status', 'task', 'conversation', 'session') THEN 'episodic'
+            WHEN lower(COALESCE(provenance_source, '')) = 'conversation' AND provenance_conversation_id IS NOT NULL THEN 'episodic'
+            ELSE 'semantic'
+          END
+          WHERE memory_type IS NULL OR trim(memory_type) = ''
+        `).run();
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (memory_type):');
+      }
+    }
+
+    // İlişki Yaşam Döngüsü kolonları — memory_relations tablosuna ekle (yoksa)
+    if (relTableInfo.length > 0 && !relTableInfo.some((col: any) => col.name === 'last_accessed_at')) {
+      logger.info('[Database] 🚀 Migrating: Adding lifecycle columns to memory_relations table');
+      try {
+        this.db.exec("ALTER TABLE memory_relations ADD COLUMN last_accessed_at DATETIME");
+        this.db.exec("ALTER TABLE memory_relations ADD COLUMN access_count INTEGER DEFAULT 0");
+        this.db.exec("ALTER TABLE memory_relations ADD COLUMN decay_rate REAL DEFAULT 0.05");
+
+        // Backfill: last_accessed_at = created_at
+        this.db.prepare(`
+          UPDATE memory_relations SET last_accessed_at = created_at WHERE last_accessed_at IS NULL
+        `).run();
+
+        // Decay rate differansiyeli:
+        //   proximity (Semantik yakınlık) → 0.05 (hızlı çürür)
+        //   entity-based (Ortak varlık)   → 0.04 (orta)
+        //   LLM-extracted / diğer         → 0.03 (yavaş çürür — daha semantik ve kasıtlı)
+        this.db.prepare(`
+          UPDATE memory_relations SET decay_rate = CASE
+            WHEN description = 'Semantik yakınlık' THEN 0.05
+            WHEN description LIKE 'Ortak varlık:%' THEN 0.04
+            ELSE 0.03
+          END
+        `).run();
+
+        // İndeks: decay sorgularını hızlandır
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_memory_relations_last_accessed ON memory_relations(last_accessed_at)");
+
+        logger.info('[Database] ✅ İlişki yaşam döngüsü kolonları eklendi');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (relation lifecycle columns):');
+      }
+    }
+
+    // messages tablosuna attachments kolonu ekle (yoksa)
+    if (msgTableInfo.length > 0 && !msgTableInfo.some((col: any) => col.name === 'attachments')) {
+      logger.info('[Database] 🚀 Migrating: Adding attachments column to messages table');
+      try {
+        this.db.exec("ALTER TABLE messages ADD COLUMN attachments TEXT");
+        logger.info('[Database] ✅ attachments kolonu eklendi');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (messages.attachments):');
+      }
+    }
+
+    // OPT-4: conversations tablosuna message_count kolonu + trigger ekle (yoksa)
+    if (convTableInfo.length > 0 && !convTableInfo.some((col: any) => col.name === 'message_count')) {
+      logger.info('[Database] 🚀 Migrating: Adding message_count column and triggers');
+      try {
+        this.db.exec("ALTER TABLE conversations ADD COLUMN message_count INTEGER DEFAULT 0");
+        // Backfill: mevcut konuşmalar için mesaj sayısını hesapla
+        this.db.prepare(`
+          UPDATE conversations SET message_count = (
+            SELECT COUNT(*) FROM messages WHERE conversation_id = conversations.id
+              AND (role = 'user' OR (role = 'assistant' AND tool_calls IS NULL))
+          )
+        `).run();
+        // TRIGGER: mesaj eklendiğinde sayacı artır
+        this.db.exec(`
+          CREATE TRIGGER IF NOT EXISTS trg_messages_insert_count AFTER INSERT ON messages
+          WHEN NEW.role = 'user' OR (NEW.role = 'assistant' AND NEW.tool_calls IS NULL)
+          BEGIN
+            UPDATE conversations SET message_count = message_count + 1 WHERE id = NEW.conversation_id;
+          END;
+        `);
+        // TRIGGER: mesaj silindiğinde sayacı azalt
+        this.db.exec(`
+          CREATE TRIGGER IF NOT EXISTS trg_messages_delete_count AFTER DELETE ON messages
+          WHEN OLD.role = 'user' OR (OLD.role = 'assistant' AND OLD.tool_calls IS NULL)
+          BEGIN
+            UPDATE conversations SET message_count = MAX(0, message_count - 1) WHERE id = OLD.conversation_id;
+          END;
+        `);
+        logger.info('[Database] ✅ message_count kolonu ve trigger\'ları eklendi');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (message_count):');
+      }
+    }
+    // autonomous_tasks tablosunu oluştur (yoksa)
+    const autonomousTableTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='autonomous_tasks'"
+    ).get();
+    if (!autonomousTableTable) {
+      logger.info('[Database] 🚀 Migrating: Creating autonomous_tasks table for checkpointing');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS autonomous_tasks (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            priority INTEGER NOT NULL,
+            payload TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+        logger.info('[Database] ✅ autonomous_tasks tablosu oluşturuldu');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (autonomous_tasks):');
+      }
+    }
+
+  }
+
+  /**
+   * Embedding boyut tutarlılığını doğrular.
+   * Mevcut DB'deki settings tablosundaki boyut ile yapılandırılan boyut farklıysa uyarı verir.
+   */
+  private validateEmbeddingDimensions(): void {
+    try {
+      const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'embedding_dimensions'`).get() as { value: string } | undefined;
+      if (row) {
+        const storedDim = parseInt(row.value, 10);
+        if (!isNaN(storedDim) && storedDim !== this.embeddingDimensions) {
+          logger.warn(
+            `[Database] ⚠️ Embedding boyut uyuşmazlığı: DB=${storedDim}, Config=${this.embeddingDimensions}. ` +
+            `Mevcut embedding verilerini silip yeniden hesaplatmanız gerekebilir.`
+          );
+        }
+      }
+      // Güncel boyutu kaydet
+      this.db.prepare(`
+        INSERT INTO settings (key, value, updated_at) VALUES ('embedding_dimensions', ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+      `).run(String(this.embeddingDimensions));
+    } catch {
+      // settings tablosu henüz oluşmamış olabilir, yoksay
+    }
+  }
+
+  /**
+   * Yapılandırılan embedding boyutunu döndürür.
+   */
+  getEmbeddingDimensions(): number {
+    return this.embeddingDimensions;
+  }
+
+  /**
+   * Ham veritabanı instance'ını döndürür.
+   */
+  getDb(): Database.Database {
+    return this.db;
+  }
+
+  /**
+   * Veritabanını güvenli şekilde kapatır.
+   */
+  close(): void {
+    this.db.close();
+  }
+}

@@ -1,0 +1,1 @@
+Her yeni sohbette ilk başta #PROJE_HARITASI.md dosyasını okuyacaksın.

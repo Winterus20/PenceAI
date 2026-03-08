@@ -1,0 +1,100 @@
+import { v4 as uuidv4 } from 'uuid';
+import { logger } from '../utils/logger.js';
+import type { Channel, ChannelType, UnifiedMessage, MessageResponse, Attachment } from './types.js';
+
+type MessageHandler = (message: UnifiedMessage) => Promise<void>;
+
+export class MessageRouter {
+    private channels: Map<ChannelType, Channel> = new Map();
+    private messageHandler: MessageHandler | null = null;
+
+    /**
+     * Yeni bir kanal kaydeder.
+     */
+    registerChannel(channel: Channel): void {
+        this.channels.set(channel.type, channel);
+        channel.onMessage(async (message) => {
+            logger.info(`[Router] 📨 ${channel.type}/${message.senderName}: ${message.content.substring(0, 80)}...`);
+            if (this.messageHandler) {
+                await this.messageHandler(message);
+            }
+        });
+        logger.info(`[Router] ✅ Kanal kaydedildi: ${channel.name} (${channel.type})`);
+    }
+
+    /**
+     * Tüm kaydedilmiş kanalları başlatır.
+     */
+    async connectAll(): Promise<void> {
+        for (const [type, channel] of this.channels) {
+            try {
+                await channel.connect();
+                logger.info(`[Router] 🔗 ${type} bağlandı`);
+            } catch (err) {
+                logger.error({ err }, `[Router] ❌ ${type} bağlantı hatası`);
+            }
+        }
+    }
+
+    /**
+     * Tüm kanalları kapatır.
+     */
+    async disconnectAll(): Promise<void> {
+        for (const [type, channel] of this.channels) {
+            try {
+                await channel.disconnect();
+                logger.info(`[Router] 🔌 ${type} bağlantısı kesildi`);
+            } catch (err) {
+                logger.error({ err }, `[Router] ❌ ${type} kapatma hatası`);
+            }
+        }
+    }
+
+    /**
+     * Gelen mesajları işleyecek handler'ı ayarlar.
+     */
+    onMessage(handler: MessageHandler): void {
+        this.messageHandler = handler;
+    }
+
+    /**
+     * Belirli bir kanala yanıt gönderir.
+     */
+    async sendResponse(channelType: ChannelType, channelId: string, response: MessageResponse): Promise<void> {
+        const channel = this.channels.get(channelType);
+        if (!channel) {
+            throw new Error(`Kanal bulunamadı: ${channelType}`);
+        }
+        if (!channel.isConnected) {
+            throw new Error(`Kanal bağlı değil: ${channelType}`);
+        }
+        await channel.sendMessage(channelId, response);
+    }
+
+    /**
+     * Kayıtlı kanalların durumunu döndürür.
+     */
+    getChannelStatus(): Array<{ type: ChannelType; name: string; connected: boolean }> {
+        return Array.from(this.channels.entries()).map(([type, channel]) => ({
+            type,
+            name: channel.name,
+            connected: channel.isConnected,
+        }));
+    }
+
+    /**
+     * Web Dashboard'dan gelen mesaj için UnifiedMessage oluşturur.
+     */
+    static createWebMessage(content: string, userName: string = 'Kullanıcı', channelId: string = 'dashboard', attachments: Attachment[] = []): UnifiedMessage {
+        return {
+            id: uuidv4(),
+            channelType: 'web',
+            channelId,
+            senderId: 'default',
+            senderName: userName,
+            content,
+            attachments,
+            timestamp: new Date(),
+        };
+    }
+}
