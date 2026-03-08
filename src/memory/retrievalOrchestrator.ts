@@ -374,7 +374,7 @@ function extractPrimerEntityHints(query: string, recentMessages: Array<{ role: s
     const combinedText = [query, ...recentMessages.slice(0, 2).map(message => message.content)].join(' ');
     const matches = combinedText.match(/\b(?:[A-ZÇĞİÖŞÜ][\p{L}\p{N}_-]{2,}|[A-Z]{2,}[\p{L}\p{N}_-]*)\b/gu) ?? [];
     const excludedEntities = new Set([
-        'acaba', 'bu', 'bunu', 'genel', 'hangi', 'kullanıcı', 'ne', 'neden', 'nedir', 'openclawı', 'profilimi',
+        'acaba', 'bu', 'bunu', 'genel', 'hangi', 'kullanıcı', 'ne', 'neden', 'nedir', 'penceai', 'penceaiı', 'profilimi',
         'selam', 'son', 'söyle', 'takip', 'tercihlerimi', 've', 'veya', 'yardım',
     ]);
     const seen = new Set<string>();

@@ -60,7 +60,7 @@ describe('memory type inference', () => {
     });
 
     test('falls back to semantic safely when cues are ambiguous', () => {
-        expect(inferMemoryType('Openclaw repository üzerinde çalışılıyor', 'project', {
+        expect(inferMemoryType('PenceAI repository üzerinde çalışılıyor', 'project', {
             source: 'system',
         })).toEqual({
             memoryType: 'semantic',
@@ -188,7 +188,7 @@ describe('memory type aware retrieval weighting', () => {
         });
         const semantic = createMemoryRow({
             id: 6,
-            content: 'Openclaw bir TypeScript kod tabanıdır',
+            content: 'PenceAI bir TypeScript kod tabanıdır',
             category: 'knowledge',
             memory_type: 'semantic',
             importance: 5,
@@ -210,7 +210,7 @@ describe('memory type aware retrieval weighting', () => {
         });
 
         const bundle = await orchestrator.getPromptContextBundle({
-            query: 'Openclaw hakkında bilgi ver',
+            query: 'PenceAI hakkında bilgi ver',
             activeConversationId: 'conv-neutral',
             options: {
                 relevantMemoryLimit: 2,
@@ -236,7 +236,7 @@ describe('memory type aware retrieval weighting', () => {
         let debugPayload: any = null;
         const semantic = createMemoryRow({
             id: 21,
-            content: 'Openclaw TypeScript tabanlı bir projedir',
+            content: 'PenceAI TypeScript tabanlı bir projedir',
             category: 'knowledge',
             memory_type: 'semantic',
             updated_at: '2026-03-08T10:00:01.000Z',
@@ -263,7 +263,7 @@ describe('memory type aware retrieval weighting', () => {
         });
 
         await orchestrator.getPromptContextBundle({
-            query: 'Openclaw nedir?',
+            query: 'PenceAI nedir?',
             activeConversationId: 'conv-fast',
             options: {
                 relevantMemoryLimit: 2,
@@ -525,7 +525,7 @@ describe('memory type aware retrieval weighting', () => {
         let debugPayload: any = null;
         const primedMemory = createMemoryRow({
             id: 9,
-            content: 'Openclaw retrieval pipeline içinde priming katmanını hafifçe ısıtıyoruz',
+            content: 'PenceAI retrieval pipeline içinde priming katmanını hafifçe ısıtıyoruz',
             category: 'project',
             memory_type: 'semantic',
             importance: 4,
@@ -561,7 +561,7 @@ describe('memory type aware retrieval weighting', () => {
         });
 
         const bundle = await orchestrator.getPromptContextBundle({
-            query: 'Openclaw priming davranışı hakkında kısa bilgi ver',
+            query: 'PenceAI priming davranışı hakkında kısa bilgi ver',
             activeConversationId: 'conv-primer',
             options: {
                 relevantMemoryLimit: 2,
@@ -572,7 +572,7 @@ describe('memory type aware retrieval weighting', () => {
         expect(bundle.relevantMemories.map(memory => memory.id)).toEqual([9, 11]);
         expect(debugPayload.primer).toMatchObject({
             triggered: true,
-            entityHints: expect.arrayContaining(['openclaw']),
+            entityHints: expect.arrayContaining(['penceai']),
             topicHints: expect.arrayContaining(['priming']),
         });
         expect(debugPayload.primer.bonusSummary.maxCandidateBonus).toBeLessThanOrEqual(0.22);
@@ -639,7 +639,7 @@ describe('memory type aware retrieval weighting', () => {
         let debugPayload: any = null;
         const primedButWeak = createMemoryRow({
             id: 14,
-            content: 'Openclaw priming notu',
+            content: 'PenceAI priming notu',
             category: 'project',
             memory_type: 'semantic',
             importance: 1,
@@ -676,7 +676,7 @@ describe('memory type aware retrieval weighting', () => {
         });
 
         const bundle = await orchestrator.getPromptContextBundle({
-            query: 'Openclaw priming durumunu özetle',
+            query: 'PenceAI priming durumunu özetle',
             activeConversationId: 'conv-soft-primer',
             options: {
                 relevantMemoryLimit: 2,
@@ -693,7 +693,7 @@ describe('memory type aware retrieval weighting', () => {
         let debugPayload: any = null;
         const seed = createMemoryRow({
             id: 101,
-            content: 'Openclaw retrieval çekirdeği',
+            content: 'PenceAI retrieval çekirdeği',
             category: 'project',
             memory_type: 'semantic',
             importance: 8,

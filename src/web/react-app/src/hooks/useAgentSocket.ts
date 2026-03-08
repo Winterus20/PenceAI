@@ -78,7 +78,7 @@ export function useAgentSocket() {
                 return;
             }
             setConnected(true);
-            console.log('[WS] Connected to Openclaw Gateway');
+            console.log('[WS] Connected to PenceAI Gateway');
 
             if (thinkingEnabledRef.current) {
                 socket.send(JSON.stringify({ type: 'set_thinking', enabled: true }));
