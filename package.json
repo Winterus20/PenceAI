@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "PençeAI — Self-hosted, local-first AI agent platform",
   "type": "module",
+  "license": "MIT",
   "main": "dist/gateway/index.js",
   "scripts": {
     "dev": "chcp 65001 && tsx watch src/gateway/index.ts",
