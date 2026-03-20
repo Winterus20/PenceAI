@@ -161,6 +161,12 @@ export function useAgentSocket() {
                 }
                 break;
 
+            case 'replace_stream':
+                if (currentAssistantMessageId.current) {
+                    patchMessage(currentAssistantMessageId.current, { content: data.content });
+                }
+                break;
+
             case 'tool_use':
                 break;
 

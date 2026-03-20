@@ -19,6 +19,18 @@ describe('reconsolidation pilot', () => {
             reason: 'novel_semantic_detail_append_first',
             safetyReasons: ['append_first_guard'],
             preferredContent: 'longer',
+            proposalMode: 'proposal_append',
+            commitEligible: false,
+            shadowEligible: true,
+            guardrails: {
+                confidenceFloor: 0.78,
+                appendSemanticFloor: 0.86,
+                appendJaccardFloor: 0.72,
+                observedConfidence: 0.9,
+                semanticSimilarity: 0.88,
+                jaccardSimilarity: 0.74,
+                incomingAddsNewInformation: true,
+            },
         });
         expect(decision.candidateContent).toContain('[reconsolidated]');
     });
@@ -33,7 +45,7 @@ describe('reconsolidation pilot', () => {
             semanticSimilarity: 0.91,
         });
 
-        expect(decision).toEqual({
+        expect(decision).toMatchObject({
             pilotActive: true,
             eligible: false,
             action: 'skip',
@@ -41,6 +53,14 @@ describe('reconsolidation pilot', () => {
             safetyReasons: ['memory_type_not_semantic'],
             preferredContent: 'existing',
             candidateContent: null,
+            proposalMode: 'skip',
+            commitEligible: false,
+            shadowEligible: false,
+            guardrails: {
+                observedConfidence: 0.95,
+                semanticSimilarity: 0.91,
+                incomingAddsNewInformation: true,
+            },
         });
     });
 
@@ -55,7 +75,7 @@ describe('reconsolidation pilot', () => {
             jaccardSimilarity: 0.86,
         });
 
-        expect(decision).toEqual({
+        expect(decision).toMatchObject({
             pilotActive: true,
             eligible: false,
             action: 'skip',
@@ -63,6 +83,14 @@ describe('reconsolidation pilot', () => {
             safetyReasons: ['confidence_below_floor'],
             preferredContent: 'existing',
             candidateContent: null,
+            proposalMode: 'skip',
+            commitEligible: false,
+            shadowEligible: false,
+            guardrails: {
+                observedConfidence: 0.6,
+                confidenceFloor: 0.78,
+                jaccardSimilarity: 0.86,
+            },
         });
     });
 
@@ -76,7 +104,7 @@ describe('reconsolidation pilot', () => {
             semanticSimilarity: 1,
         });
 
-        expect(decision).toEqual({
+        expect(decision).toMatchObject({
             pilotActive: true,
             eligible: true,
             action: 'skip',
@@ -84,6 +112,14 @@ describe('reconsolidation pilot', () => {
             safetyReasons: ['no_new_information'],
             preferredContent: 'existing',
             candidateContent: null,
+            proposalMode: 'skip',
+            commitEligible: false,
+            shadowEligible: false,
+            guardrails: {
+                observedConfidence: 0.92,
+                semanticSimilarity: 1,
+                incomingAddsNewInformation: false,
+            },
         });
     });
 
@@ -99,7 +135,7 @@ describe('reconsolidation pilot', () => {
             containmentRatio: 0.67,
         });
 
-        expect(decision).toEqual({
+        expect(decision).toMatchObject({
             pilotActive: true,
             eligible: true,
             action: 'skip',
@@ -107,6 +143,15 @@ describe('reconsolidation pilot', () => {
             safetyReasons: ['structured_variance_conflict'],
             preferredContent: 'existing',
             candidateContent: null,
+            proposalMode: 'skip',
+            commitEligible: false,
+            shadowEligible: false,
+            guardrails: {
+                observedConfidence: 0.93,
+                containmentRatio: 0.67,
+                structuredVariance: true,
+                structuredVarianceSimilarityFloor: 0.95,
+            },
         });
     });
 });

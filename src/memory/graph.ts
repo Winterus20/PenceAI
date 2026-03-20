@@ -219,12 +219,12 @@ export class MemoryGraphManager {
         const placeholders = uniqueIds.map(() => '?').join(',');
 
         const rows = this.db.prepare(`
-            SELECT 
+            SELECT
                 mr.source_memory_id as edge_source,
                 mr.target_memory_id as edge_target,
-                m.*, 
-                mr.relation_type, 
-                mr.confidence, 
+                m.*,
+                mr.relation_type,
+                mr.confidence,
                 mr.description as relation_description
             FROM memory_relations mr
             JOIN memories m ON (
@@ -496,8 +496,7 @@ export class MemoryGraphManager {
                 }
             }
 
-            // @ts-ignore - fetching the raw payload we smuggled from the LLMFallbackStep
-            const rawLlmRelations = result.rawLlmRelations || [];
+            const rawLlmRelations = result.rawLlmRelations ?? [];
             for (const rel of rawLlmRelations) {
                 this.upsertRelation(
                     memoryId,

@@ -282,10 +282,20 @@ describe('memory type aware retrieval weighting', () => {
             secondPassSummary: null,
             adjustedBudgetProfile: 'supportive_expansion',
         });
+        expect(debugPayload.secondPass).toMatchObject({
+            applied: false,
+            mode: 'system1',
+            coverageGaps: [],
+            adjustments: expect.arrayContaining([
+                expect.objectContaining({ lane: 'relevant', applied: false }),
+                expect.objectContaining({ lane: 'supplemental', applied: false }),
+            ]),
+        });
         expect(debugPayload.reasons).toEqual(expect.arrayContaining([
             'dual_process:system1',
             'dual_process_reason:fast_path_low_load',
             'dual_process_reason:direct_question_low_ambiguity',
+            'second_pass:bounded_to_existing_candidates',
         ]));
     });
 
@@ -338,6 +348,7 @@ describe('memory type aware retrieval weighting', () => {
             'dual_process:system2',
             'dual_process_trigger:follow_up_ambiguity',
             'dual_process:second_pass_applied',
+            'second_pass:bounded_to_existing_candidates',
         ]));
         expect(debugPayload.budget.profile).toBe('balanced_default');
     });
@@ -578,6 +589,98 @@ describe('memory type aware retrieval weighting', () => {
         expect(debugPayload.primer.bonusSummary.maxCandidateBonus).toBeLessThanOrEqual(0.22);
     });
 
+    test('applies deterministic second-pass swap to restore preferred type coverage when bounded candidates allow it', async () => {
+        let debugPayload: any = null;
+        const semanticHigh = createMemoryRow({
+            id: 201,
+            content: 'Kullanıcının ürün kararlarında metrik odaklı düşündüğü bilgisi',
+            category: 'profile',
+            memory_type: 'semantic',
+            importance: 10,
+            access_count: 8,
+            confidence: 0.98,
+            provenance_conversation_id: 'conv-second-pass',
+        });
+        const semanticMid = createMemoryRow({
+            id: 202,
+            content: 'Kullanıcı kısa özetleri tercih ediyor',
+            category: 'preference',
+            memory_type: 'semantic',
+            importance: 8,
+            access_count: 4,
+            confidence: 0.92,
+            provenance_conversation_id: 'conv-second-pass',
+            updated_at: '2026-03-08T10:00:01.000Z',
+        });
+        const episodicLower = createMemoryRow({
+            id: 203,
+            content: 'Dün dashboard alarmını birlikte kontrol ettik',
+            category: 'follow_up',
+            memory_type: 'episodic',
+            importance: 4,
+            access_count: 0,
+            confidence: 0.74,
+            provenance_conversation_id: 'conv-second-pass',
+            updated_at: '2026-03-08T10:00:02.000Z',
+        });
+
+        const orchestrator = new MemoryRetrievalOrchestrator({
+            graphAwareSearch: async () => ({ active: [semanticHigh, semanticMid, episodicLower], archival: [] }),
+            getRecentConversationSummaries: () => [],
+            getMemoriesDueForReview: () => [],
+            getFollowUpCandidates: () => [],
+            getRecentMessages: () => [
+                { role: 'user', content: 'Bu işi dün konuşmuştuk', created_at: '2026-03-08T10:00:00.000Z', conversation_title: 'Test' },
+            ],
+            getUserMemories: () => [],
+            prioritizeConversationMemories: (memories) => memories,
+            recordDebug: (payload) => {
+                debugPayload = payload;
+            },
+        });
+
+        const bundle = await orchestrator.getPromptContextBundle({
+            query: 'Son durumu kısaca analiz et ve sadece ilgili şeyleri hatırla',
+            activeConversationId: 'conv-second-pass',
+            options: {
+                relevantMemoryLimit: 2,
+                searchLimit: 3,
+            },
+        });
+
+        expect(bundle.relevantMemories.map(memory => memory.id)).toEqual([201, 203]);
+        expect(debugPayload.secondPass).toMatchObject({
+            applied: false,
+            mode: 'system2',
+            coverageGaps: [],
+            guardrailSummary: expect.arrayContaining([
+                'second_pass:bounded_to_existing_candidates',
+                'second_pass:selection_limit_preserved:2',
+            ]),
+            adjustments: expect.arrayContaining([
+                expect.objectContaining({
+                    lane: 'relevant',
+                    applied: false,
+                    reason: null,
+                    removedId: null,
+                    addedId: null,
+                    preservedIds: [201, 203],
+                }),
+            ]),
+        });
+        expect(debugPayload.explanations.relevant).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 201, reasons: expect.arrayContaining(['conversation_scoped']) }),
+            expect.objectContaining({ id: 203, reasons: expect.arrayContaining(['conversation_scoped', 'type_aligned:episodic']) }),
+        ]));
+        expect(debugPayload.reasons).toEqual(expect.arrayContaining([
+            'signal:follow_up_cue',
+            'signal:recall_cue',
+            'signal:constraint_cue',
+            'second_pass:bounded_to_existing_candidates',
+            'second_pass:selection_limit_preserved:2',
+        ]));
+    });
+
     test('preserves default balanced behavior when primer is not triggered', async () => {
         let debugPayload: any = null;
         const newer = createMemoryRow({
@@ -732,7 +835,7 @@ describe('memory type aware retrieval weighting', () => {
             getRecentMessages: () => [],
             getUserMemories: () => [],
             getMemoryNeighborsBatch: () => new Map([
-                [101, [{ ...activatedNeighbor, relation_type: 'related_to', confidence: 0.9, relation_description: 'Aynı retrieval konusu' }]],
+                [101, [{ ...activatedNeighbor, relation_type: 'related_to', relation_confidence: 0.9, relation_description: 'Aynı retrieval konusu' }]],
                 [103, []],
             ]),
             prioritizeConversationMemories: (memories) => memories,
@@ -761,7 +864,7 @@ describe('memory type aware retrieval weighting', () => {
                     id: 102,
                     strongestSeedId: 101,
                     relationType: 'related_to',
-                    candidateConfidence: 0.9,
+                    candidateConfidence: 0.8,
                     capped: false,
                 }),
             ],
@@ -827,7 +930,7 @@ describe('memory type aware retrieval weighting', () => {
             getRecentMessages: () => [],
             getUserMemories: () => [],
             getMemoryNeighborsBatch: () => new Map([
-                [111, [{ ...weakNeighbor, relation_type: 'supports', confidence: 0.95, relation_description: 'Destekleyici edge' }]],
+                [111, [{ ...weakNeighbor, relation_type: 'supports', relation_confidence: 0.95, relation_description: 'Destekleyici edge' }]],
                 [112, []],
             ]),
             prioritizeConversationMemories: (memories) => memories,
@@ -905,7 +1008,7 @@ describe('memory type aware retrieval weighting', () => {
             getRecentMessages: () => [],
             getUserMemories: () => [],
             getMemoryNeighborsBatch: () => new Map([
-                [122, [{ ...weakNeighbor, relation_type: 'related_to', confidence: 0.4, relation_description: 'Zayıf edge' }]],
+                [122, [{ ...weakNeighbor, relation_type: 'related_to', relation_confidence: 0.4, relation_description: 'Zayıf edge' }]],
             ]),
             prioritizeConversationMemories: (memories) => memories,
             recordDebug: (payload) => {
@@ -1032,14 +1135,14 @@ describe('memory type aware retrieval weighting', () => {
             getSpreadingActivationConfig: () => ({ rolloutState: 'soft', seedLimit: 3, maxCandidates: 2 }),
             getMemoryNeighborsBatch: () => new Map([
                 [131, [
-                    { ...promotedNeighbor, relation_type: 'related_to', confidence: 0.98, relation_description: 'Ana edge 1' },
-                    { ...truncatedNeighbor, relation_type: 'related_to', confidence: 0.95, relation_description: 'Truncate edge 1' },
-                    { ...anotherActivated, relation_type: 'supports', confidence: 0.9, relation_description: 'Destek edge 1' },
+                    { ...promotedNeighbor, relation_type: 'related_to', relation_confidence: 0.98, relation_description: 'Ana edge 1' },
+                    { ...truncatedNeighbor, relation_type: 'related_to', relation_confidence: 0.95, relation_description: 'Truncate edge 1' },
+                    { ...anotherActivated, relation_type: 'supports', relation_confidence: 0.9, relation_description: 'Destek edge 1' },
                 ]],
                 [132, [
-                    { ...promotedNeighbor, relation_type: 'related_to', confidence: 0.98, relation_description: 'Ana edge 2' },
-                    { ...truncatedNeighbor, relation_type: 'supports', confidence: 0.95, relation_description: 'Truncate edge 2' },
-                    { ...anotherActivated, relation_type: 'supports', confidence: 0.9, relation_description: 'Destek edge 2' },
+                    { ...promotedNeighbor, relation_type: 'related_to', relation_confidence: 0.98, relation_description: 'Ana edge 2' },
+                    { ...truncatedNeighbor, relation_type: 'supports', relation_confidence: 0.95, relation_description: 'Truncate edge 2' },
+                    { ...anotherActivated, relation_type: 'supports', relation_confidence: 0.9, relation_description: 'Destek edge 2' },
                 ]],
             ]),
             prioritizeConversationMemories: (memories) => memories,

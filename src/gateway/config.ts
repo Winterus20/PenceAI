@@ -45,6 +45,7 @@ export interface AppConfig {
     fsRootDir?: string;
     dashboardPassword?: string;
     braveSearchApiKey?: string;
+    jinaReaderApiKey?: string;
     sensitivePaths: string[];
 
     // Advanced Settings
@@ -113,6 +114,7 @@ export function loadConfig(): AppConfig {
         fsRootDir: process.env.FS_ROOT_DIR || undefined,
         dashboardPassword: process.env.DASHBOARD_PASSWORD || undefined,
         braveSearchApiKey: process.env.BRAVE_SEARCH_API_KEY || undefined,
+        jinaReaderApiKey: process.env.JINA_READER_API_KEY || undefined,
         sensitivePaths: process.env.SENSITIVE_PATHS
             ? process.env.SENSITIVE_PATHS.split(',').map(s => s.trim()).filter(Boolean)
             : [

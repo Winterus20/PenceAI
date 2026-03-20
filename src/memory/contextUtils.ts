@@ -239,7 +239,8 @@ function scoreConversationAffinity(memory: MemoryRow, conversationLexicon: Set<s
 export function deriveMemoryWriteMetadata(
     category: string,
     metadata?: MemoryWriteMetadata,
-): Required<Pick<MemoryWriteMetadata, 'source' | 'confidence' | 'reviewProfile'>> & Pick<MemoryWriteMetadata, 'conversationId' | 'messageId'> {
+): Required<Pick<MemoryWriteMetadata, 'source' | 'confidence' | 'reviewProfile'>>
+    & Pick<MemoryWriteMetadata, 'conversationId' | 'messageId' | 'rolloutState' | 'writeTraceId'> {
     const normalizedCategory = normalizeCategory(category);
     const reviewProfile = normalizeProfile(metadata?.reviewProfile ?? REVIEW_PROFILE_BY_CATEGORY[normalizedCategory]);
     const policy = REVIEW_POLICIES[reviewProfile];
@@ -251,6 +252,8 @@ export function deriveMemoryWriteMetadata(
         messageId: metadata?.messageId,
         confidence: clampConfidence((metadata?.confidence ?? 0.7) * policy.confidenceWeight),
         reviewProfile,
+        rolloutState: metadata?.rolloutState ?? 'commit',
+        writeTraceId: metadata?.writeTraceId,
     };
 }
 

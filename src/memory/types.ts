@@ -30,6 +30,44 @@ export interface MessageRow {
 
 export type MemoryType = 'episodic' | 'semantic';
 
+export type BehaviorDiscoveryLifecycleState = 'disabled' | 'observe' | 'candidate' | 'shadow' | 'limited' | 'trusted';
+export type BehaviorDiscoveryDomain = 'retrieval' | 'write';
+export type BehaviorDiscoveryRiskProfile = 'low' | 'medium' | 'high';
+export type BehaviorDiscoveryShadowReadiness = 'hold' | 'shadow_ready' | 'promotion_blocked';
+
+export interface BehaviorDiscoveryCandidate {
+    id: string;
+    domain: BehaviorDiscoveryDomain;
+    feature: string;
+    state: Extract<BehaviorDiscoveryLifecycleState, 'candidate' | 'shadow'>;
+    summary: string;
+    trigger: string;
+    observedSignals: string[];
+    riskProfile: BehaviorDiscoveryRiskProfile;
+}
+
+export interface BehaviorDiscoveryShadowComparison {
+    candidateId: string;
+    currentSelectionIds: number[];
+    shadowSelectionIds: number[];
+    addedIds: number[];
+    removedIds: number[];
+    changed: boolean;
+    summary: string;
+    readiness: BehaviorDiscoveryShadowReadiness;
+}
+
+export interface BehaviorDiscoveryTrace {
+    enabled: boolean;
+    domain: BehaviorDiscoveryDomain;
+    state: Extract<BehaviorDiscoveryLifecycleState, 'disabled' | 'observe' | 'candidate' | 'shadow'>;
+    liveEffectAllowed: boolean;
+    observedSignals: string[];
+    candidates: BehaviorDiscoveryCandidate[];
+    shadowComparison: BehaviorDiscoveryShadowComparison | null;
+    guardrails: string[];
+}
+
 export interface MemoryTypeInference {
     memoryType: MemoryType;
     reason: string;
@@ -68,6 +106,26 @@ export interface MemoryWriteMetadata {
     reviewProfile?: string;
     memoryType?: MemoryType;
     reconsolidationHint?: 'access' | 'write_merge';
+    rolloutState?: 'disabled' | 'shadow' | 'commit';
+    writeTraceId?: string;
+}
+
+export type ReconsolidationProposalMode = 'skip' | 'proposal_append' | 'commit_update';
+
+export interface ReconsolidationGuardrailSnapshot {
+    confidenceFloor: number;
+    strictContainmentFloor: number;
+    structuredVarianceSimilarityFloor: number;
+    highSimilaritySemanticFloor: number;
+    highSimilarityJaccardFloor: number;
+    appendSemanticFloor: number;
+    appendJaccardFloor: number;
+    observedConfidence: number | null;
+    semanticSimilarity: number;
+    jaccardSimilarity: number;
+    containmentRatio: number;
+    structuredVariance: boolean;
+    incomingAddsNewInformation: boolean;
 }
 
 export interface ReconsolidationDecision {
@@ -78,6 +136,10 @@ export interface ReconsolidationDecision {
     safetyReasons: string[];
     preferredContent: 'existing' | 'incoming' | 'longer';
     candidateContent: string | null;
+    proposalMode: ReconsolidationProposalMode;
+    commitEligible: boolean;
+    shadowEligible: boolean;
+    guardrails: ReconsolidationGuardrailSnapshot;
 }
 
 export interface MessageSearchRow extends MessageRow {

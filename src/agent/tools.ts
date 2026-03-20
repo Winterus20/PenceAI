@@ -2,6 +2,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { Readability } from '@mozilla/readability';
+import { parseHTML } from 'linkedom';
+import TurndownService from 'turndown';
 import { getConfig } from '../gateway/config.js';
 import { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/logger.js';
@@ -84,7 +87,7 @@ export function createBuiltinTools(
                 let handle: fs.FileHandle | null = null;
                 try {
                     const stats = await fs.stat(filePath);
-                    const MAX_BYTES = 50000;
+                    const MAX_BYTES = 128000;
 
                     handle = await fs.open(filePath, 'r');
                     const buffer = Buffer.alloc(MAX_BYTES);
@@ -191,6 +194,25 @@ export function createBuiltinTools(
             },
         },
 
+        // --- Belleğe Ekleme (DENEYSEL) ---
+        {
+            name: 'saveMemory',
+            async execute(args) {
+                // Not: Deneysel olarak eklendi, ileride kaldırılabilir.
+                const content = args.content as string;
+                if (!content) return 'Hata: İçerik boş olamaz.';
+                const category = typeof args.category === 'string' ? args.category : 'preference';
+                const importance = Number(args.importance) || 5;
+
+                try {
+                    const result = await memoryManager.addMemory(content, category, importance, mergeFn);
+                    return `✅ Bilgi başarıyla kaydedildi/birleştirildi (ID: ${result.id})${result.isUpdate ? ' [Mevcut bilgi güncellendi]' : ''}`;
+                } catch (err: any) {
+                    return `Hata: Bilgi kaydedilemedi — ${err.message}`;
+                }
+            },
+        },
+
         // --- Konuşma Geçmişinde Arama (Hibrit: FTS + Semantik) ---
         {
             name: 'searchConversation',
@@ -214,6 +236,85 @@ export function createBuiltinTools(
                     return `Hata: Konuşma araması yapılamadı — ${err.message}`;
                 }
             },
+        },
+
+        // --- Web Okuyucu (Quick & Deep Scan) ---
+        {
+            name: 'webTool',
+            async execute(args) {
+                const url = args.url as string;
+                const mode = args.mode as string || 'quick';
+
+                if (!url) return 'Hata: "url" parametresi zorunludur.';
+
+                try {
+                    if (mode === 'deep') {
+                        // Jina Reader API Fallback
+                        const jinaKey = config.jinaReaderApiKey;
+                        const headers: Record<string, string> = {
+                            'Accept': 'text/markdown',
+                        };
+                        if (jinaKey) {
+                            headers['Authorization'] = `Bearer ${jinaKey}`;
+                        }
+                        const response = await fetch(`https://r.jina.ai/${url}`, { headers });
+                        if (!response.ok) {
+                            return `Hata: Jina Reader API başarısız oldu — ${response.status} ${response.statusText}`;
+                        }
+                        const text = await response.text();
+                        return text || 'Sayfadan içerik alınamadı.';
+                    } else {
+                        // Quick Mode: Yerel Fetch + Readability
+                        const response = await fetch(url, {
+                            headers: {
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                            }
+                        });
+                        if (!response.ok) {
+                            return `Hata: Web sayfası yüklenemedi — ${response.status} ${response.statusText}`;
+                        }
+                        
+                        const contentType = response.headers.get('content-type') || '';
+                        if (!contentType.includes('text/html')) {
+                            return `Hata: Bu URL bir HTML sayfası değil (${contentType}). PDF, resim veya raw data olabilir.`;
+                        }
+
+                        const html = await response.text();
+
+                        // linkedom ile DOM ağacını kur (çok hafif ve hızlı)
+                        const { document } = parseHTML(html);
+                        
+                        // JS tabanlı gereksiz elementleri parse öncesi temizlemek performansı artırabilir
+                        const scripts = document.querySelectorAll('script');
+                        const styles = document.querySelectorAll('style');
+                        scripts.forEach((s: any) => s.remove());
+                        styles.forEach((s: any) => s.remove());
+
+                        const reader = new Readability(document);
+                        const article = reader.parse();
+
+                        if (!article || !article.content) {
+                            return 'Hata: Sayfadan anlamlı bir makale veya içerik çıkarılamadı (belki de JS ile render oluyordur, "deep" modunu deneyin).';
+                        }
+
+                        const turndownService = new TurndownService({
+                            headingStyle: 'atx',
+                            codeBlockStyle: 'fenced'
+                        });
+                        const markdown = turndownService.turndown(article.content);
+
+                        let finalContent = `# ${article.title}\\n\\n${markdown}`;
+                        
+                        // Token limitlerini korumak için çok uzun içerikleri kırp (yaklaşık 10-15 bin token)
+                        if (finalContent.length > 60000) {
+                            finalContent = finalContent.substring(0, 60000) + '\\n\\n... [İçerik çok uzun olduğu için güvenlik amacıyla kırpıldı]';
+                        }
+                        return finalContent;
+                    }
+                } catch (err: any) {
+                    return `Hata: webTool çalıştırılamadı — ${err.message}`;
+                }
+            }
         },
     ];
 
@@ -305,8 +406,8 @@ export function createBuiltinTools(
                     if (stderr) result += `\n[stderr]: ${stderr}`;
 
                     // Çıktıyı kırp
-                    if (result.length > 20000) {
-                        result = result.substring(0, 20000) + '\n... [Çıktı kırpıldı]';
+                    if (result.length > 128000) {
+                        result = result.substring(0, 128000) + '\n... [Çıktı kırpıldı]';
                     }
 
                     return result || '(Komut çıktı üretmedi)';

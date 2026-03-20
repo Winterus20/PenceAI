@@ -201,6 +201,8 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                             ws.send(JSON.stringify({ type: 'token', content: event.data.content }));
                         } else if (event.type === 'clear_stream') {
                             ws.send(JSON.stringify({ type: 'clear_stream' }));
+                        } else if (event.type === 'replace_stream') {
+                            ws.send(JSON.stringify({ type: 'replace_stream', content: event.data.content }));
                         } else {
                             ws.send(JSON.stringify({
                                 type: 'agent_event',

@@ -9,16 +9,17 @@ export class OpenAIProvider extends LLMProvider {
 
     protected client: OpenAI;
 
-    private isAutoToolChoiceUnsupported(error: unknown): boolean {
+    private isToolRelatedError(error: unknown): boolean {
         if (!(error instanceof Error)) return false;
-        return /auto tool choice requires .*enable-auto-tool-choice.*tool-call-parser|tool_choice.+auto|tool choice.+auto/i.test(error.message);
+        // Geniş hata yakalama: tool_choice, auto-tool, tool not supported, invalid tool, vb.
+        return /tool.?choice|auto.?tool|tool.?call.?parser|enable.?auto.?tool|tool.*not.*support|invalid.*tool|function.*call.*not|does not support.*function/i.test(error.message);
     }
 
     private async createChatCompletionWithToolFallback(reqOpts: any): Promise<any> {
         try {
             return await this.client.chat.completions.create(reqOpts);
         } catch (error) {
-            if (!reqOpts?.tools?.length || !this.isAutoToolChoiceUnsupported(error)) {
+            if (!reqOpts?.tools?.length || !this.isToolRelatedError(error)) {
                 throw error;
             }
 
@@ -55,8 +56,90 @@ export class OpenAIProvider extends LLMProvider {
             openaiMessages.push({ role: 'system', content: options.systemPrompt });
         }
 
-        // Mesajları dönüştür
+        // --- STRICT ALTERNATING ROLES NORMALIZATION ---
+        // Bazı modeller (özellikle NVIDIA Gemma/Llama) ardışık aynı rolleri veya 'tool' rollerini sevmez.
+        const normalizedHistory: any[] = [];
+        let currentRole: string | null = null;
+        let currentContent = '';
+
         for (const msg of messages) {
+            let roleToUse = msg.role;
+            let contentToAdd = msg.content || '';
+
+            // Tool response'larını user mesajı gibi yedir, model "ben ne sormuştum, sen ne dedin" anlasın
+            if (msg.role === 'tool' && msg.toolResults) {
+                roleToUse = 'user';
+                contentToAdd = msg.toolResults.map(r => `[Araç Sonucu - ${r.toolCallId}]:\n${r.result}`).join('\n\n');
+            } else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+                // Sadece metin içeren fallback tool call'lar yaptıysak asistan mesajı olarak kalmalı
+                if (!contentToAdd) {
+                    contentToAdd = `[Araç Kullanıldı: ${msg.toolCalls.map(tc => tc.name).join(', ')}]`;
+                }
+            }
+
+            if (!contentToAdd.trim() && msg.role !== 'assistant') continue; // Boş içerikleri atla (asistan hariç, tool_call barındırabilir)
+            
+            if (roleToUse === currentRole && roleToUse !== 'system') {
+                // Ardışık rolleri birleştir
+                currentContent += '\n\n' + contentToAdd;
+            } else {
+                // Yeni rol, eskisini kaydet
+                if (currentRole && currentRole !== 'system') {
+                    // Önceki rol assistant ise ve biz de assistant ekliyorsak birleşirdi.
+                    // Eğer şu an user ekliyorsak ve önceki sistemse, direkt ekle
+                    normalizedHistory.push({ role: currentRole, content: currentContent, toolCalls: (normalizedHistory.length === 0 ? undefined : null) /* hack for preserving toolCalls later if needed */ });
+                }
+                currentRole = roleToUse;
+                currentContent = contentToAdd;
+            }
+        }
+        if (currentRole && currentRole !== 'system') {
+            normalizedHistory.push({ role: currentRole, content: currentContent });
+        }
+
+        // Eğer ilk mesaj assistant ise onu user yaparız çünkü bazı modeller ilk mesajın user olmasını zorunlu kılar
+        if (normalizedHistory.length > 0 && normalizedHistory[0].role === 'assistant') {
+            normalizedHistory[0].role = 'user';
+            normalizedHistory[0].content = `[Önceki Asistan Durumu]:\n${normalizedHistory[0].content}`;
+            
+            // Eğer bu değişiklik ardışık user mesajlarına sebep olduysa, birleştir (strict alternating roles ihlalini önlemek için)
+            if (normalizedHistory.length > 1 && normalizedHistory[1].role === 'user') {
+                normalizedHistory[1].content = normalizedHistory[0].content + '\n\n' + normalizedHistory[1].content;
+                normalizedHistory.shift(); // ilk elemanı sil, zaten ikincisiyle birleşti
+            }
+        }
+
+        // Strict mode: model adına göre — native tool calling desteklemeyen modeller
+        // (gemma, llama, mistral) strict alternating roles formatı gerektirir.
+        // Bu modeller için: strict mesaj formatı + tools kaldırılır (fallback parser devreye girer)
+        // Diğer modeller (minimax, deepseek, qwen vb.): normal format + native tool calling
+        const needsStrictMode = model.includes('gemma') || model.includes('llama') || model.includes('mistral');
+
+        // Strict mode'da tools göndermiyoruz — API alternating roles ihlali verir
+        const effectiveTools: OpenAI.Chat.ChatCompletionTool[] | undefined = needsStrictMode
+            ? undefined
+            : options?.tools?.map(t => ({
+                type: 'function' as const,
+                function: {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.parameters as Record<string, unknown>,
+                },
+            }));
+
+        const finalMessages = needsStrictMode ? normalizedHistory : messages;
+
+        for (const msg of finalMessages) {
+            // Strict mode'da msg artık sadece {role, content} içeriyor (asistan tool call string halinde)
+            if (needsStrictMode) {
+                 openaiMessages.push({
+                    role: msg.role as 'user' | 'assistant',
+                    content: msg.content,
+                });
+                continue;
+            }
+
+            // Normal provider (OpenAI orijinal mantık)
             if (msg.role === 'tool' && msg.toolResults) {
                 for (const result of msg.toolResults) {
                     openaiMessages.push({
@@ -69,7 +152,7 @@ export class OpenAIProvider extends LLMProvider {
                 openaiMessages.push({
                     role: 'assistant',
                     content: msg.content || null,
-                    tool_calls: msg.toolCalls.map(tc => ({
+                    tool_calls: msg.toolCalls.map((tc: ToolCall) => ({
                         id: tc.id,
                         type: 'function' as const,
                         function: {
@@ -80,7 +163,7 @@ export class OpenAIProvider extends LLMProvider {
                 });
             } else if (msg.role === 'user' && msg.imageBlocks && msg.imageBlocks.length > 0) {
                 const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [
-                    ...msg.imageBlocks.map(img => ({
+                    ...msg.imageBlocks.map((img: { mimeType: string; data: string; fileName?: string }) => ({
                         type: 'image_url' as const,
                         image_url: { url: `data:${img.mimeType};base64,${img.data}` },
                     })),
@@ -95,20 +178,10 @@ export class OpenAIProvider extends LLMProvider {
             }
         }
 
-        // Araçları dönüştür
-        const tools: OpenAI.Chat.ChatCompletionTool[] | undefined = options?.tools?.map(t => ({
-            type: 'function' as const,
-            function: {
-                name: t.name,
-                description: t.description,
-                parameters: t.parameters as Record<string, unknown>,
-            },
-        }));
-
         const reqOpts: any = {
             model,
             messages: openaiMessages,
-            tools: tools && tools.length > 0 ? tools : undefined,
+            tools: effectiveTools?.length ? effectiveTools : undefined,
             temperature: model.startsWith('o1') ? 1 : (options?.temperature ?? 0.7),
         };
         if (options?.maxTokens) {
@@ -119,10 +192,10 @@ export class OpenAIProvider extends LLMProvider {
         const response = await this.createChatCompletionWithToolFallback(reqOpts);
 
         const choice = response.choices[0];
-        const toolCalls: ToolCall[] | undefined = choice.message.tool_calls?.map((tc: any) => ({
+        const toolCalls: ToolCall[] | undefined = choice.message.tool_calls?.map((tc: OpenAI.Chat.ChatCompletionMessageToolCall) => ({
             id: tc.id,
             name: tc.function.name,
-            arguments: (() => { try { return JSON.parse(tc.function.arguments); } catch { return {}; } })(),
+            arguments: (() => { try { return JSON.parse(tc.function.arguments); } catch { return {}; } })()
         }));
 
         let finishReason: LLMResponse['finishReason'] = 'stop';
@@ -147,7 +220,68 @@ export class OpenAIProvider extends LLMProvider {
         if (options?.systemPrompt) {
             openaiMessages.push({ role: 'system', content: options.systemPrompt });
         }
+
+        // --- STRICT ALTERNATING ROLES NORMALIZATION ---
+        const normalizedHistory: any[] = [];
+        let currentRole: string | null = null;
+        let currentContent = '';
+
         for (const msg of messages) {
+            let roleToUse = msg.role;
+            let contentToAdd = msg.content || '';
+
+            if (msg.role === 'tool' && msg.toolResults) {
+                roleToUse = 'user';
+                contentToAdd = msg.toolResults.map(r => `[Araç Sonucu - ${r.toolCallId}]:\n${r.result}`).join('\n\n');
+            } else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+                if (!contentToAdd) {
+                    contentToAdd = `[Araç Kullanıldı: ${msg.toolCalls.map(tc => tc.name).join(', ')}]`;
+                }
+            }
+
+            if (!contentToAdd.trim() && msg.role !== 'assistant') continue;
+            
+            if (roleToUse === currentRole && roleToUse !== 'system') {
+                currentContent += '\n\n' + contentToAdd;
+            } else {
+                if (currentRole && currentRole !== 'system') {
+                    normalizedHistory.push({ role: currentRole, content: currentContent });
+                }
+                currentRole = roleToUse;
+                currentContent = contentToAdd;
+            }
+        }
+        if (currentRole && currentRole !== 'system') {
+            normalizedHistory.push({ role: currentRole, content: currentContent });
+        }
+
+        if (normalizedHistory.length > 0 && normalizedHistory[0].role === 'assistant') {
+            normalizedHistory[0].role = 'user';
+            normalizedHistory[0].content = `[Önceki Asistan Durumu]:\n${normalizedHistory[0].content}`;
+
+            if (normalizedHistory.length > 1 && normalizedHistory[1].role === 'user') {
+                normalizedHistory[1].content = normalizedHistory[0].content + '\n\n' + normalizedHistory[1].content;
+                normalizedHistory.shift();
+            }
+        }
+
+        const needsStrictMode = model.includes('gemma') || model.includes('llama') || model.includes('mistral');
+
+        const effectiveTools: OpenAI.Chat.ChatCompletionTool[] | undefined = needsStrictMode
+            ? undefined
+            : options?.tools?.map(t => ({
+                type: 'function' as const,
+                function: { name: t.name, description: t.description, parameters: t.parameters as Record<string, unknown> },
+            }));
+
+        const finalMessages = needsStrictMode ? normalizedHistory : messages;
+
+        for (const msg of finalMessages) {
+            if (needsStrictMode) {
+                 openaiMessages.push({ role: msg.role as 'user' | 'assistant', content: msg.content });
+                 continue;
+            }
+
             if (msg.role === 'tool' && msg.toolResults) {
                 for (const result of msg.toolResults) {
                     openaiMessages.push({ role: 'tool', tool_call_id: result.toolCallId, content: result.result });
@@ -155,11 +289,11 @@ export class OpenAIProvider extends LLMProvider {
             } else if (msg.role === 'assistant' && msg.toolCalls?.length) {
                 openaiMessages.push({
                     role: 'assistant', content: msg.content || null,
-                    tool_calls: msg.toolCalls.map(tc => ({ id: tc.id, type: 'function' as const, function: { name: tc.name, arguments: JSON.stringify(tc.arguments) } })),
+                    tool_calls: msg.toolCalls.map((tc: ToolCall) => ({ id: tc.id, type: 'function' as const, function: { name: tc.name, arguments: JSON.stringify(tc.arguments) } })),
                 });
             } else if (msg.role === 'user' && msg.imageBlocks && msg.imageBlocks.length > 0) {
                 const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [
-                    ...msg.imageBlocks.map(img => ({
+                    ...msg.imageBlocks.map((img: { mimeType: string; data: string; fileName?: string }) => ({
                         type: 'image_url' as const,
                         image_url: { url: `data:${img.mimeType};base64,${img.data}` },
                     })),
@@ -170,14 +304,10 @@ export class OpenAIProvider extends LLMProvider {
                 openaiMessages.push({ role: msg.role as 'user' | 'assistant', content: msg.content });
             }
         }
-        const tools: OpenAI.Chat.ChatCompletionTool[] | undefined = options?.tools?.map(t => ({
-            type: 'function' as const,
-            function: { name: t.name, description: t.description, parameters: t.parameters as Record<string, unknown> },
-        }));
 
         const reqOpts: any = {
             model, messages: openaiMessages,
-            tools: tools?.length ? tools : undefined,
+            tools: effectiveTools?.length ? effectiveTools : undefined,
             temperature: model.startsWith('o1') ? 1 : (options?.temperature ?? 0.7),
             stream: true,
         };
@@ -190,7 +320,7 @@ export class OpenAIProvider extends LLMProvider {
 
         let content = '';
         let hasToolCalls = false;
-        let tokensEmitted = false; // Token gönderilip gönderilmediğini takip et
+        let tokensEmitted = false;
         const toolCallsAccum = new Map<number, { id: string; name: string; argsStr: string }>();
 
         for await (const chunk of stream) {
@@ -204,10 +334,6 @@ export class OpenAIProvider extends LLMProvider {
                 }
             }
             if (delta.tool_calls) {
-                if (!hasToolCalls && tokensEmitted) {
-                    // İlk tool call tespit edildi — önceden stream edilmiş metni temizle
-                    onToken(TOOL_CALL_CLEAR_SIGNAL);
-                }
                 hasToolCalls = true;
                 for (const tc of delta.tool_calls) {
                     if (!toolCallsAccum.has(tc.index)) toolCallsAccum.set(tc.index, { id: '', name: '', argsStr: '' });
@@ -221,7 +347,7 @@ export class OpenAIProvider extends LLMProvider {
 
         const toolCalls = hasToolCalls ? Array.from(toolCallsAccum.entries())
             .sort(([a], [b]) => a - b)
-            .map(([, tc]) => ({ id: tc.id, name: tc.name, arguments: (() => { try { return JSON.parse(tc.argsStr || '{}'); } catch { return {}; } })() })) : undefined;
+            .map(([, tc]: [number, any]) => ({ id: tc.id, name: tc.name, arguments: (() => { try { return JSON.parse(tc.argsStr || '{}'); } catch { return {}; } })() })) : undefined;
 
         return { content, toolCalls: toolCalls?.length ? toolCalls : undefined, finishReason: toolCalls?.length ? 'tool_calls' : 'stop' };
     }

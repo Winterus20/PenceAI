@@ -1,9 +1,15 @@
 import { computeReviewPriority, selectConversationAwareSupplementalMemories } from './contextUtils.js';
-import type { GraphAwareSearchResult, MemoryRow, MemoryType } from './types.js';
+import type {
+    BehaviorDiscoveryCandidate,
+    BehaviorDiscoveryTrace,
+    GraphAwareSearchResult,
+    MemoryRow,
+    MemoryType,
+} from './types.js';
 
 type MemoryRelationNeighbor = MemoryRow & {
     relation_type: string;
-    confidence: number;
+    relation_confidence?: number;
     relation_description: string;
 };
 
@@ -52,6 +58,57 @@ interface RetrievalSelectionSnapshot {
     breakdown: RetrievalMemoryBreakdown;
 }
 
+interface RetrievalCoverageGap {
+    type: 'semantic' | 'episodic' | 'conversation_scoped' | 'novel_category';
+    reason: string;
+}
+
+interface RetrievalSecondPassAdjustment {
+    lane: 'relevant' | 'supplemental';
+    applied: boolean;
+    reason: string | null;
+    removedId: number | null;
+    addedId: number | null;
+    preservedIds: number[];
+}
+
+interface RetrievalSecondPassAuditSnapshot {
+    applied: boolean;
+    mode: DualProcessMode;
+    coverageGaps: RetrievalCoverageGap[];
+    guardrailSummary: string[];
+    adjustments: RetrievalSecondPassAdjustment[];
+}
+
+interface RetrievalMemoryExplanation {
+    id: number;
+    rank: number;
+    lane: 'relevant' | 'archival' | 'supplemental' | 'review' | 'follow_up';
+    category: string;
+    memoryType: MemoryType | 'unknown';
+    source: string;
+    conversationScoped: boolean;
+    finalScore: number;
+    components: {
+        signalScore: number;
+        primingBonus: number;
+        activationBonus: number;
+        importanceBonus: number;
+        accessBonus: number;
+    };
+    reasons: string[];
+}
+
+interface RetrievalRankedEntry {
+    memory: MemoryRow;
+    signalScore: number;
+    primingBonus: number;
+    activationBonus: number;
+    importanceBonus: number;
+    accessBonus: number;
+    finalScore: number;
+}
+
 export interface PromptContextBundle {
     relevantMemories: MemoryRow[];
     archivalMemories: MemoryRow[];
@@ -96,6 +153,11 @@ export interface RetrievalOrchestratorDeps {
     getUserMemories: (limit: number) => MemoryRow[];
     getMemoryNeighborsBatch?: (memoryIds: number[], limitPerNode: number) => Map<number, MemoryRelationNeighbor[]>;
     getSpreadingActivationConfig?: () => Partial<RetrievalSpreadingActivationConfig>;
+    getBehaviorDiscoveryConfig?: () => {
+        retrieval?: {
+            state?: 'disabled' | 'observe' | 'candidate' | 'shadow';
+        };
+    };
     prioritizeConversationMemories: (
         memories: MemoryRow[],
         recentMessages: Array<{ role: string; content: string; created_at: string; conversation_title: string }>,
@@ -109,6 +171,8 @@ interface RetrievalIntentSignals {
     hasQuestion: boolean;
     hasPreferenceCue: boolean;
     hasFollowUpCue: boolean;
+    hasRecallCue: boolean;
+    hasConstraintCue: boolean;
     hasRecentContext: boolean;
     hasAnalyticalCue: boolean;
     hasExploratoryCue: boolean;
@@ -265,6 +329,15 @@ interface BundleSelectionContext {
     spreadingActivation: RetrievalSpreadingActivationState;
 }
 
+interface RetrievalBehaviorDiscoveryConfig {
+    state: 'disabled' | 'observe' | 'candidate' | 'shadow';
+}
+
+interface RetrievalBehaviorDiscoveryShadowPlan {
+    candidate: BehaviorDiscoveryCandidate;
+    shadowSelectionIds: number[];
+}
+
 function clampScore(value: number, min: number = 0, max: number = 2): number {
     return Math.max(min, Math.min(max, value));
 }
@@ -320,7 +393,8 @@ function resolveMemoryTypeWeight(memory: MemoryRow, typePreference: RetrievalTyp
 
 function normalizePrimerText(text: string): string {
     return text
-        .toLocaleLowerCase('tr-TR')
+        .normalize('NFKC')
+        .toLowerCase()
         .replace(/[^\p{L}\p{N}\s_-]+/gu, ' ')
         .replace(/\s+/g, ' ')
         .trim();
@@ -374,7 +448,7 @@ function extractPrimerEntityHints(query: string, recentMessages: Array<{ role: s
     const combinedText = [query, ...recentMessages.slice(0, 2).map(message => message.content)].join(' ');
     const matches = combinedText.match(/\b(?:[A-ZÇĞİÖŞÜ][\p{L}\p{N}_-]{2,}|[A-Z]{2,}[\p{L}\p{N}_-]*)\b/gu) ?? [];
     const excludedEntities = new Set([
-        'acaba', 'bu', 'bunu', 'genel', 'hangi', 'kullanıcı', 'ne', 'neden', 'nedir', 'penceai', 'penceaiı', 'profilimi',
+        'acaba', 'bu', 'bunu', 'genel', 'hangi', 'kullanıcı', 'ne', 'neden', 'nedir', 'profilimi',
         'selam', 'son', 'söyle', 'takip', 'tercihlerimi', 've', 'veya', 'yardım',
     ]);
     const seen = new Set<string>();
@@ -685,7 +759,7 @@ function buildSpreadingActivationState(
                 continue;
             }
 
-            const relationConfidence = normalizeConfidence(neighbor.confidence);
+            const relationConfidence = normalizeConfidence(neighbor.relation_confidence ?? 0);
             if (relationConfidence < config.relationConfidenceFloor) {
                 relationFloorSkips += 1;
                 neighborSkipEntries.push({ id: neighbor.id, reason: 'relation_confidence_below_floor' });
@@ -821,16 +895,88 @@ function computeSpreadingActivationBonus(memory: MemoryRow, context: BundleSelec
     return context.spreadingActivation.bonusByMemoryId.get(memory.id) ?? 0;
 }
 
-function rankMemoriesBySignals(memories: MemoryRow[], limit: number, context: BundleSelectionContext): MemoryRow[] {
+function buildRankedEntries(memories: MemoryRow[], context: BundleSelectionContext): RetrievalRankedEntry[] {
     return memories
-        .map(memory => ({
-            memory,
-            score: computeBaseRankingScore(memory, context)
-                + computeSpreadingActivationBonus(memory, context),
-        }))
-        .sort((a, b) => b.score - a.score || b.memory.updated_at.localeCompare(a.memory.updated_at))
+        .map(memory => {
+            const signalScore = computeRetrievalSignalScore(memory, context);
+            const primingBonus = computePrimingBonus(memory, context);
+            const activationBonus = computeSpreadingActivationBonus(memory, context);
+            const importanceBonus = Number((memory.importance * 0.04).toFixed(3));
+            const accessBonus = Number((memory.access_count * 0.015).toFixed(3));
+            const finalScore = Number((
+                signalScore
+                + primingBonus
+                + activationBonus
+                + importanceBonus
+                + accessBonus
+            ).toFixed(3));
+
+            return {
+                memory,
+                signalScore: Number(signalScore.toFixed(3)),
+                primingBonus,
+                activationBonus,
+                importanceBonus,
+                accessBonus,
+                finalScore,
+            };
+        })
+        .sort((a, b) => b.finalScore - a.finalScore || b.memory.updated_at.localeCompare(a.memory.updated_at));
+}
+
+function rankMemoriesBySignals(memories: MemoryRow[], limit: number, context: BundleSelectionContext): MemoryRow[] {
+    return buildRankedEntries(memories, context)
         .slice(0, limit)
         .map(entry => entry.memory);
+}
+
+function buildMemoryExplanations(
+    lane: RetrievalMemoryExplanation['lane'],
+    rankedEntries: RetrievalRankedEntry[],
+    selected: MemoryRow[],
+    context: BundleSelectionContext,
+): RetrievalMemoryExplanation[] {
+    const selectedIds = new Set(selected.map(memory => memory.id));
+
+    return rankedEntries
+        .filter(entry => selectedIds.has(entry.memory.id))
+        .slice(0, selected.length)
+        .map((entry, index) => {
+            const normalizedMemoryText = normalizePrimerText(entry.memory.content);
+            const reasons: string[] = [];
+
+            if (entry.signalScore > 1.2) reasons.push('strong_signal_score');
+            if (entry.primingBonus > 0) reasons.push('intent_primed');
+            if (entry.activationBonus > 0) reasons.push('graph_supported');
+            if (entry.memory.provenance_conversation_id === context.activeConversationId) reasons.push('conversation_scoped');
+            if (context.typePreference.preferredType !== 'balanced' && entry.memory.memory_type === context.typePreference.preferredType) {
+                reasons.push(`type_aligned:${context.typePreference.preferredType}`);
+            }
+            if (context.primer.entityHints.some(entity => normalizedMemoryText.includes(entity))) reasons.push('entity_hint_match');
+            if (context.primer.topicHints.some(topic => normalizedMemoryText.includes(topic))) reasons.push('topic_hint_match');
+            if (lane === 'supplemental') reasons.push('supplemental_context');
+            if (lane === 'review') reasons.push('review_queue');
+            if (lane === 'follow_up') reasons.push('follow_up_candidate');
+
+            return {
+                id: entry.memory.id,
+                rank: index + 1,
+                lane,
+                category: entry.memory.category?.trim() || 'unknown',
+                memoryType: entry.memory.memory_type ?? 'unknown',
+                source: entry.memory.provenance_source?.trim() || 'unknown',
+                conversationScoped: entry.memory.provenance_conversation_id === context.activeConversationId,
+                finalScore: entry.finalScore,
+                components: {
+                    signalScore: entry.signalScore,
+                    primingBonus: entry.primingBonus,
+                    activationBonus: entry.activationBonus,
+                    importanceBonus: entry.importanceBonus,
+                    accessBonus: entry.accessBonus,
+                },
+                reasons,
+            };
+        });
 }
 
 function summarizeMemoryBreakdown(memories: MemoryRow[], activeConversationId: string): RetrievalMemoryBreakdown {
@@ -906,6 +1052,8 @@ function buildReasonList(
 
     if (signals.hasPreferenceCue) reasons.push('signal:preference_cue');
     if (signals.hasFollowUpCue) reasons.push('signal:follow_up_cue');
+    if (signals.hasRecallCue) reasons.push('signal:recall_cue');
+    if (signals.hasConstraintCue) reasons.push('signal:constraint_cue');
     if (signals.hasQuestion) reasons.push('signal:question');
     if (signals.hasRecentContext) reasons.push('signal:recent_context');
     if (signals.hasAnalyticalCue) reasons.push('signal:analytical_cue');
@@ -927,8 +1075,323 @@ function buildReasonList(
     return reasons;
 }
 
+function resolveBehaviorDiscoveryConfig(deps: RetrievalOrchestratorDeps): RetrievalBehaviorDiscoveryConfig {
+    return {
+        state: deps.getBehaviorDiscoveryConfig?.().retrieval?.state ?? 'shadow',
+    };
+}
+
+function collectBehaviorDiscoveryObservedSignals(signals: RetrievalIntentSignals, dualProcess: DualProcessRoutingSnapshot): string[] {
+    const observedSignals: string[] = [];
+    if (signals.hasPreferenceCue) observedSignals.push('signal:preference_cue');
+    if (signals.hasFollowUpCue) observedSignals.push('signal:follow_up_cue');
+    if (signals.hasRecallCue) observedSignals.push('signal:recall_cue');
+    if (signals.hasRecentContext) observedSignals.push('signal:recent_context');
+    if (dualProcess.escalationTriggers.includes('cross_signal_conflict')) observedSignals.push('trigger:cross_signal_conflict');
+    if (dualProcess.escalationTriggers.includes('follow_up_ambiguity')) observedSignals.push('trigger:follow_up_ambiguity');
+    return observedSignals;
+}
+
+function maybeBuildBehaviorDiscoveryShadowPlan(
+    config: RetrievalBehaviorDiscoveryConfig,
+    signals: RetrievalIntentSignals,
+    relevantRankedEntries: RetrievalRankedEntry[],
+    selectionContext: BundleSelectionContext,
+    relevantLimit: number,
+): RetrievalBehaviorDiscoveryShadowPlan | null {
+    if (config.state === 'disabled' || config.state === 'observe' || relevantRankedEntries.length === 0) {
+        return null;
+    }
+
+    const observedSignals = collectBehaviorDiscoveryObservedSignals(signals, selectionContext.dualProcess);
+    const shouldProbeMixedIntent = signals.hasPreferenceCue && signals.hasFollowUpCue;
+    const shouldProbeConversationSupport = signals.hasFollowUpCue
+        && relevantRankedEntries.some(entry => entry.memory.provenance_conversation_id === selectionContext.activeConversationId)
+        && relevantRankedEntries.some(entry => entry.memory.provenance_conversation_id !== selectionContext.activeConversationId);
+
+    if (!shouldProbeMixedIntent && !shouldProbeConversationSupport) {
+        return null;
+    }
+
+    const candidate: BehaviorDiscoveryCandidate = {
+        id: shouldProbeMixedIntent
+            ? 'retrieval_mixed_intent_shadow_v1'
+            : 'retrieval_followup_conversation_shadow_v1',
+        domain: 'retrieval',
+        feature: shouldProbeMixedIntent ? 'mixed_intent_shadow_probe' : 'conversation_followup_shadow_probe',
+        state: config.state === 'candidate' ? 'candidate' : 'shadow',
+        summary: shouldProbeMixedIntent
+            ? 'Preference + follow-up sinyallerinde gölge karşılaştırma için çift taraflı coverage bias uygula.'
+            : 'Follow-up sorgularında conversation-scoped episodic desteği gölgede karşılaştır.',
+        trigger: shouldProbeMixedIntent ? 'cross_signal_conflict' : 'follow_up_conversation_support_gap',
+        observedSignals,
+        riskProfile: 'low',
+    };
+
+    const shadowRankedEntries = [...relevantRankedEntries]
+        .map(entry => {
+            let shadowBonus = 0;
+            if (shouldProbeMixedIntent) {
+                if (entry.memory.memory_type === 'semantic' && /preference|profile|user_fact/i.test(entry.memory.category || '')) {
+                    shadowBonus += 0.08;
+                }
+                if (entry.memory.memory_type === 'episodic' && entry.memory.provenance_conversation_id === selectionContext.activeConversationId) {
+                    shadowBonus += 0.08;
+                }
+            } else if (entry.memory.provenance_conversation_id === selectionContext.activeConversationId && entry.memory.memory_type === 'episodic') {
+                shadowBonus += 0.1;
+            }
+
+            return {
+                id: entry.memory.id,
+                score: Number((entry.finalScore + shadowBonus).toFixed(3)),
+                updatedAt: entry.memory.updated_at,
+            };
+        })
+        .sort((a, b) => b.score - a.score || b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, relevantLimit)
+        .map(entry => entry.id);
+
+    return {
+        candidate,
+        shadowSelectionIds: shadowRankedEntries,
+    };
+}
+
+function buildBehaviorDiscoveryTrace(
+    config: RetrievalBehaviorDiscoveryConfig,
+    signals: RetrievalIntentSignals,
+    dualProcess: DualProcessRoutingSnapshot,
+    currentSelectionIds: number[],
+    shadowPlan: RetrievalBehaviorDiscoveryShadowPlan | null,
+): BehaviorDiscoveryTrace {
+    const observedSignals = collectBehaviorDiscoveryObservedSignals(signals, dualProcess);
+    const guardrails = [
+        'behavior_discovery:shadow_safe_only',
+        'behavior_discovery:no_live_effect',
+        'behavior_discovery:active_policy_unchanged',
+    ];
+
+    if (config.state === 'disabled') {
+        return {
+            enabled: false,
+            domain: 'retrieval',
+            state: 'disabled',
+            liveEffectAllowed: false,
+            observedSignals,
+            candidates: [],
+            shadowComparison: null,
+            guardrails: [...guardrails, 'behavior_discovery:kill_switch_disabled'],
+        };
+    }
+
+    if (!shadowPlan) {
+        return {
+            enabled: true,
+            domain: 'retrieval',
+            state: 'observe',
+            liveEffectAllowed: false,
+            observedSignals,
+            candidates: [],
+            shadowComparison: null,
+            guardrails,
+        };
+    }
+
+    const addedIds = shadowPlan.shadowSelectionIds.filter(id => !currentSelectionIds.includes(id));
+    const removedIds = currentSelectionIds.filter(id => !shadowPlan.shadowSelectionIds.includes(id));
+    const changed = addedIds.length > 0 || removedIds.length > 0;
+    const readiness = !changed
+        ? 'hold'
+        : addedIds.length <= 1 && removedIds.length <= 1
+            ? 'shadow_ready'
+            : 'promotion_blocked';
+
+    return {
+        enabled: true,
+        domain: 'retrieval',
+        state: shadowPlan.candidate.state === 'candidate' ? 'candidate' : 'shadow',
+        liveEffectAllowed: false,
+        observedSignals,
+        candidates: [shadowPlan.candidate],
+        shadowComparison: {
+            candidateId: shadowPlan.candidate.id,
+            currentSelectionIds,
+            shadowSelectionIds: shadowPlan.shadowSelectionIds,
+            addedIds,
+            removedIds,
+            changed,
+            summary: changed
+                ? `shadow_diff:+${addedIds.join(',') || 'none'}:-${removedIds.join(',') || 'none'}`
+                : 'shadow_matches_current_selection',
+            readiness,
+        },
+        guardrails,
+    };
+}
+
 function estimateMemoryTokenCount(memories: MemoryRow[]): number {
     return memories.reduce((total, memory) => total + Math.ceil(memory.content.length / 4), 0);
+}
+
+function detectCoverageGaps(
+    selected: MemoryRow[],
+    candidatePool: MemoryRow[],
+    context: BundleSelectionContext,
+): RetrievalCoverageGap[] {
+    const gaps: RetrievalCoverageGap[] = [];
+    const selectedIds = new Set(selected.map(memory => memory.id));
+    const unselected = candidatePool.filter(memory => !selectedIds.has(memory.id));
+    const selectedCategories = new Set(selected.map(memory => memory.category?.trim().toLowerCase() || 'unknown'));
+
+    if (
+        context.typePreference.preferredType !== 'balanced'
+        && selected.every(memory => memory.memory_type !== context.typePreference.preferredType)
+        && unselected.some(memory => memory.memory_type === context.typePreference.preferredType)
+    ) {
+        gaps.push({
+            type: context.typePreference.preferredType,
+            reason: `missing_preferred_type:${context.typePreference.preferredType}`,
+        });
+    }
+
+    if (
+        (context.recipe.preferConversationSignals || context.primer.reasons.includes('recent_follow_up_context'))
+        && selected.every(memory => memory.provenance_conversation_id !== context.activeConversationId)
+        && unselected.some(memory => memory.provenance_conversation_id === context.activeConversationId)
+    ) {
+        gaps.push({
+            type: 'conversation_scoped',
+            reason: 'missing_conversation_scoped_support',
+        });
+    }
+
+    if (
+        context.recipe.name === 'exploratory'
+        && unselected.some(memory => !selectedCategories.has(memory.category?.trim().toLowerCase() || 'unknown'))
+    ) {
+        gaps.push({
+            type: 'novel_category',
+            reason: 'missing_exploratory_category_coverage',
+        });
+    }
+
+    return gaps;
+}
+
+function applyDeterministicSecondPass(
+    lane: RetrievalSecondPassAdjustment['lane'],
+    rankedEntries: RetrievalRankedEntry[],
+    limit: number,
+    context: BundleSelectionContext,
+): { selected: MemoryRow[]; adjustment: RetrievalSecondPassAdjustment; coverageGaps: RetrievalCoverageGap[]; guardrailSummary: string[] } {
+    const initialSelected = rankedEntries.slice(0, limit).map(entry => entry.memory);
+    const selectedIds = new Set(initialSelected.map(memory => memory.id));
+    const unselectedEntries = rankedEntries.filter(entry => !selectedIds.has(entry.memory.id));
+    const coverageGaps = detectCoverageGaps(initialSelected, rankedEntries.map(entry => entry.memory), context);
+    const guardrailSummary = [
+        'second_pass:bounded_to_existing_candidates',
+        `second_pass:selection_limit_preserved:${limit}`,
+    ];
+
+    if (context.dualProcess.selectedMode !== 'system2' || coverageGaps.length === 0 || initialSelected.length === 0 || unselectedEntries.length === 0) {
+        return {
+            selected: initialSelected,
+            adjustment: {
+                lane,
+                applied: false,
+                reason: null,
+                removedId: null,
+                addedId: null,
+                preservedIds: initialSelected.map(memory => memory.id),
+            },
+            coverageGaps,
+            guardrailSummary,
+        };
+    }
+
+    const replacementEntry = unselectedEntries.find(entry => {
+        const categoryKey = entry.memory.category?.trim().toLowerCase() || 'unknown';
+        return coverageGaps.some(gap => {
+            if (gap.type === 'conversation_scoped') {
+                return entry.memory.provenance_conversation_id === context.activeConversationId;
+            }
+            if (gap.type === 'novel_category') {
+                return !initialSelected.some(memory => (memory.category?.trim().toLowerCase() || 'unknown') === categoryKey);
+            }
+            return entry.memory.memory_type === gap.type;
+        });
+    });
+
+    if (!replacementEntry) {
+        guardrailSummary.push('second_pass:no_eligible_replacement');
+        return {
+            selected: initialSelected,
+            adjustment: {
+                lane,
+                applied: false,
+                reason: null,
+                removedId: null,
+                addedId: null,
+                preservedIds: initialSelected.map(memory => memory.id),
+            },
+            coverageGaps,
+            guardrailSummary,
+        };
+    }
+
+    const removableEntry = [...rankedEntries.slice(0, limit)]
+        .reverse()
+        .find(entry => {
+            const memory = entry.memory;
+            return !coverageGaps.some(gap => {
+                if (gap.type === 'conversation_scoped') {
+                    return memory.provenance_conversation_id === context.activeConversationId;
+                }
+                if (gap.type === 'novel_category') {
+                    const categoryKey = memory.category?.trim().toLowerCase() || 'unknown';
+                    const categoryCount = initialSelected.filter(item => (item.category?.trim().toLowerCase() || 'unknown') === categoryKey).length;
+                    return categoryCount <= 1;
+                }
+                return memory.memory_type === gap.type;
+            });
+        });
+
+    if (!removableEntry) {
+        guardrailSummary.push('second_pass:no_safe_removal');
+        return {
+            selected: initialSelected,
+            adjustment: {
+                lane,
+                applied: false,
+                reason: null,
+                removedId: null,
+                addedId: null,
+                preservedIds: initialSelected.map(memory => memory.id),
+            },
+            coverageGaps,
+            guardrailSummary,
+        };
+    }
+
+    const selected = rankedEntries
+        .slice(0, limit)
+        .map(entry => entry.memory.id === removableEntry.memory.id ? replacementEntry.memory : entry.memory);
+    guardrailSummary.push('second_pass:coverage_swap_applied');
+
+    return {
+        selected,
+        adjustment: {
+            lane,
+            applied: true,
+            reason: coverageGaps[0]?.reason ?? 'coverage_gap',
+            removedId: removableEntry.memory.id,
+            addedId: replacementEntry.memory.id,
+            preservedIds: selected.filter(memory => memory.id !== replacementEntry.memory.id).map(memory => memory.id),
+        },
+        coverageGaps,
+        guardrailSummary,
+    };
 }
 
 function resolveTypePreference(signals: RetrievalIntentSignals, recipe: PromptContextRecipe): RetrievalTypePreference {
@@ -947,6 +1410,15 @@ function resolveTypePreference(signals: RetrievalIntentSignals, recipe: PromptCo
             semanticWeight: 0.96,
             episodicWeight: 1.16,
             reason: 'recent_event_followup',
+        };
+    }
+
+    if (signals.hasRecallCue) {
+        return {
+            preferredType: 'semantic',
+            semanticWeight: 1.08,
+            episodicWeight: 0.98,
+            reason: 'explicit_recall_bias',
         };
     }
 
@@ -974,6 +1446,8 @@ function detectIntentSignals(
         hasQuestion: /\?|nasıl|neden|ne|hangi|hatırla|remember|recall/.test(normalizedQuery),
         hasPreferenceCue: /tercih|sev|sever|istemem|favori|alışkanlık|preference|prefer|like|dislike/.test(normalizedQuery),
         hasFollowUpCue: /takip|devam|son durum|güncel|update|follow[ -]?up|progress|durum|az önce|demin|bugün|dün/.test(normalizedQuery),
+        hasRecallCue: /hatırla|hatırlat|recall|remember|bildikler(in|ini)|what do you know|retrieve/.test(normalizedQuery),
+        hasConstraintCue: /sadece|yalnızca|özellikle|kısa|short|brief|odaklan|focus|bounded|limit/.test(normalizedQuery),
         hasRecentContext: recentUserMessages.some(message => message.content.trim().length > 0),
         hasAnalyticalCue: /analiz|karşılaştır|trade-?off|step by step|adım adım|değerlendir|planla|reason|explain|why|diagnose/.test(normalizedQuery),
         hasExploratoryCue: /öner|fikir|araştır|keşfet|alternatif|recipe|tarif|brainstorm|explore|options|ideas/.test(normalizedQuery),
@@ -1350,8 +1824,21 @@ export class MemoryRetrievalOrchestrator {
             ...selectionContextBase,
             spreadingActivation,
         };
-        const relevantMemories = rankMemoriesBySignals(relevantBase, budgetApplication.relevantLimit, selectionContext);
-        const archivalMemories = rankMemoriesBySignals(searchResult.archival, budgetApplication.archivalLimit, selectionContext);
+        const relevantRankedEntries = buildRankedEntries(relevantBase, selectionContext);
+        const relevantSecondPass = applyDeterministicSecondPass('relevant', relevantRankedEntries, budgetApplication.relevantLimit, selectionContext);
+        const relevantMemories = relevantSecondPass.selected;
+        const behaviorDiscoveryConfig = resolveBehaviorDiscoveryConfig(this.deps);
+        const behaviorDiscoveryShadowPlan = maybeBuildBehaviorDiscoveryShadowPlan(
+            behaviorDiscoveryConfig,
+            signals,
+            relevantRankedEntries,
+            selectionContext,
+            budgetApplication.relevantLimit,
+        );
+        const archivalRankedEntries = buildRankedEntries(searchResult.archival, selectionContext);
+        const archivalMemories = archivalRankedEntries
+            .slice(0, budgetApplication.archivalLimit)
+            .map(entry => entry.memory);
 
         const baseCandidatePool = this.deps.getUserMemories(budgetApplication.fallbackPoolSize);
         const candidatePool = recipe.preferArchivalForSupplemental
@@ -1368,17 +1855,54 @@ export class MemoryRetrievalOrchestrator {
             fallbackMemories: candidatePool,
             limit: budgetApplication.candidateExpansionLimit,
         });
-        const supplementalMemories = rankMemoriesBySignals(supplementalCandidates, supplementalLimit, selectionContext);
+        const supplementalRankedEntries = buildRankedEntries(supplementalCandidates, selectionContext);
+        const supplementalSecondPass = applyDeterministicSecondPass('supplemental', supplementalRankedEntries, supplementalLimit, selectionContext);
+        const supplementalMemories = supplementalSecondPass.selected;
 
-        const rankedReviewMemories = rankMemoriesBySignals(reviewMemories, budgetApplication.reviewLimit, selectionContext);
-        const rankedFollowUpCandidates = rankMemoriesBySignals(followUpCandidates, budgetApplication.followUpLimit, selectionContext);
+        const reviewRankedEntries = buildRankedEntries(reviewMemories, selectionContext);
+        const rankedReviewMemories = reviewRankedEntries
+            .slice(0, budgetApplication.reviewLimit)
+            .map(entry => entry.memory);
+        const followUpRankedEntries = buildRankedEntries(followUpCandidates, selectionContext);
+        const rankedFollowUpCandidates = followUpRankedEntries
+            .slice(0, budgetApplication.followUpLimit)
+            .map(entry => entry.memory);
 
         const relevantSnapshot = createSelectionSnapshot(relevantBase, relevantMemories, activeConversationId);
         const archivalSnapshot = createSelectionSnapshot(searchResult.archival, archivalMemories, activeConversationId);
         const supplementalSnapshot = createSelectionSnapshot(supplementalCandidates, supplementalMemories, activeConversationId);
         const reviewSnapshot = createSelectionSnapshot(reviewMemories, rankedReviewMemories, activeConversationId);
         const followUpSnapshot = createSelectionSnapshot(followUpCandidates, rankedFollowUpCandidates, activeConversationId);
+        const secondPassAudit: RetrievalSecondPassAuditSnapshot = {
+            applied: relevantSecondPass.adjustment.applied || supplementalSecondPass.adjustment.applied,
+            mode: dualProcess.selectedMode,
+            coverageGaps: [...relevantSecondPass.coverageGaps, ...supplementalSecondPass.coverageGaps],
+            guardrailSummary: Array.from(new Set([...relevantSecondPass.guardrailSummary, ...supplementalSecondPass.guardrailSummary])),
+            adjustments: [relevantSecondPass.adjustment, supplementalSecondPass.adjustment],
+        };
+        const explanations = {
+            relevant: buildMemoryExplanations('relevant', relevantRankedEntries, relevantMemories, selectionContext),
+            archival: buildMemoryExplanations('archival', archivalRankedEntries, archivalMemories, selectionContext),
+            supplemental: buildMemoryExplanations('supplemental', supplementalRankedEntries, supplementalMemories, selectionContext),
+            review: buildMemoryExplanations('review', reviewRankedEntries, rankedReviewMemories, selectionContext),
+            followUp: buildMemoryExplanations('follow_up', followUpRankedEntries, rankedFollowUpCandidates, selectionContext),
+        };
+        const behaviorDiscovery = buildBehaviorDiscoveryTrace(
+            behaviorDiscoveryConfig,
+            signals,
+            dualProcess,
+            relevantSnapshot.selectedIds,
+            behaviorDiscoveryShadowPlan,
+        );
         const decisionReasons = buildReasonList(signals, recipe, typePreference, cognitiveLoad, budgetApplication, primer, dualProcess);
+        decisionReasons.push(...secondPassAudit.guardrailSummary);
+        decisionReasons.push(...secondPassAudit.coverageGaps.map(gap => `coverage_gap:${gap.reason}`));
+        decisionReasons.push(...secondPassAudit.adjustments.filter(adjustment => adjustment.applied && adjustment.reason).map(adjustment => `second_pass_adjustment:${adjustment.lane}:${adjustment.reason}`));
+        decisionReasons.push(`behavior_discovery:${behaviorDiscovery.state}`);
+        if (behaviorDiscovery.shadowComparison) {
+            decisionReasons.push(`behavior_discovery_shadow:${behaviorDiscovery.shadowComparison.summary}`);
+            decisionReasons.push(`behavior_discovery_readiness:${behaviorDiscovery.shadowComparison.readiness}`);
+        }
 
         this.deps.recordDebug({
             query,
@@ -1397,7 +1921,10 @@ export class MemoryRetrievalOrchestrator {
                 adjustedBudgetProfile: dualProcess.adjustedBudgetProfile,
                 adjustedGraphDepth: dualProcess.adjustedGraphDepth,
             },
+            secondPass: secondPassAudit,
+            explanations,
             spreadingActivation: spreadingActivation.snapshot,
+            behaviorDiscovery,
             budget: {
                 searchLimit,
                 summaryLimit,
@@ -1418,6 +1945,14 @@ export class MemoryRetrievalOrchestrator {
                     followUpLimit: budgetApplication.followUpLimit,
                     candidateExpansionLimit: budgetApplication.candidateExpansionLimit,
                 },
+                guardrails: {
+                    searchLimitReached: searchResult.active.length > budgetApplication.relevantLimit,
+                    archivalLimitReached: searchResult.archival.length > budgetApplication.archivalLimit,
+                    supplementalExpansionUsed: supplementalCandidates.length > 0,
+                    candidateExpansionPressure: supplementalCandidates.length > budgetApplication.supplementalLimit,
+                    reviewLimitReached: reviewMemories.length > budgetApplication.reviewLimit,
+                    followUpLimitReached: followUpCandidates.length > budgetApplication.followUpLimit,
+                },
                 trimming: {
                     relevantTrimmed: Math.max(0, relevantSnapshot.candidateCount - relevantSnapshot.selectedCount),
                     archivalTrimmed: Math.max(0, archivalSnapshot.candidateCount - archivalSnapshot.selectedCount),
@@ -1435,6 +1970,19 @@ export class MemoryRetrievalOrchestrator {
                         ...supplementalMemories,
                         ...archivalMemories,
                     ]),
+                },
+            },
+            retrievalControl: {
+                rolloutState: spreadingActivation.snapshot.rolloutState,
+                graphDepth: recipe.graphDepth,
+                dualProcessMode: dualProcess.selectedMode,
+                primerTriggered: primer.triggered,
+                behaviorDiscoveryState: behaviorDiscovery.state,
+                behaviorDiscoveryLiveEffect: behaviorDiscovery.liveEffectAllowed,
+                candidatePressure: {
+                    relevant: Math.max(0, relevantSnapshot.candidateCount - relevantSnapshot.selectedCount),
+                    supplemental: Math.max(0, supplementalSnapshot.candidateCount - supplementalSnapshot.selectedCount),
+                    archival: Math.max(0, archivalSnapshot.candidateCount - archivalSnapshot.selectedCount),
                 },
             },
             counts: {

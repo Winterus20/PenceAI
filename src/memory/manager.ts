@@ -27,6 +27,7 @@ import {
     escapeFtsQuery,
     inferMemoryType,
     CONVERSATION_TIMEOUT_MS, DEFAULT_USER_ID, DEFAULT_USER_NAME,
+    type BehaviorDiscoveryTrace,
     type ConversationRow, type MessageRow, type MemoryRow,
     type MessageSearchRow, type RecentConversationRow,
     type GraphAwareSearchResult,
@@ -94,6 +95,7 @@ export class MemoryManager {
             getRecentMessages: (hours, limit, excludeConversationId) => this.getRecentMessages(hours, limit, excludeConversationId),
             getUserMemories: (limit) => this.getUserMemories(limit),
             getMemoryNeighborsBatch: (memoryIds, limitPerNode) => this.graph.getMemoryNeighborsBatch(memoryIds, limitPerNode),
+            getBehaviorDiscoveryConfig: () => ({ retrieval: { state: 'shadow' } }),
             prioritizeConversationMemories: (memories, recentMessages, activeConversationId, limit) => this.prioritizeConversationMemories(memories, recentMessages, activeConversationId, limit),
             recordDebug: (payload) => this.recordRetrievalDebug('promptContextBundle', payload),
         });
@@ -439,12 +441,38 @@ export class MemoryManager {
         mergeFn?: (oldContent: string, newContent: string) => Promise<string>,
         metadata?: ReturnType<typeof deriveMemoryWriteMetadata>,
     ): Promise<{ id: number; isUpdate: boolean }> {
+        const rolloutState = metadata?.rolloutState ?? 'commit';
+        const writeTraceId = metadata?.writeTraceId ?? crypto.randomUUID();
+        const writeBehaviorDiscoveryTrace: BehaviorDiscoveryTrace = {
+            enabled: rolloutState !== 'disabled',
+            domain: 'write',
+            state: rolloutState === 'disabled' ? 'disabled' : rolloutState === 'shadow' ? 'shadow' : 'observe',
+            liveEffectAllowed: false,
+            observedSignals: [
+                `write_rollout:${rolloutState}`,
+                `memory_type:${memoryType}`,
+                `category:${category}`,
+            ],
+            candidates: [],
+            shadowComparison: null,
+            guardrails: [
+                'behavior_discovery:write_telemetry_only',
+                'behavior_discovery:no_destructive_live_effect',
+                'behavior_discovery:default_write_path_preserved',
+            ],
+        };
         const writeContextBase = {
             category,
             memoryType,
             confidence: metadata?.confidence ?? null,
             source: metadata?.source ?? null,
+            conversationId: metadata?.conversationId ?? null,
+            messageId: metadata?.messageId ?? null,
+            reviewProfile: metadata?.reviewProfile ?? null,
             reconsolidationHint: 'write_merge' as const,
+            rolloutState,
+            writeTraceId,
+            behaviorDiscovery: writeBehaviorDiscoveryTrace,
         };
 
         // 1. Semantik dedup: embedding benzerliği ile kontrol et
@@ -498,71 +526,89 @@ export class MemoryManager {
                         similarity: bestMatch.similarity,
                         mergeDecision,
                         reconsolidation,
+                        proposal: {
+                            mode: reconsolidation.proposalMode,
+                            candidateContentPreview: reconsolidation.candidateContent?.slice(0, 160) ?? null,
+                            commitEligible: reconsolidation.commitEligible,
+                            shadowEligible: reconsolidation.shadowEligible,
+                        },
                         ...writeContextBase,
                     });
 
-                    if (mergeDecision.shouldMerge && reconsolidation.action === 'update') {
-                        const betterContent = reconsolidation.candidateContent
-                            ?? await this.resolveMergedContent(bestMatch.content, content, mergeFn, mergeDecision.preferredContent, '[Memory] Semantic dedup merge');
+                    if (mergeDecision.shouldMerge) {
+                        if (reconsolidation.action === 'update' || reconsolidation.action === 'append') {
+                            const betterContent = reconsolidation.candidateContent
+                                ?? await this.resolveMergedContent(bestMatch.content, content, mergeFn, mergeDecision.preferredContent, '[Memory] Semantic dedup merge');
 
-                        this.db.prepare(`
-                        UPDATE memories
-                        SET content = ?,
-                            importance = MAX(importance, ?),
-                            max_importance = MAX(COALESCE(max_importance, importance), ?),
-                            access_count = access_count + 1,
-                            last_accessed = CURRENT_TIMESTAMP,
-                            updated_at = CURRENT_TIMESTAMP,
-                            confidence = MAX(COALESCE(confidence, 0.0), ?),
-                            provenance_source = COALESCE(provenance_source, ?),
-                            provenance_conversation_id = COALESCE(provenance_conversation_id, ?),
-                            provenance_message_id = COALESCE(provenance_message_id, ?),
-                            review_profile = COALESCE(review_profile, ?),
-                            memory_type = COALESCE(memory_type, ?)
-                        WHERE id = ?
-                        `).run(
-                            betterContent,
-                            importance,
-                            importance,
-                            metadata?.confidence ?? 0.7,
-                            metadata?.source ?? null,
-                            metadata?.conversationId ?? null,
-                            metadata?.messageId ?? null,
-                            metadata?.reviewProfile ?? 'standard',
-                            memoryType,
-                            bestMatch.id,
-                        );
+                            this.db.prepare(`
+                            UPDATE memories
+                            SET content = ?,
+                                importance = MAX(importance, ?),
+                                max_importance = MAX(COALESCE(max_importance, importance), ?),
+                                access_count = access_count + 1,
+                                last_accessed = CURRENT_TIMESTAMP,
+                                updated_at = CURRENT_TIMESTAMP,
+                                confidence = MAX(COALESCE(confidence, 0.0), ?),
+                                provenance_source = COALESCE(provenance_source, ?),
+                                provenance_conversation_id = COALESCE(provenance_conversation_id, ?),
+                                provenance_message_id = COALESCE(provenance_message_id, ?),
+                                review_profile = COALESCE(review_profile, ?),
+                                memory_type = COALESCE(memory_type, ?)
+                            WHERE id = ?
+                            `).run(
+                                betterContent,
+                                importance,
+                                importance,
+                                metadata?.confidence ?? 0.7,
+                                metadata?.source ?? null,
+                                metadata?.conversationId ?? null,
+                                metadata?.messageId ?? null,
+                                metadata?.reviewProfile ?? 'standard',
+                                memoryType,
+                                bestMatch.id,
+                            );
 
-                        await this.computeAndStoreEmbedding(bestMatch.id, betterContent).catch(err => {
-                            logger.warn({ err: err }, `[Memory] Semantik dedup embedding güncelleme başarısız (id=${bestMatch.id}):`);
-                        });
+                            await this.computeAndStoreEmbedding(bestMatch.id, betterContent).catch(err => {
+                                logger.warn({ err: err }, `[Memory] Semantik dedup embedding güncelleme başarısız (id=${bestMatch.id}):`);
+                            });
 
-                        logger.info(`[Memory] 🔗 Semantik dedup + reconsolidation: "${content.substring(0, 40)}..." → mevcut #${bestMatch.id} (sim=${bestMatch.similarity.toFixed(2)}, reason=${mergeDecision.reason}, action=${reconsolidation.action})`);
-                        this.graph.autoCreateProximityRelations(bestMatch.id);
-                        return { id: bestMatch.id, isUpdate: true };
-                    }
-
-                    if (mergeDecision.shouldMerge && reconsolidation.reason === 'exact_match_no_rewrite') {
-                        this.db.prepare(`
-                        UPDATE memories
-                        SET importance = MAX(importance, ?),
-                            max_importance = MAX(COALESCE(max_importance, importance), ?),
-                            access_count = access_count + 1,
-                            last_accessed = CURRENT_TIMESTAMP,
-                            updated_at = CURRENT_TIMESTAMP,
-                            confidence = MAX(COALESCE(confidence, 0.0), ?),
-                            review_profile = COALESCE(review_profile, ?),
-                            memory_type = COALESCE(memory_type, ?)
-                        WHERE id = ?
-                        `).run(
-                            importance,
-                            importance,
-                            metadata?.confidence ?? 0.7,
-                            metadata?.reviewProfile ?? 'standard',
-                            memoryType,
-                            bestMatch.id,
-                        );
-                        return { id: bestMatch.id, isUpdate: false };
+                            logger.info(`[Memory] 🔗 Semantik dedup + reconsolidation: "${content.substring(0, 40)}..." → mevcut #${bestMatch.id} (sim=${bestMatch.similarity.toFixed(2)}, reason=${mergeDecision.reason}, action=${reconsolidation.action})`);
+                            this.graph.autoCreateProximityRelations(bestMatch.id);
+                            return { id: bestMatch.id, isUpdate: true };
+                        } else {
+                            this.db.prepare(`
+                            UPDATE memories
+                            SET importance = MAX(importance, ?),
+                                max_importance = MAX(COALESCE(max_importance, importance), ?),
+                                access_count = access_count + 1,
+                                last_accessed = CURRENT_TIMESTAMP,
+                                updated_at = CURRENT_TIMESTAMP,
+                                confidence = MAX(COALESCE(confidence, 0.0), ?),
+                                review_profile = COALESCE(review_profile, ?),
+                                memory_type = COALESCE(memory_type, ?)
+                            WHERE id = ?
+                            `).run(
+                                importance,
+                                importance,
+                                metadata?.confidence ?? 0.7,
+                                metadata?.reviewProfile ?? 'standard',
+                                memoryType,
+                                bestMatch.id,
+                            );
+                            this.recordMemoryWriteDebug({
+                                phase: 'semantic_dedup_skip_update',
+                                candidateId: bestMatch.id,
+                                similarity: bestMatch.similarity,
+                                mergeDecision,
+                                reconsolidation,
+                                committed: false,
+                                outcome: 'touch_existing_memory',
+                                storedMemoryId: bestMatch.id,
+                                ...writeContextBase,
+                            });
+                            logger.info(`[Memory] Semantik dedup atlandı ama metadata güncellendi: "${content.substring(0, 40)}..." → mevcut #${bestMatch.id} (reason=${reconsolidation.reason})`);
+                            return { id: bestMatch.id, isUpdate: false };
+                        }
                     }
 
                     logger.debug({ memoryId: bestMatch.id, reason: mergeDecision.reason, similarity: bestMatch.similarity, reconsolidation }, '[Memory] Semantik dedup merge atlandı');
@@ -626,73 +672,92 @@ export class MemoryManager {
                             containmentRatio,
                             mergeDecision,
                             reconsolidation,
+                            proposal: {
+                                mode: reconsolidation.proposalMode,
+                                candidateContentPreview: reconsolidation.candidateContent?.slice(0, 160) ?? null,
+                                commitEligible: reconsolidation.commitEligible,
+                                shadowEligible: reconsolidation.shadowEligible,
+                            },
                             ...writeContextBase,
                         });
 
-                        if (mergeDecision.shouldMerge && reconsolidation.action === 'update') {
-                            const betterContent = reconsolidation.candidateContent
-                                ?? await this.resolveMergedContent(existing.content, content, mergeFn, mergeDecision.preferredContent, '[Memory] FTS dedup merge');
+                        if (mergeDecision.shouldMerge) {
+                            if (reconsolidation.action === 'update' || reconsolidation.action === 'append') {
+                                const betterContent = reconsolidation.candidateContent
+                                    ?? await this.resolveMergedContent(existing.content, content, mergeFn, mergeDecision.preferredContent, '[Memory] FTS dedup merge');
 
-                            this.db.prepare(`
-                            UPDATE memories
-                            SET content = ?,
-                                importance = MAX(importance, ?),
-                                max_importance = MAX(COALESCE(max_importance, importance), ?),
-                                access_count = access_count + 1,
-                                last_accessed = CURRENT_TIMESTAMP,
-                                updated_at = CURRENT_TIMESTAMP,
-                                confidence = MAX(COALESCE(confidence, 0.0), ?),
-                                provenance_source = COALESCE(provenance_source, ?),
-                                provenance_conversation_id = COALESCE(provenance_conversation_id, ?),
-                                provenance_message_id = COALESCE(provenance_message_id, ?),
-                                review_profile = COALESCE(review_profile, ?),
-                                memory_type = COALESCE(memory_type, ?)
-                            WHERE id = ?
-                            `).run(
-                                betterContent,
-                                importance,
-                                importance,
-                                metadata?.confidence ?? 0.7,
-                                metadata?.source ?? null,
-                                metadata?.conversationId ?? null,
-                                metadata?.messageId ?? null,
-                                metadata?.reviewProfile ?? 'standard',
-                                memoryType,
-                                existing.id,
-                            );
+                                this.db.prepare(`
+                                UPDATE memories
+                                SET content = ?,
+                                    importance = MAX(importance, ?),
+                                    max_importance = MAX(COALESCE(max_importance, importance), ?),
+                                    access_count = access_count + 1,
+                                    last_accessed = CURRENT_TIMESTAMP,
+                                    updated_at = CURRENT_TIMESTAMP,
+                                    confidence = MAX(COALESCE(confidence, 0.0), ?),
+                                    provenance_source = COALESCE(provenance_source, ?),
+                                    provenance_conversation_id = COALESCE(provenance_conversation_id, ?),
+                                    provenance_message_id = COALESCE(provenance_message_id, ?),
+                                    review_profile = COALESCE(review_profile, ?),
+                                    memory_type = COALESCE(memory_type, ?)
+                                WHERE id = ?
+                                `).run(
+                                    betterContent,
+                                    importance,
+                                    importance,
+                                    metadata?.confidence ?? 0.7,
+                                    metadata?.source ?? null,
+                                    metadata?.conversationId ?? null,
+                                    metadata?.messageId ?? null,
+                                    metadata?.reviewProfile ?? 'standard',
+                                    memoryType,
+                                    existing.id,
+                                );
 
-                            try {
-                                await this.computeAndStoreEmbedding(existing.id, betterContent);
-                                this.graph.autoCreateProximityRelations(existing.id);
-                            } catch (err) {
-                                logger.warn({ err: err }, `[Memory] FTS dedup embedding güncelleme başarısız (id=${existing.id}):`);
+                                try {
+                                    await this.computeAndStoreEmbedding(existing.id, betterContent);
+                                    this.graph.autoCreateProximityRelations(existing.id);
+                                } catch (err) {
+                                    logger.warn({ err: err }, `[Memory] FTS dedup embedding güncelleme başarısız (id=${existing.id}):`);
+                                }
+
+                                logger.info(`[Memory] 🔗 FTS dedup + reconsolidation: "${content.substring(0, 40)}..." → mevcut #${existing.id} (jaccard=${jaccardSim.toFixed(2)}, reason=${mergeDecision.reason}, action=${reconsolidation.action})`);
+                                return { id: existing.id, isUpdate: true };
+                            } else {
+                                this.db.prepare(`
+                                UPDATE memories
+                                SET importance = MAX(importance, ?),
+                                    max_importance = MAX(COALESCE(max_importance, importance), ?),
+                                    access_count = access_count + 1,
+                                    last_accessed = CURRENT_TIMESTAMP,
+                                    updated_at = CURRENT_TIMESTAMP,
+                                    confidence = MAX(COALESCE(confidence, 0.0), ?),
+                                    review_profile = COALESCE(review_profile, ?),
+                                    memory_type = COALESCE(memory_type, ?)
+                                WHERE id = ?
+                                `).run(
+                                    importance,
+                                    importance,
+                                    metadata?.confidence ?? 0.7,
+                                    metadata?.reviewProfile ?? 'standard',
+                                    memoryType,
+                                    existing.id,
+                                );
+                                this.recordMemoryWriteDebug({
+                                    phase: 'fts_dedup_skip_update',
+                                    candidateId: existing.id,
+                                    jaccardSimilarity: jaccardSim,
+                                    containmentRatio,
+                                    mergeDecision,
+                                    reconsolidation,
+                                    committed: false,
+                                    outcome: 'touch_existing_memory',
+                                    storedMemoryId: existing.id,
+                                    ...writeContextBase,
+                                });
+                                logger.info(`[Memory] FTS dedup atlandı ama metadata güncellendi: "${content.substring(0, 40)}..." → mevcut #${existing.id} (reason=${reconsolidation.reason})`);
+                                return { id: existing.id, isUpdate: false };
                             }
-
-                            logger.debug({ memoryId: existing.id, reason: mergeDecision.reason, jaccardSim, containmentRatio, reconsolidation }, '[Memory] FTS dedup merge uygulandı');
-                            return { id: existing.id, isUpdate: true };
-                        }
-
-                        if (mergeDecision.shouldMerge && reconsolidation.reason === 'exact_match_no_rewrite') {
-                            this.db.prepare(`
-                            UPDATE memories
-                            SET importance = MAX(importance, ?),
-                                max_importance = MAX(COALESCE(max_importance, importance), ?),
-                                access_count = access_count + 1,
-                                last_accessed = CURRENT_TIMESTAMP,
-                                updated_at = CURRENT_TIMESTAMP,
-                                confidence = MAX(COALESCE(confidence, 0.0), ?),
-                                review_profile = COALESCE(review_profile, ?),
-                                memory_type = COALESCE(memory_type, ?)
-                            WHERE id = ?
-                            `).run(
-                                importance,
-                                importance,
-                                metadata?.confidence ?? 0.7,
-                                metadata?.reviewProfile ?? 'standard',
-                                memoryType,
-                                existing.id,
-                            );
-                            return { id: existing.id, isUpdate: false };
                         }
                     }
                     logger.info(`[Memory] FTS eşleşmesi atlandı (jaccard=${jaccardSim.toFixed(2)}, contained=${isContained}): "${content.substring(0, 40)}..."`);
@@ -713,7 +778,31 @@ export class MemoryManager {
                 safetyReasons: ['append_first_fallback'],
                 preferredContent: 'incoming',
                 candidateContent: content,
+                proposalMode: 'proposal_append',
+                commitEligible: false,
+                shadowEligible: true,
+                guardrails: {
+                    confidenceFloor: 0.78,
+                    strictContainmentFloor: 0.92,
+                    structuredVarianceSimilarityFloor: 0.95,
+                    highSimilaritySemanticFloor: 0.93,
+                    highSimilarityJaccardFloor: 0.85,
+                    appendSemanticFloor: 0.86,
+                    appendJaccardFloor: 0.72,
+                    observedConfidence: metadata?.confidence ?? null,
+                    semanticSimilarity: 0,
+                    jaccardSimilarity: 0,
+                    containmentRatio: 0,
+                    structuredVariance: false,
+                    incomingAddsNewInformation: true,
+                },
             } satisfies ReconsolidationDecision,
+            proposal: {
+                mode: 'proposal_append',
+                candidateContentPreview: content.slice(0, 160),
+                commitEligible: false,
+                shadowEligible: true,
+            },
             ...writeContextBase,
         });
 
@@ -756,6 +845,15 @@ export class MemoryManager {
         } catch (err) {
             logger.warn({ err: err }, `[Memory] Embedding hesaplama başarısız (id=${newId}):`);
         }
+
+        this.recordMemoryWriteDebug({
+            phase: 'insert_new_memory_committed',
+            mergeCandidateFound: false,
+            committed: true,
+            outcome: 'insert_new_memory',
+            storedMemoryId: newId,
+            ...writeContextBase,
+        });
 
         return { id: newId, isUpdate: false };
     }

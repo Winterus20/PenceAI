@@ -9,11 +9,12 @@ import type { FeedbackManager } from '../autonomous/urgeFilter.js';
 import type { TaskQueue } from '../autonomous/queue.js';
 import { TaskPriority } from '../autonomous/queue.js';
 import { formatRecentContextMessages, pruneConversationHistory } from './runtimeContext.js';
+import { getConfig } from '../gateway/config.js';
 
-const MAX_TOOL_ITERATIONS = 5;
+const MAX_TOOL_ITERATIONS_DEFAULT = 5;
 
 export interface AgentEvent {
-    type: 'thinking' | 'tool_start' | 'tool_end' | 'iteration' | 'token' | 'clear_stream';
+    type: 'thinking' | 'tool_start' | 'tool_end' | 'iteration' | 'token' | 'clear_stream' | 'replace_stream';
     data: Record<string, unknown>;
 }
 
@@ -30,6 +31,7 @@ export class AgentRuntime {
     private memory: MemoryManager;
     private tools: Map<string, ToolExecutor> = new Map();
     private toolDefinitions = getBuiltinToolDefinitions();
+    private maxToolIterations: number;
 
     // Light extraction throttle — her mesajda değil, her N mesajda bir LLM çağrısı ya
     private _extractionCounter: number = 0;
@@ -43,6 +45,8 @@ export class AgentRuntime {
     constructor(llm: LLMProvider, memory: MemoryManager) {
         this.llm = llm;
         this.memory = memory;
+        this.maxToolIterations = getConfig().autonomousStepLimit || MAX_TOOL_ITERATIONS_DEFAULT;
+        logger.info(`[Agent] Max tool iterations set to ${this.maxToolIterations}`);
     }
 
     private beginConversationTurn(message: UnifiedMessage, userMessage: ConversationMessage) {
@@ -198,7 +202,7 @@ export class AgentRuntime {
         // --- Sliding Window Context Budaması (Atomik Çift-Korumalı) ---
         // assistant(toolCalls) + tool(toolResults) çiftleri bölünemez birim olarak ele alınır.
         // Böylece MiniMax/OpenAI'da "tool result not found" veya "does not follow" hataları önlenir.
-        const MAX_HISTORY_TOKENS = 6000;
+        const MAX_HISTORY_TOKENS = 128000;
         const prunedHistory = pruneConversationHistory(
             history,
             this.estimateMessageTokens.bind(this),
@@ -267,6 +271,37 @@ export class AgentRuntime {
             followUpCandidates.map(m => m.content)
         );
 
+        // Strict mode modeller (gemma, llama, mistral) native tool calling
+        // desteklemez. Bu modellere sistem prompt'unda açık format talimatı ver.
+        const currentModel = getConfig().defaultLLMModel.toLowerCase();
+        const isStrictModel = currentModel.includes('gemma') || currentModel.includes('llama') || currentModel.includes('mistral');
+
+        let finalSystemPrompt = systemPrompt;
+        if (isStrictModel) {
+            finalSystemPrompt += `
+
+## KRİTİK: Araç Çağrısı Formatı
+Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLUDUR — başka formatta araç çağıra MAZSIN.
+
+**Format:** \`araçAdı(parametre="değer")\`
+
+**Örnekler:**
+- Dosya okumak: \`readFile(path="C:\\Users\\Yigit\\dosya.txt")\`
+- Dizin listelemek: \`listDirectory(path="C:\\Users\\Yigit\\Documents")\`
+- Komut çalıştırmak: \`executeShell(command="echo %USERNAME%")\`
+- Dosyaya yazmak: \`writeFile(path="C:\\Users\\Yigit\\test.txt", content="Merhaba")\`
+- Bellekte aramak: \`searchMemory(query="kullanıcı tercihleri")\`
+- Konuşma aramak: \`searchConversation(query="proje durumu")\`
+- Bellek silmek: \`deleteMemory(id="mem_123")\`
+
+**KURALLAR:**
+1. Araç çağrısını MUTLAKA yukarıdaki formatta yaz — açıklama veya giriş cümlesinden SONRA yeni satırda tek başına.
+2. Araç çağrısı dışında başka hiçbir şey yazma — sadece araç çağrısı satırını yaz.
+3. Araç çağrısını asla kod bloğu (\`\`\`) içine SARMA.
+4. Araç sonucu sana "[Araç Sonucu - ...]:" formatında dönecektir — bu sonucu kullanarak kullanıcıya yanıt ver.
+5. Bir aracı gerçekten kullanmak istiyorsan, BAHSETME — doğrudan çağır.`;
+        }
+
         // LLM mesajlarını hazırla
         const llmMessages: LLMMessage[] = history.map(h => ({
             role: h.role,
@@ -292,17 +327,18 @@ export class AgentRuntime {
         }
 
         // ReAct döngüsü
-        let response = '';
+        let uiContent = '';
+        let lastDbContent = '';
         let iterations = 0;
 
-        while (iterations < MAX_TOOL_ITERATIONS) {
+        while (iterations < this.maxToolIterations) {
             iterations++;
 
             logger.info(`[Agent] 🧠 LLM çağrılıyor (iterasyon ${iterations})...`);
             onEvent?.({ type: 'iteration', data: { iteration: iterations } });
 
             const chatOptions = {
-                systemPrompt,
+                systemPrompt: finalSystemPrompt,
                 tools: this.toolDefinitions,
                 temperature: 0.7,
                 maxTokens: 4096,
@@ -313,8 +349,7 @@ export class AgentRuntime {
             if (this.llm.chatStream) {
                 llmResponse = await this.llm.chatStream(llmMessages, chatOptions, (token) => {
                     if (token === TOOL_CALL_CLEAR_SIGNAL) {
-                        // Provider tool call tespit etti — önceden stream edilmiş metni anında temizle
-                        onEvent?.({ type: 'clear_stream', data: {} });
+                        // clear_stream engellendi; ara yazılar artık silinmeyecek.
                     } else {
                         onEvent?.({ type: 'token', data: { content: token } });
                     }
@@ -332,34 +367,23 @@ export class AgentRuntime {
             // Gerçek düşünme içeriği (reasoning_split: true ile gelir, thinking: true ise)
             const thinkingContent = llmResponse.thinkingContent;
 
-            // Fallback: Model tool_calls array yerine content içerisine direkt JSON döndürdüyse
+            // Fallback: Model tool_calls array yerine content içerisine direkt JSON veya fonksiyon formatı döndürdüyse
             if ((!llmResponse.toolCalls || llmResponse.toolCalls.length === 0) && cleanContent) {
-                try {
-                    // Sadece JSON objesini yakalamaya çalış (bazen markdown veya ekstra metinle sarmalanmış olabilir)
-                    const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
-                    if (jsonMatch) {
-                        const parsed = JSON.parse(jsonMatch[0]);
-                        // Eğer JSON bir array değilse ve type="function", veya name varsa bunu bir ToolCall olarak ele al
-                        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                            if (parsed.name || (parsed.type === 'function' && parsed.function?.name)) {
-                                const toolName = parsed.name || parsed.function.name;
-                                const toolArgs = parsed.arguments || parsed.parameters || parsed.function?.arguments || parsed;
+                const fallbackCalls = this.extractFallbackToolCalls(cleanContent);
+                if (fallbackCalls.length > 0) {
+                    llmResponse.toolCalls = fallbackCalls;
+                    // Fallback aracı bulunduğu için araç formatı metinden silinir (ui kirliliği için)
+                    let strippedContent = cleanContent;
+                    fallbackCalls.forEach(tc => {
+                        const regex = new RegExp(`\\b${tc.name}\\s*\\([\\s\\S]*?\\)`, 'g');
+                        strippedContent = strippedContent.replace(regex, '').trim();
+                    });
 
-                                llmResponse.toolCalls = [{
-                                    id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                                    name: toolName,
-                                    arguments: typeof toolArgs === 'string' ? JSON.parse(toolArgs) : toolArgs
-                                }];
-                                logger.warn(`[Agent] ⚠️ Model tool'u string content olarak döndürdü. Fallback parser ile yakalandı: ${toolName}`);
-                                // tool_call haline geldiği için content'i temizle, böylece kullanıcıya JSON görünmez
-                                llmResponse.content = '';
-                                // Streaming sırasında zaten gönderilmiş olan JSON tokenlarını temizle
-                                onEvent?.({ type: 'clear_stream', data: {} });
-                            }
-                        }
-                    }
-                } catch {
-                    // Parse edilemiyorsa sadece düz metindir, normal devam et
+                    llmResponse.content = strippedContent;
+                    logger.warn(`[Agent] ⚠️ Fallback parser: ${fallbackCalls.length} araç çağrısı yakalandı — ${fallbackCalls.map(tc => tc.name).join(', ')}`);
+                    
+                    uiContent = this.joinUIContent(uiContent, strippedContent);
+                    onEvent?.({ type: 'replace_stream', data: { content: uiContent } });
                 }
             }
 
@@ -377,7 +401,8 @@ export class AgentRuntime {
                     });
                     // Tüm araç çağrıları filtrelendiyse normal yanıt olarak devam et
                     if (llmResponse.toolCalls.length === 0) {
-                        response = llmResponse.content || cleanContent || '';
+                        lastDbContent = llmResponse.content || cleanContent || '';
+                        uiContent = this.joinUIContent(uiContent, lastDbContent);
                         if (thinkingContent) {
                             onEvent?.({ type: 'thinking', data: { content: thinkingContent } });
                         }
@@ -414,6 +439,9 @@ export class AgentRuntime {
                 };
                 llmMessages.push(toolMessage);
 
+                // UI içeriğini güncelle
+                uiContent = this.joinUIContent(uiContent, llmResponse.content || '');
+
                 // Araç sonuçlarını veritabanına kaydet (temiz içerikle, düşünme olmadan)
                 this.addConversationMessage(conversationId, {
                     role: 'assistant',
@@ -432,7 +460,8 @@ export class AgentRuntime {
             }
 
             // Araç çağrısı yok — son yanıt
-            response = llmResponse.content || cleanContent;
+            lastDbContent = llmResponse.content || cleanContent;
+            uiContent = this.joinUIContent(uiContent, lastDbContent);
             // Son yanıt için de düşünme içeriğini gönder (varsa)
             if (thinkingContent) {
                 onEvent?.({ type: 'thinking', data: { content: thinkingContent } });
@@ -440,21 +469,22 @@ export class AgentRuntime {
             break;
         }
 
-        if (!response) {
-            response = '⚠️ Yanıt oluşturulamadı.';
+        if (!uiContent) {
+            uiContent = '⚠️ Yanıt oluşturulamadı.';
         }
 
-        if (iterations >= MAX_TOOL_ITERATIONS) {
-            response += '\n\n⚠️ Maksimum araç iterasyon sayısına ulaşıldı.';
+        if (iterations >= this.maxToolIterations) {
+            uiContent += '\n\n⚠️ Maksimum araç iterasyon sayısına ulaşıldı.';
         }
 
-        // Asistan yanıtını kaydet
+        // Asistan yanıtını kaydet (veritabanında sadece son iterasyon)
         this.addConversationMessage(conversationId, {
             role: 'assistant',
-            content: response,
+            content: lastDbContent || (iterations >= this.maxToolIterations ? '⚠️ Maksimum araç iterasyon sayısına ulaşıldı.' : '⚠️ Yanıt oluşturulamadı.'),
             timestamp: new Date(),
         });
 
+        let response = uiContent;
         logger.info(`[Agent] ✅ Yanıt oluşturuldu (${response.length} karakter, ${iterations} iterasyon)`);
 
         // Geri Bildirim Döngüsü — Yanıt süresini kaydet
@@ -730,7 +760,7 @@ export class AgentRuntime {
             }
 
             const extractionPrompt = buildDeepExtractionPrompt(transcript.userName);
-            const existingMemories = this.memory.getUserMemories(30);
+            const existingMemories = this.memory.getUserMemories(50);
             const existingStr = existingMemories.length > 0
                 ? `\n\n## Bellekte Zaten Kayıtlı Bilgiler (bunları tekrar çıkarma)\n${existingMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}`
                 : '';
@@ -835,6 +865,189 @@ export class AgentRuntime {
     }
 
     /**
+     * Fallback araç çağrısı çıkarıcı — LLM native tool calling yerine
+     * metin olarak araç çağrısı döndürdüğünde devreye girer.
+     * 
+     * Desteklenen formatlar:
+     * 1) tool_code blokları (```tool_code ... ``` veya tool_code [...])
+     * 2) JSON objeleri ({ "name": "readFile", "arguments": {...} })
+     * 3) Fonksiyon çağrısı formatı (readFile(path="C:\..."))
+     */
+    private extractFallbackToolCalls(content: string): ToolCall[] {
+        const results: ToolCall[] = [];
+        const knownToolNames = new Set(this.toolDefinitions.map(t => t.name));
+
+        // ——— Senaryo 1: tool_code blokları ———
+        // ```tool_code\nreadFile(path="...")``` veya tool_code [readFile(...)]
+        const toolCodeBlockRegex = /```tool_code\s*([\s\S]*?)```/gi;
+        for (const m of content.matchAll(toolCodeBlockRegex)) {
+            const innerCalls = this.parseFunctionCallsFromText(m[1], knownToolNames);
+            results.push(...innerCalls);
+        }
+        // tool_code readFile(...) veya tool_code [readFile(...)]
+        const toolCodeInlineRegex = /tool_code\s*\[?\s*([\s\S]*?)\s*\]?\s*(?:\n|$)/gi;
+        if (results.length === 0) {
+            for (const m of content.matchAll(toolCodeInlineRegex)) {
+                const innerCalls = this.parseFunctionCallsFromText(m[1], knownToolNames);
+                results.push(...innerCalls);
+            }
+        }
+
+        if (results.length > 0) return results;
+
+        // ——— Senaryo 2: JSON objeleri ———
+        // Tüm {...} bloklarını tara (greedy olmayan, iç içe olmayan)
+        const jsonBlockRegex = /\{[^{}]*\}/g;
+        for (const m of content.matchAll(jsonBlockRegex)) {
+            try {
+                const parsed = JSON.parse(m[0]);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    const toolName = parsed.name || (parsed.type === 'function' && parsed.function?.name);
+                    if (toolName && knownToolNames.has(toolName)) {
+                        const toolArgs = parsed.arguments || parsed.parameters || parsed.function?.arguments || {};
+                        results.push({
+                            id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                            name: toolName,
+                            arguments: typeof toolArgs === 'string' ? this.safeJsonParse(toolArgs) : toolArgs,
+                        });
+                    }
+                }
+            } catch {
+                // JSON parse hatası — devam et
+            }
+        }
+
+        // İç içe JSON'lar için daha greedy regex
+        if (results.length === 0) {
+            const greedyJsonRegex = /\{[\s\S]*?\}/g;
+            for (const m of content.matchAll(greedyJsonRegex)) {
+                try {
+                    // Windows backslash'lerini escape et: C:\Users → C:\\Users
+                    const escaped = m[0].replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+                    const parsed = JSON.parse(escaped);
+                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                        const toolName = parsed.name || (parsed.type === 'function' && parsed.function?.name);
+                        if (toolName && knownToolNames.has(toolName)) {
+                            const toolArgs = parsed.arguments || parsed.parameters || parsed.function?.arguments || {};
+                            results.push({
+                                id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                                name: toolName,
+                                arguments: typeof toolArgs === 'string' ? this.safeJsonParse(toolArgs) : toolArgs,
+                            });
+                        }
+                    }
+                } catch {
+                    // devam et
+                }
+            }
+        }
+
+        if (results.length > 0) return results;
+
+        // ——— Senaryo 3: Fonksiyon çağrısı formatı ———
+        return this.parseFunctionCallsFromText(content, knownToolNames);
+    }
+
+    /**
+     * Metin içinden fonksiyon çağrısı formatındaki araç çağrılarını çıkarır.
+     * Örn: readFile(path="C:\Users\Yigit\file.txt")
+     * Parantez dengeleme ile iç içe parantezleri doğru ele alır.
+     */
+    private parseFunctionCallsFromText(text: string, knownToolNames: Set<string>): ToolCall[] {
+        const results: ToolCall[] = [];
+        const toolNamePattern = Array.from(knownToolNames).join('|');
+        // Araç adını ve açılan parantezi yakala; kapanışı manuel bul
+        const callStartRegex = new RegExp(`(${toolNamePattern})\\s*\\(`, 'g');
+        
+        let startMatch: RegExpExecArray | null;
+        while ((startMatch = callStartRegex.exec(text)) !== null) {
+            const toolName = startMatch[1];
+            const argsStartIdx = startMatch.index + startMatch[0].length;
+            // Parantez dengeleme ile argüman sonunu bul
+            let depth = 1;
+            let idx = argsStartIdx;
+            while (idx < text.length && depth > 0) {
+                if (text[idx] === '(') depth++;
+                else if (text[idx] === ')') depth--;
+                idx++;
+            }
+            if (depth !== 0) continue; // Dengesiz parantez — atla
+            
+            const argsString = text.substring(argsStartIdx, idx - 1).trim();
+            const parsedArgs = this.parseFallbackArgs(toolName, argsString);
+            results.push({
+                id: `call_${Date.now()}_func_${Math.random().toString(36).substring(2, 6)}`,
+                name: toolName,
+                arguments: parsedArgs,
+            });
+        }
+        return results;
+    }
+
+    /**
+     * Fallback argüman parser — çeşitli formatları destekler:
+     * - JSON: {"path": "..."}
+     * - key=value: path="C:\...", query="test"
+     * - Raw string: doğrudan argüman olarak
+     */
+    private parseFallbackArgs(toolName: string, argsString: string): Record<string, unknown> {
+        if (!argsString.trim()) return {};
+
+        // 1) JSON formatı
+        if (argsString.trim().startsWith('{')) {
+            try {
+                return JSON.parse(argsString);
+            } catch {
+                try {
+                    // Windows backslash escape: C:\Users → C:\\Users
+                    const escaped = argsString.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+                    return JSON.parse(escaped);
+                } catch { /* devam */ }
+            }
+        }
+
+        // 2) key="value" veya key='value' formatı — regex ile ayıkla
+        const kvPairs: Record<string, string> = {};
+        // Tırnaklı değerleri yakala: key="value with spaces" veya key='value'
+        const kvRegex = /([a-zA-Z0-9_]+)\s*=\s*(?:"([^"]*?)"|'([^']*?)')/g;
+        let kvMatch: RegExpExecArray | null;
+        while ((kvMatch = kvRegex.exec(argsString)) !== null) {
+            kvPairs[kvMatch[1]] = kvMatch[2] ?? kvMatch[3];
+        }
+        if (Object.keys(kvPairs).length > 0) return kvPairs;
+
+        // 3) key=value (tırnaksız) — tek bir değer
+        const simpleKvMatch = argsString.match(/^([a-zA-Z0-9_]+)\s*=\s*(.+)$/s);
+        if (simpleKvMatch) {
+            return { [simpleKvMatch[1]]: simpleKvMatch[2].replace(/^["']|["']$/g, '').trim() };
+        }
+
+        // 4) Araç türüne göre fallback — raw string'i ana parametreye ata
+        const primaryParam = this.getPrimaryParam(toolName);
+        return { [primaryParam]: argsString.replace(/^["']|["']$/g, '').trim() };
+    }
+
+    /**
+     * Araç adından birincil parametre adını döndürür.
+     */
+    private getPrimaryParam(toolName: string): string {
+        if (toolName === 'listDirectory' || toolName === 'readFile' || toolName === 'writeFile') return 'path';
+        if (toolName === 'executeShell') return 'command';
+        if (toolName === 'searchConversation' || toolName === 'webSearch' || toolName === 'searchMemory') return 'query';
+        if (toolName === 'deleteMemory') return 'id';
+        return 'path'; // Varsayılan
+    }
+
+    /**
+     * Windows backslash'li yolları güvenli şekilde JSON parse eder.
+     */
+    private safeJsonParse(str: string): Record<string, unknown> {
+        try { return JSON.parse(str); } catch { /* fallthrough */ }
+        try { return JSON.parse(str.replace(/\\(?!["\\/bfnrtu])/g, '\\\\')); } catch { /* fallthrough */ }
+        return {};
+    }
+
+    /**
      * Araç çağrılarını paralel yürütür ve her adımda event gönderir.
      * Bağımsız araçlar (webSearch, dosya okuma vb.) eşzamanlı çalışır.
      */
@@ -894,6 +1107,41 @@ export class AgentRuntime {
                 isError: true,
             };
         });
+    }
+
+    /**
+     * ReAct iterasyonları arasındaki UI içeriğini akıllıca birleştirir.
+     * Markdown yapılarını (tablo, liste) bozmamak için aşırı \n\n eklemez.
+     */
+    private joinUIContent(current: string, next: string): string {
+        if (!next) return current;
+        if (!current) return next;
+
+        const nextTrimmed = next.trimStart();
+        // Eğer yeni içerik tablo satırı (|), liste elemanı (-, *, 1.) veya kod bloğu (```) ise
+        const isStructural = nextTrimmed.startsWith('|') ||
+            nextTrimmed.startsWith('- ') ||
+            nextTrimmed.startsWith('* ') ||
+            /^\d+\.\s/.test(nextTrimmed) ||
+            nextTrimmed.startsWith('```');
+
+        if (isStructural) {
+            // Yapısal içerik için: eğer mevcut içerik \n ile bitmiyorsa ekle, ama \n\n ekleme
+            if (current.endsWith('\n')) return current + next;
+            return current + '\n' + next;
+        }
+
+        // Normal metin için: eğer paragraf devam ediyorsa (noktalama yoksa) boşlukla bağla, değilse \n\n
+        const lastChar = current.trimEnd().slice(-1);
+        const isSentenceEnd = ['.', '!', '?', ':', ';'].includes(lastChar);
+
+        if (!isSentenceEnd && !current.endsWith('\n')) {
+            return current + ' ' + next;
+        }
+
+        if (current.endsWith('\n\n')) return current + next;
+        if (current.endsWith('\n')) return current + '\n' + next;
+        return current + '\n\n' + next;
     }
 
     /**

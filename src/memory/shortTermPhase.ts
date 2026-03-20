@@ -1,4 +1,9 @@
-import type { MemoryType, ReconsolidationDecision } from './types.js';
+import type {
+    MemoryType,
+    ReconsolidationDecision,
+    ReconsolidationGuardrailSnapshot,
+    ReconsolidationProposalMode,
+} from './types.js';
 
 export interface NormalizedMemoryWriteInput {
     content: string;
@@ -181,10 +186,36 @@ export function decideReconsolidationPilot(input: ReconsolidationDecisionInput):
     const normalizedExisting = normalizeWhitespace(existingContent).toLowerCase();
     const normalizedIncoming = normalizeWhitespace(incomingContent).toLowerCase();
     const safetyReasons: string[] = [];
+    const guardrails: ReconsolidationGuardrailSnapshot = {
+        confidenceFloor: 0.78,
+        strictContainmentFloor: 0.92,
+        structuredVarianceSimilarityFloor: 0.95,
+        highSimilaritySemanticFloor: 0.93,
+        highSimilarityJaccardFloor: 0.85,
+        appendSemanticFloor: 0.86,
+        appendJaccardFloor: 0.72,
+        observedConfidence: Number.isFinite(confidence) ? Number(confidence) : null,
+        semanticSimilarity,
+        jaccardSimilarity,
+        containmentRatio,
+        structuredVariance: hasStructuredVariance(existingContent, incomingContent),
+        incomingAddsNewInformation: normalizedExisting !== normalizedIncoming,
+    };
+
+    const buildDecision = (
+        decision: Omit<ReconsolidationDecision, 'guardrails' | 'proposalMode' | 'commitEligible' | 'shadowEligible'>,
+        proposalMode: ReconsolidationProposalMode,
+    ): ReconsolidationDecision => ({
+        ...decision,
+        proposalMode,
+        commitEligible: decision.action === 'update',
+        shadowEligible: decision.action === 'update' || decision.action === 'append',
+        guardrails,
+    });
 
     if (memoryType !== 'semantic') {
         safetyReasons.push('memory_type_not_semantic');
-        return {
+        return buildDecision({
             pilotActive: true,
             eligible: false,
             action: 'skip',
@@ -192,12 +223,12 @@ export function decideReconsolidationPilot(input: ReconsolidationDecisionInput):
             safetyReasons,
             preferredContent: 'existing',
             candidateContent: null,
-        };
+        }, 'skip');
     }
 
-    if (!Number.isFinite(confidence) || Number(confidence) < 0.78) {
+    if (!Number.isFinite(confidence) || Number(confidence) < guardrails.confidenceFloor) {
         safetyReasons.push('confidence_below_floor');
-        return {
+        return buildDecision({
             pilotActive: true,
             eligible: false,
             action: 'skip',
@@ -205,12 +236,12 @@ export function decideReconsolidationPilot(input: ReconsolidationDecisionInput):
             safetyReasons,
             preferredContent: 'existing',
             candidateContent: null,
-        };
+        }, 'skip');
     }
 
     if (normalizedExisting === normalizedIncoming) {
         safetyReasons.push('no_new_information');
-        return {
+        return buildDecision({
             pilotActive: true,
             eligible: true,
             action: 'skip',
@@ -218,12 +249,12 @@ export function decideReconsolidationPilot(input: ReconsolidationDecisionInput):
             safetyReasons,
             preferredContent: 'existing',
             candidateContent: null,
-        };
+        }, 'skip');
     }
 
-    if (hasStructuredVariance(existingContent, incomingContent) && containmentRatio < 0.92 && semanticSimilarity < 0.95) {
+    if (guardrails.structuredVariance && containmentRatio < guardrails.strictContainmentFloor && semanticSimilarity < guardrails.structuredVarianceSimilarityFloor) {
         safetyReasons.push('structured_variance_conflict');
-        return {
+        return buildDecision({
             pilotActive: true,
             eligible: true,
             action: 'skip',
@@ -231,12 +262,12 @@ export function decideReconsolidationPilot(input: ReconsolidationDecisionInput):
             safetyReasons,
             preferredContent: 'existing',
             candidateContent: null,
-        };
+        }, 'skip');
     }
 
-    if (containmentRatio >= 0.92) {
+    if (containmentRatio >= guardrails.strictContainmentFloor) {
         safetyReasons.push('contained_update_guard');
-        return {
+        return buildDecision({
             pilotActive: true,
             eligible: true,
             action: 'update',
@@ -244,13 +275,13 @@ export function decideReconsolidationPilot(input: ReconsolidationDecisionInput):
             safetyReasons,
             preferredContent: 'existing',
             candidateContent: existingContent,
-        };
+        }, 'commit_update');
     }
 
-    if (semanticSimilarity >= 0.93 || jaccardSimilarity >= 0.85) {
+    if (semanticSimilarity >= guardrails.highSimilaritySemanticFloor || jaccardSimilarity >= guardrails.highSimilarityJaccardFloor) {
         safetyReasons.push('high_similarity_guard');
         const preferredContent = incomingContent.length >= existingContent.length ? 'incoming' : 'existing';
-        return {
+        return buildDecision({
             pilotActive: true,
             eligible: true,
             action: 'update',
@@ -258,12 +289,12 @@ export function decideReconsolidationPilot(input: ReconsolidationDecisionInput):
             safetyReasons,
             preferredContent,
             candidateContent: preferredContent === 'incoming' ? incomingContent : existingContent,
-        };
+        }, 'commit_update');
     }
 
-    if (semanticSimilarity >= 0.86 || jaccardSimilarity >= 0.72) {
+    if (semanticSimilarity >= guardrails.appendSemanticFloor || jaccardSimilarity >= guardrails.appendJaccardFloor) {
         safetyReasons.push('append_first_guard');
-        return {
+        return buildDecision({
             pilotActive: true,
             eligible: true,
             action: 'append',
@@ -271,12 +302,12 @@ export function decideReconsolidationPilot(input: ReconsolidationDecisionInput):
             safetyReasons,
             preferredContent: 'longer',
             candidateContent: `${existingContent}\n[reconsolidated] ${incomingContent}`,
-        };
+        }, 'proposal_append');
     }
 
     safetyReasons.push(`category:${normalizeCategory(category) || 'general'}`);
     safetyReasons.push('weak_signal_no_change');
-    return {
+    return buildDecision({
         pilotActive: true,
         eligible: false,
         action: 'skip',
@@ -284,5 +315,5 @@ export function decideReconsolidationPilot(input: ReconsolidationDecisionInput):
         safetyReasons,
         preferredContent: 'existing',
         candidateContent: null,
-    };
+    }, 'skip');
 }

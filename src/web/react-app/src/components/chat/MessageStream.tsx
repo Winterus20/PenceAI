@@ -23,7 +23,7 @@ const quickActions = [
     'Kendini tanıt, neler yapabilirsin?',
 ];
 
-const stripThinkTags = (text: string) => text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<\/?think>/gi, '').trim();
+const stripThinkTags = (text: string) => text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<\/?think>/gi, '');
 
 const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);

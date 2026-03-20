@@ -59,7 +59,7 @@ describe('MemoryRetrievalOrchestrator observability', () => {
             getRecentMessages: () => recentMessages,
             getUserMemories: () => fallbackMemories,
             getMemoryNeighborsBatch: () => new Map([
-                [1, [{ ...activeMemories[1], relation_type: 'related_to', confidence: 0.88, relation_description: 'Aynı kullanıcı profili' }]],
+                [1, [{ ...activeMemories[1], relation_type: 'related_to', relation_confidence: 0.88, relation_description: 'Aynı kullanıcı profili' }]],
                 [2, []],
             ]),
             prioritizeConversationMemories: (memories) => memories,
@@ -146,6 +146,14 @@ describe('MemoryRetrievalOrchestrator observability', () => {
                 followUpLimit: 1,
                 candidateExpansionLimit: 4,
             },
+            guardrails: {
+                searchLimitReached: false,
+                archivalLimitReached: false,
+                supplementalExpansionUsed: true,
+                candidateExpansionPressure: false,
+                reviewLimitReached: false,
+                followUpLimitReached: false,
+            },
             trimming: {
                 relevantTrimmed: 0,
                 archivalTrimmed: 0,
@@ -159,6 +167,57 @@ describe('MemoryRetrievalOrchestrator observability', () => {
             },
         });
         expect(debugPayload.budget.memoryTokenEstimate.totalSelected).toBeGreaterThan(0);
+        expect(debugPayload.retrievalControl).toEqual({
+            rolloutState: 'shadow',
+            graphDepth: 1,
+            dualProcessMode: 'system2',
+            primerTriggered: true,
+            behaviorDiscoveryState: 'shadow',
+            behaviorDiscoveryLiveEffect: false,
+            candidatePressure: {
+                relevant: 0,
+                supplemental: 0,
+                archival: 0,
+            },
+        });
+        expect(debugPayload.behaviorDiscovery).toMatchObject({
+            enabled: true,
+            domain: 'retrieval',
+            state: 'shadow',
+            liveEffectAllowed: false,
+            observedSignals: expect.arrayContaining([
+                'signal:preference_cue',
+                'signal:follow_up_cue',
+                'signal:recall_cue',
+                'signal:recent_context',
+                'trigger:cross_signal_conflict',
+            ]),
+            candidates: [
+                expect.objectContaining({
+                    id: 'retrieval_mixed_intent_shadow_v1',
+                    domain: 'retrieval',
+                    feature: 'mixed_intent_shadow_probe',
+                    state: 'shadow',
+                    trigger: 'cross_signal_conflict',
+                    riskProfile: 'low',
+                }),
+            ],
+            shadowComparison: {
+                candidateId: 'retrieval_mixed_intent_shadow_v1',
+                currentSelectionIds: [1, 2],
+                shadowSelectionIds: [1, 2],
+                addedIds: [],
+                removedIds: [],
+                changed: false,
+                summary: 'shadow_matches_current_selection',
+                readiness: 'hold',
+            },
+            guardrails: expect.arrayContaining([
+                'behavior_discovery:shadow_safe_only',
+                'behavior_discovery:no_live_effect',
+                'behavior_discovery:active_policy_unchanged',
+            ]),
+        });
         expect(debugPayload.dualProcess).toMatchObject({
             selectedMode: 'system2',
             routingReasons: expect.arrayContaining([
@@ -207,7 +266,7 @@ describe('MemoryRetrievalOrchestrator observability', () => {
                     strongestSeedId: 1,
                     relationType: 'related_to',
                     relationConfidence: 0.88,
-                    candidateConfidence: 0.88,
+                    candidateConfidence: 0.8,
                     hop: 1,
                     decayApplied: 1,
                     bonus: expect.any(Number),
@@ -244,17 +303,51 @@ describe('MemoryRetrievalOrchestrator observability', () => {
                 targetId: 2,
                 relationType: 'related_to',
                 relationConfidence: 0.88,
-                candidateConfidence: 0.88,
+                candidateConfidence: 0.8,
                 hop: 1,
                 decayApplied: 1,
                 rawBonus: expect.any(Number),
                 capped: false,
             }),
         ]));
+        expect(debugPayload.secondPass).toMatchObject({
+            applied: false,
+            mode: 'system2',
+            coverageGaps: [],
+            guardrailSummary: expect.arrayContaining([
+                'second_pass:bounded_to_existing_candidates',
+                'second_pass:selection_limit_preserved:2',
+            ]),
+            adjustments: expect.arrayContaining([
+                expect.objectContaining({ lane: 'relevant', applied: false }),
+                expect.objectContaining({ lane: 'supplemental', applied: false }),
+            ]),
+        });
+        expect(debugPayload.explanations.relevant).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 1,
+                lane: 'relevant',
+                memoryType: 'semantic',
+                conversationScoped: true,
+                reasons: expect.arrayContaining(['strong_signal_score', 'intent_primed', 'conversation_scoped', 'type_aligned:semantic']),
+                components: expect.objectContaining({
+                    signalScore: expect.any(Number),
+                    primingBonus: expect.any(Number),
+                    activationBonus: 0,
+                }),
+            }),
+        ]));
+        expect(debugPayload.explanations.supplemental).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                lane: 'supplemental',
+                reasons: expect.arrayContaining(['supplemental_context']),
+            }),
+        ]));
         expect(debugPayload.reasons).toEqual(expect.arrayContaining([
             'recipe:preference_recall',
             'signal:preference_cue',
             'signal:follow_up_cue',
+            'signal:recall_cue',
             'signal:recent_context',
             'memory_type_preference:semantic',
             'memory_type_reason:preference_profile_recall',
@@ -270,6 +363,10 @@ describe('MemoryRetrievalOrchestrator observability', () => {
             'dual_process_reason:deliberate_route_escalated',
             'dual_process_trigger:cross_signal_conflict',
             'dual_process:second_pass_applied',
+            'second_pass:bounded_to_existing_candidates',
+            'behavior_discovery:shadow',
+            'behavior_discovery_shadow:shadow_matches_current_selection',
+            'behavior_discovery_readiness:hold',
         ]));
     });
 
@@ -339,6 +436,7 @@ describe('MemoryRetrievalOrchestrator observability', () => {
         expect(debugPayload.reasons).toEqual(expect.arrayContaining([
             'recipe:conversation_followup',
             'signal:follow_up_cue',
+            'signal:question',
             'signal:recent_context',
             'memory_type_preference:episodic',
             'memory_type_reason:recent_event_followup',
@@ -358,6 +456,7 @@ describe('MemoryRetrievalOrchestrator observability', () => {
             'dual_process_reason:fast_path_low_load',
             'dual_process_trigger:follow_up_ambiguity',
             'dual_process:second_pass_applied',
+            'second_pass:bounded_to_existing_candidates',
         ]));
     });
 
@@ -381,14 +480,14 @@ describe('MemoryRetrievalOrchestrator observability', () => {
             getSpreadingActivationConfig: () => ({ rolloutState: 'soft', maxCandidates: 2 }),
             getMemoryNeighborsBatch: () => new Map([
                 [31, [
-                    { ...promotedNeighbor, relation_type: 'related_to', confidence: 0.98, relation_description: 'Primary edge' },
-                    { ...cappedNeighbor, relation_type: 'supports', confidence: 0.95, relation_description: 'Cap edge 1' },
-                    { ...truncatedNeighbor, relation_type: 'supports', confidence: 0.9, relation_description: 'Truncate edge' },
+                    { ...promotedNeighbor, relation_type: 'related_to', relation_confidence: 0.98, relation_description: 'Primary edge' },
+                    { ...cappedNeighbor, relation_type: 'supports', relation_confidence: 0.95, relation_description: 'Cap edge 1' },
+                    { ...truncatedNeighbor, relation_type: 'supports', relation_confidence: 0.9, relation_description: 'Truncate edge' },
                 ]],
                 [32, [
-                    { ...promotedNeighbor, relation_type: 'related_to', confidence: 0.98, relation_description: 'Primary edge 2' },
-                    { ...cappedNeighbor, relation_type: 'supports', confidence: 0.95, relation_description: 'Cap edge 2' },
-                    { ...weakRelationNeighbor, relation_type: 'related_to', confidence: 0.4, relation_description: 'Weak edge' },
+                    { ...promotedNeighbor, relation_type: 'related_to', relation_confidence: 0.98, relation_description: 'Primary edge 2' },
+                    { ...cappedNeighbor, relation_type: 'supports', relation_confidence: 0.95, relation_description: 'Cap edge 2' },
+                    { ...weakRelationNeighbor, relation_type: 'related_to', relation_confidence: 0.4, relation_description: 'Weak edge' },
                 ]],
             ]),
             prioritizeConversationMemories: (memories) => memories,
@@ -433,6 +532,31 @@ describe('MemoryRetrievalOrchestrator observability', () => {
                 totalBonusApplied: expect.any(Number),
                 strongestBonus: 0.05,
             },
+        });
+        expect(debugPayload.retrievalControl).toEqual({
+            rolloutState: 'soft',
+            graphDepth: 2,
+            dualProcessMode: 'system1',
+            primerTriggered: false,
+            behaviorDiscoveryState: 'observe',
+            behaviorDiscoveryLiveEffect: false,
+            candidatePressure: {
+                relevant: 0,
+                supplemental: 0,
+                archival: 0,
+            },
+        });
+        expect(debugPayload.behaviorDiscovery).toMatchObject({
+            enabled: true,
+            domain: 'retrieval',
+            state: 'observe',
+            liveEffectAllowed: false,
+            candidates: [],
+            shadowComparison: null,
+            guardrails: expect.arrayContaining([
+                'behavior_discovery:shadow_safe_only',
+                'behavior_discovery:no_live_effect',
+            ]),
         });
         expect(debugPayload.spreadingActivation.activatedCandidates).toEqual(expect.arrayContaining([
             expect.objectContaining({ id: 34, capped: false }),
@@ -523,6 +647,66 @@ describe('MemoryRetrievalOrchestrator observability', () => {
             'fallback:expanded_pool',
             'primer:triggered:yes',
             'primer:exploratory_context',
+        ]));
+    });
+
+    test('respects behavior discovery kill switch and keeps retrieval decisions unchanged', async () => {
+        let debugPayload: any = null;
+        const activeMemories = [
+            createMemoryRow({ id: 41, content: 'Kullanıcı kısa yanıt seviyor', category: 'preference', memory_type: 'semantic' }),
+            createMemoryRow({ id: 42, content: 'Dün aynı konuyu takip ettik', category: 'follow_up', memory_type: 'episodic' }),
+        ];
+
+        const orchestrator = new MemoryRetrievalOrchestrator({
+            graphAwareSearch: async () => ({ active: activeMemories, archival: [] }),
+            getRecentConversationSummaries: () => [],
+            getMemoriesDueForReview: () => [],
+            getFollowUpCandidates: () => [],
+            getRecentMessages: () => [
+                { role: 'user', content: 'Tercihimi hatırla ve son durumu söyle', created_at: '2026-03-08T10:00:00.000Z', conversation_title: 'Test' },
+            ],
+            getUserMemories: () => [],
+            getBehaviorDiscoveryConfig: () => ({ retrieval: { state: 'disabled' } }),
+            prioritizeConversationMemories: (memories) => memories,
+            recordDebug: (payload) => {
+                debugPayload = payload;
+            },
+        });
+
+        const bundle = await orchestrator.getPromptContextBundle({
+            query: 'Tercihimi hatırla ve son durumu söyle',
+            activeConversationId: 'conv-1',
+            options: {
+                relevantMemoryLimit: 2,
+                searchLimit: 2,
+            },
+        });
+
+        expect(bundle.relevantMemories.map((memory: MemoryRow) => memory.id)).toEqual([41, 42]);
+        expect(debugPayload.behaviorDiscovery).toEqual({
+            enabled: false,
+            domain: 'retrieval',
+            state: 'disabled',
+            liveEffectAllowed: false,
+            observedSignals: expect.arrayContaining([
+                'signal:preference_cue',
+                'signal:follow_up_cue',
+            ]),
+            candidates: [],
+            shadowComparison: null,
+            guardrails: expect.arrayContaining([
+                'behavior_discovery:shadow_safe_only',
+                'behavior_discovery:no_live_effect',
+                'behavior_discovery:active_policy_unchanged',
+                'behavior_discovery:kill_switch_disabled',
+            ]),
+        });
+        expect(debugPayload.retrievalControl).toMatchObject({
+            behaviorDiscoveryState: 'disabled',
+            behaviorDiscoveryLiveEffect: false,
+        });
+        expect(debugPayload.reasons).toEqual(expect.arrayContaining([
+            'behavior_discovery:disabled',
         ]));
     });
 });

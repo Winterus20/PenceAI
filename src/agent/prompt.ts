@@ -43,11 +43,20 @@ Kullanıcının yazdığı dilde yanıtla — dili asla kendin değiştirme. Kar
 - Geri alınamaz eylemler (silme, sistem komutu, kritik dosya değişikliği) önce kullanıcıya açıkla ve onay al — onaysız gerçekleştirme.
 - Karmaşık görevlerde adımları önce zihinsel olarak planla, sonra sırayla uygula; bir adım başarısız olursa dur ve kullanıcıyı bilgilendir.
 
-## Araç Kullanımı
-- Araçları yalnızca gerçekten gerektiğinde kullan; sohbet sorularını araç çağırmadan yanıtla.
-- Araç seçimi: kullanıcı eskiyle ilgili spesifik bir şey sorarsa → searchConversation | kalıcı bilgi sorgulama → searchMemory.
-- searchConversation'ı YASAKLI durumlar: selamlama (selam, merhaba, naber, hi), ilk mesaj, günlük sohbet, genel soru, anlamsız/kısa mesajlar, tek kelimelik mesajlar, emoji mesajları. Sistem prompt'undaki özetler zaten yeterli — ekstra arama yapma.
-- KURAL: Kullanıcı geçmişe açıkça referans vermedikçe ("daha önce", "geçen sefer", "konuşmuştuk" gibi ifadeler) searchConversation'ı ASLA çağırma. Şüpheye düşersen ÇAĞIRMA.
+## Araç Kullanımı (ÖNEMLİ)
+- Emrinde şu araçlar bulunmaktadır:
+  * \`readFile\`, \`writeFile\`, \`listDirectory\`: Dosya ve dizin işlemleri (okuma, yazma, listeleme).
+  * \`executeShell\`: Sistem komutları çalıştırma (terminal işlemleri).
+  * \`searchMemory\`, \`deleteMemory\`: Uzun vadeli bellek yönetimi.
+  * \`searchConversation\`: Geçmiş konuşmalarda arama.
+  * \`webSearch\`: İnternette araştırma yapma (Brave Search).
+- Kullanıcı bir işlem yapmanı (örneğin dosya okuma, komut çalıştırma, araştırma) istediğinde BİZZAT BU ARAÇLARI KULLAN. İşlemi kullanıcının yapmasını söylemek yerine, yetkilerini kullanarak görevi doğrudan yerine getir.
+- Araç seçim stratejisi:
+  * Kullanıcı geçmişe/eskiye dair spesifik bir şey sorarsa → \`searchConversation\`.
+  * Kalıcı bilgi/prefereans sorgulama → \`searchMemory\`.
+  * Kod yazma/dosya inceleme → \`readFile\`, \`listDirectory\`, \`writeFile\`.
+  * Sistem/terminal işlemi → \`executeShell\`.
+- Araçları görevler için aktif şekilde kullanmaktan çekinme, ancak sadece sohbet/selamlaşma gerektiren durumlarda araç çağırmadan yanıtla.
 - JSON parametrelerinde sayısal değerleri tırnak içine alma: "count": 5 doğru, "count": "5" yanlış`;
 
     if (memories.length > 0) {
@@ -167,13 +176,13 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'listDirectory',
-            description: 'Belirtilen dizindeki dosya ve klasörleri listeler.',
+            description: 'Belirtilen dizindeki dosya ve klasörleri listeler. Bir projeyi anlamak veya bir dosyayı bulmak için ilk adım olarak bu aracı kullan.',
             parameters: {
                 type: 'object',
                 properties: {
                     path: {
                         type: 'string',
-                        description: 'Listelenecek dizinin tam yolu',
+                        description: 'Listelenecek dizinin tam yolu (Örn: "C:/Users/..." veya "./src")',
                     },
                 },
                 required: ['path'],
@@ -208,6 +217,29 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
             },
         },
         {
+            name: 'saveMemory',
+            description: '[DENEYSEL - İleride kaldırılabilir] OTO-KAYIT DISINDA kullanıcının hemen o an hatırlanmasını istediği kuralları, tercihleri veya bağlamları anında uzun vadeli belleğe kaydeder. Kullanıcı "bana şöyle hitap et", "şunu unutma", "ben bir yazılımcıyım" dediğinde İLK İŞ bu aracı kullan.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    content: {
+                        type: 'string',
+                        description: 'Kaydedilecek bilginin net ve özeti (örn: "Ayşe kahveyi şekersiz sever")',
+                    },
+                    category: {
+                        type: 'string',
+                        description: 'Bilginin kategorisi (preference, fact, habit, project, event, other)',
+                        enum: ['preference', 'fact', 'habit', 'project', 'event', 'other'],
+                    },
+                    importance: {
+                        type: 'integer',
+                        description: 'Bilginin önemi (1-10 arası, varsayılan 5)',
+                    },
+                },
+                required: ['content'],
+            },
+        },
+        {
             name: 'searchConversation',
             description: `Geçmiş konuşmalarda belirli bir konuyu veya mesajı arar. SADECE kullanıcı açıkça geçmişteki bir konuşmayı referans ederse çağır ("daha önce ne demiştik", "geçen sefer bahsettiğim", "bunu konuşmuştuk" gibi ifadeler ZORUNLU). Bu aracı gereksiz çağırmak YASAKTIR. Selamlama, günlük sohbet, yeni konular, ilk mesaj, anlamsız/kısa mesajlar, genel sorular veya greeting mesajları için KESİNLİKLE çağırma. Şüpheliysen çağırma.`,
             parameters: {
@@ -221,23 +253,42 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                 required: ['query'],
             },
         },
+        {
+            name: 'webTool',
+            description: 'Bir web sayfasının içeriğini okur ve metne dönüştürür. Çoğu site için "quick" modunu kullan (daha hızlı ve ücretsizdir). Ancak JS render gerektiren boş dönen modern sitelerde "deep" modunu kullanarak Jina Reader API üzerinden sayfayı okutabilirsin.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    url: {
+                        type: 'string',
+                        description: 'Okunacak web sayfasının tam URL adresi (örn: https://example.com)',
+                    },
+                    mode: {
+                        type: 'string',
+                        description: 'Tarama modu: "quick" (varsayılan, yerel fetch) veya "deep" (JS destekli gelişmiş okuma)',
+                        enum: ['quick', 'deep'],
+                    },
+                },
+                required: ['url', 'mode'],
+            },
+        },
     ];
 
     // Kabuk erişimi etkinse ekle
     if (config.allowShellExecution) {
         tools.push({
             name: 'executeShell',
-            description: 'Bir kabuk komutu çalıştırır ve çıktısını döndürür. DİKKAT: Tehlikeli komutlarda kullanıcıyı bilgilendir.',
+            description: 'Bir kabuk (PowerShell/CMD) komutu çalıştırır. Dosya oluşturma, uygulama başlatma, bağımlılık yükleme veya sistem bilgilerini alma gibi her türlü teknik işlem için bu aracı KULLAN. Windows ortamında (dir, type, npm run vb.) komutlar çalıştırabilirsin.',
             parameters: {
                 type: 'object',
                 properties: {
                     command: {
                         type: 'string',
-                        description: 'Çalıştırılacak kabuk komutu',
+                        description: 'Çalıştırılacak tam komut satırı',
                     },
                     cwd: {
                         type: 'string',
-                        description: 'Çalışma dizini (opsiyonel)',
+                        description: 'Komutun çalıştırılacağı dizin (belirtilmezse varsayılan dizin kullanılır)',
                     },
                 },
                 required: ['command'],
@@ -354,6 +405,9 @@ export function buildDeepExtractionPrompt(userName: string = 'Kullanıcı'): str
 - Çelişen bilgiler varsa en son geçerli olanı al
 - Şüpheliysen KAYDETME, bilgi yoksa boş dizi döndür (bu normal)
 - importance skoru: gerçekten önemli hayat/iş bilgileri 8-10, genel tercihler 5-7, çok spesifik detaylar 1-4
+- Mesajın sonundaki "Bellekte Zaten Kayıtlı Bilgiler" listesindeki bilgilerin TEKRARLARI, YENİDEN İFADELERİ veya ALT KÜMELERİ (örn: bellekte "Kullanıcı 21 yaşında" varsa, "Yaş: 21" ÇIKARMA)
+- Mevcut bir bilgiyle aynı anlama gelen ama farklı kelimelerle yazılmış bilgileri ASLA çıkarma.
+- MEVCUT BELLEK KONTROLÜ: Yeni çıkaracağın bir bilgi, "Bellekte Zaten Kayıtlı Bilgiler" listesindeki HERHANGİ BİR bilginin mantıksal olarak aynısı veya bir parçasıysa KESİNLİKLE ÇIKARMA.
 - DİKKAT: Bilgileri mutlaka diyaloğun konuşulduğu dilde (orijinal dilde) çıkar.
 
 ## Yanıt Formatı

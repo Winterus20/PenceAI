@@ -185,19 +185,11 @@ export class NvidiaProvider extends OpenAIProvider {
     }
 
     /**
-     * NVIDIA NIM — tools yalnızca ENABLE_NVIDIA_TOOLS=true ise gönderilir.
-     * Çoğu model tool_choice:"auto" desteklemediği için varsayılan: false.
-     * Tools devre dışıysa runtime fallback JSON parser araç çağrılarını yakalar.
+     * NVIDIA NIM — tools varsayılan olarak GÖNDERİLİR.
+     * Strict mode gerektiren modeller (gemma, llama, mistral) için
+     * OpenAI base class otomatik olarak tools'u kaldırır ve mesajları normalize eder.
+     * Model native tool calling destekliyorsa (minimax, deepseek, qwen vb.)
+     * createChatCompletionWithToolFallback hata durumunda otomatik geri çekilir.
      */
-    async chat(messages: LLMMessage[], options?: ChatOptions): Promise<LLMResponse> {
-        const config = getConfig();
-        const safeOptions = config.enableNvidiaTools ? options : (options ? { ...options, tools: undefined } : options);
-        return super.chat(messages, safeOptions);
-    }
-
-    async chatStream(messages: LLMMessage[], options: ChatOptions | undefined, onToken: (token: string) => void): Promise<LLMResponse> {
-        const config = getConfig();
-        const safeOptions = config.enableNvidiaTools ? options : (options ? { ...options, tools: undefined } : options);
-        return super.chatStream(messages, safeOptions, onToken);
-    }
+    // chat ve chatStream override'a gerek yok — base class model adına göre karar veriyor
 }

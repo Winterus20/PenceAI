@@ -13,12 +13,25 @@ export interface ExtractedRelation {
     source: string;
 }
 
+export interface RawLlmRelation {
+    targetMemoryId: number;
+    relationType: string;
+    confidence: number;
+    description: string;
+}
+
 export interface ExtractionContext {
     originalText: string;
     unprocessedText: string;
     entities: ExtractedEntity[];
     relations: ExtractedRelation[];
     existingEntitiesCache: Set<string>;
+    /**
+     * Optional "escape hatch" payload returned by the LLM fallback step.
+     * This keeps the extraction pipeline generic while allowing graph logic
+     * to consume richer relation metadata (memoryId-bound) when available.
+     */
+    rawLlmRelations?: RawLlmRelation[];
 }
 
 export interface ExtractorStep {
