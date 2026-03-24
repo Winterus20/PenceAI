@@ -14,6 +14,51 @@ import type { SemanticRouter } from '../router/semantic.js';
 import type { BackgroundWorker } from '../autonomous/index.js';
 import { logger, runWithTraceId } from '../utils/logger.js';
 
+/**
+ * WebSocket yapılandırma sabitleri
+ * Tüm magic number'lar burada merkezi olarak yönetiliyor
+ */
+export const WS_CONFIG = {
+  /** Onay isteği zaman aşımı (ms) */
+  confirmationTimeoutMs: 60000,
+  /** Maksimum mesaj uzunluğu (karakter) */
+  maxMessageLength: 50000,
+  /** Maksimum dosya boyutu (Base64, byte) */
+  maxAttachmentBase64Size: 10 * 1024 * 1024, // 10 MB
+  /** Metin dosyası kısaltma sınırı (karakter) */
+  maxTextFileLength: 20000,
+} as const;
+
+// WebSocket mesaj tipleri
+interface WebSocketChatMessage {
+	type: 'chat';
+	content?: string;
+	conversationId?: string;
+	newConversation?: boolean;
+	userName?: string;
+	attachments?: WebSocketAttachment[];
+}
+
+interface WebSocketAttachment {
+	mimeType?: string;
+	fileName?: string;
+	size?: number;
+	data?: string;
+}
+
+interface WebSocketSetThinkingMessage {
+	type: 'set_thinking';
+	enabled: boolean;
+}
+
+interface WebSocketConfirmResponseMessage {
+	type: 'confirm_response';
+	id: string;
+	approved: boolean;
+}
+
+type WebSocketMessage = WebSocketChatMessage | WebSocketSetThinkingMessage | WebSocketConfirmResponseMessage | Record<string, unknown>;
+
 export interface WebSocketDeps {
     memory: MemoryManager;
     agent: AgentRuntime;
@@ -33,7 +78,7 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
         logger.info(`[Gateway] 🔗 WebSocket bağlantısı açıldı`);
 
         // --- Per-connection mesaj kuyruğu (race condition önleme) ---
-        const messageQueue: Array<{ data: any }> = [];
+        const messageQueue: Array<{ data: WebSocketMessage }> = [];
         let isProcessing = false;
 
         // --- Per-connection düşünme modu ---
@@ -69,11 +114,11 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                 }
 
                 setTimeout(() => {
-                    if (pendingConfirmations.has(confirmId)) {
-                        pendingConfirmations.delete(confirmId);
-                        resolve(false);
-                    }
-                }, 60000);
+                  if (pendingConfirmations.has(confirmId)) {
+                    pendingConfirmations.delete(confirmId);
+                    resolve(false);
+                  }
+                }, WS_CONFIG.confirmationTimeoutMs);
             });
         };
 
@@ -95,17 +140,23 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
             isProcessing = false;
         }
 
-        async function handleChatMessage(data: any, ws: WebSocket) {
-            let channelId: string;
-
-            if (data.newConversation) {
-                channelId = `web-${Date.now()}`;
-            } else if (data.conversationId) {
-                const ctx = memory.getConversationContext(data.conversationId);
-                channelId = ctx ? ctx.channelId : `web-${Date.now()}`;
-            } else {
-                channelId = `web-${Date.now()}`;
-            }
+        async function handleChatMessage(data: WebSocketMessage, ws: WebSocket) {
+        // Type guard: Sadece chat mesajlarını işle
+        if (data.type !== 'chat') {
+        	return;
+        }
+        const chatData = data as WebSocketChatMessage;
+       
+        let channelId: string;
+       
+        if (chatData.newConversation) {
+        channelId = `web-${Date.now()}`;
+        } else if (chatData.conversationId) {
+        const ctx = memory.getConversationContext(chatData.conversationId);
+        channelId = ctx ? ctx.channelId : `web-${Date.now()}`;
+        } else {
+        channelId = `web-${Date.now()}`;
+        }
 
             // ---- Dosya ekleme işleme ----
             const TEXT_MIMES = new Set([
@@ -118,17 +169,16 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                 mimeType.startsWith('text/') ||
                 /\.(txt|md|json|csv|xml|html|htm|css|js|ts|jsx|tsx|py|rb|java|c|cpp|h|hpp|cs|go|rs|sh|yaml|yml|toml|ini|cfg|conf|env|log|sql)$/i.test(fileName || '');
 
-            let enrichedContent: string = data.content ?? '';
-            const wsAttachments: any[] = Array.isArray(data.attachments) ? data.attachments : [];
+            let enrichedContent: string = chatData.content ?? '';
+            const wsAttachments: WebSocketAttachment[] = Array.isArray(chatData.attachments) ? chatData.attachments : [];
             const builtAttachments: import('../router/types.js').Attachment[] = [];
 
             for (const att of wsAttachments) {
                 const mime: string = att.mimeType || 'application/octet-stream';
                 const name: string = att.fileName || 'dosya';
 
-                // OPT-5: Base64 boyut sınırı — 10 MB üzeri dosyalar olay döngüsünü bloke eder
-                const MAX_ATTACHMENT_BASE64_SIZE = 10 * 1024 * 1024;
-                if (att.data && typeof att.data === 'string' && att.data.length > MAX_ATTACHMENT_BASE64_SIZE) {
+                // OPT-5: Base64 boyut sınırı — büyük dosyalar olay döngüsünü bloke eder
+                if (att.data && typeof att.data === 'string' && att.data.length > WS_CONFIG.maxAttachmentBase64Size) {
                     logger.warn(`[Gateway] ⚠️ Dosya çok büyük, atlandı: ${name} (${(att.data.length / 1024 / 1024).toFixed(1)} MB base64)`);
                     enrichedContent += `\n\n[Dosya çok büyük ve işlenemedi: ${name} (${mime})]`;
                     continue;
@@ -141,7 +191,7 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                     } catch {
                         text = '(içerik okunamadı)';
                     }
-                    const truncated = text.length > 20000 ? text.substring(0, 20000) + '\n...(dosya uzun, kısaltıldı)' : text;
+                    const truncated = text.length > WS_CONFIG.maxTextFileLength ? text.substring(0, WS_CONFIG.maxTextFileLength) + '\n...(dosya uzun, kısaltıldı)' : text;
                     const lang = name.split('.').pop() || '';
                     enrichedContent += `\n\n---\n**[Dosya: ${name}]**\n\`\`\`${lang}\n${truncated}\n\`\`\``;
                     logger.info(`[Gateway] 📄 Metin dosyası eklendi: ${name} (${text.length} karakter)`);
@@ -175,7 +225,7 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
 
             const message = MessageRouter.createWebMessage(
                 enrichedContent,
-                resolveWebUserName(data.userName),
+                resolveWebUserName(chatData.userName),
                 channelId,
                 builtAttachments,
             );
@@ -188,7 +238,7 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                         ws.send(JSON.stringify({
                             type: 'response',
                             content: semanticCheck.response,
-                            conversationId: data.conversationId || `web-${Date.now()}`,
+                            conversationId: chatData.conversationId || `web-${Date.now()}`,
                         }));
                     }
                     return;
@@ -233,13 +283,14 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                 lastActiveConversationId = convId;
 
                 broadcastStats();
-            } catch (err: any) {
-                if (ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        type: 'error',
-                        message: err.message || 'Bilinmeyen hata',
-                    }));
-                }
+            } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+            type: 'error',
+            message: error.message || 'Bilinmeyen hata',
+            }));
+            }
             }
         }
 
@@ -250,8 +301,8 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                 const data = JSON.parse(raw.toString());
 
                 if (data.type === 'chat' && data.content) {
-                    if (typeof data.content === 'string' && data.content.length > 50000) {
-                        ws.send(JSON.stringify({ type: 'error', message: 'Mesaj çok uzun (maksimum 50.000 karakter)' }));
+                  if (typeof data.content === 'string' && data.content.length > WS_CONFIG.maxMessageLength) {
+                    ws.send(JSON.stringify({ type: 'error', message: `Mesaj çok uzun (maksimum ${WS_CONFIG.maxMessageLength.toLocaleString('tr-TR')} karakter)` }));
                         return;
                     }
                     messageQueue.push({ data });

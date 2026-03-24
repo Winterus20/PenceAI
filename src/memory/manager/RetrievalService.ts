@@ -1,0 +1,641 @@
+/**
+ * RetrievalService - Bellek arama ve getirme işlemleri.
+ * 
+ * Sorumluluklar:
+ * - FTS (tam metin) arama
+ * - Semantik (embedding) arama
+ * - Hibrit arama (FTS + Semantik + RRF)
+ * - Graph-aware arama
+ * - Mesaj arama
+ * - Review ve follow-up adayları getirme
+ */
+
+import type Database from 'better-sqlite3';
+import { getConfig } from '../../gateway/config.js';
+import { logger } from '../../utils/logger.js';
+import { computeReviewPriority } from '../contextUtils.js';
+import {
+  escapeFtsQuery,
+  type MemoryRow,
+  type MessageRow,
+  type MessageSearchRow,
+  type GraphAwareSearchResult,
+} from '../types.js';
+import { rrfFusion, applyRetentionToRrfWithExplain } from '../contextUtils.js';
+import { computeNextReview } from '../ebbinghaus.js';
+import type { EmbeddingProvider } from '../embeddings.js';
+import type { TaskQueue } from '../../autonomous/queue.js';
+import type { RecentMessage, PromptContextBundle, PromptContextOptions } from './types.js';
+
+export interface RetrievalDeps {
+  db: Database.Database;
+  embeddingProvider: EmbeddingProvider | null;
+  taskQueue: TaskQueue | null;
+  graphManager: {
+    getMemoryNeighborsBatch: (memoryIds: number[], limitPerNode?: number) => Map<number, MemoryRow[]>;
+    updateStabilityOnAccess: (memory: MemoryRow) => void;
+    autoCreateProximityRelations: (memoryId: number) => void;
+  };
+  enqueueEbbinghausToWorker: (memoryIds: number[]) => void;
+  getRecentConversationSummaries: (limit: number) => Array<{ id: string; title: string; summary: string; updated_at: string }>;
+  getMemoriesDueForReview: (limit: number) => MemoryRow[];
+  getFollowUpCandidates: (days: number, limit: number) => MemoryRow[];
+  getRecentMessages: (hours: number, limit: number, excludeConversationId?: string) => RecentMessage[];
+  getUserMemories: (limit: number) => MemoryRow[];
+  prioritizeConversationMemories: (
+    memories: MemoryRow[],
+    recentMessages: RecentMessage[],
+    activeConversationId: string,
+    limit: number
+  ) => MemoryRow[];
+}
+
+export class RetrievalService {
+  private lastRetrievalDebug: Map<string, unknown> = new Map();
+
+  constructor(private deps: RetrievalDeps) {}
+
+  // ========== Bellek Arama ==========
+
+  /**
+   * Belleklerde tam metin arama yapar (iç kullanım — stability güncellemesi yapmaz).
+   * hybridSearch gibi metotlar bunu kullanır, böylece Ebbinghaus ağırlıklandırması
+   * erişim öncesi değerlerle çalışabilir.
+   */
+  private _searchMemoriesRaw(query: string, limit: number = 10): MemoryRow[] {
+    const ftsQuery = escapeFtsQuery(query);
+    if (!ftsQuery) return [];
+
+    return this.deps.db.prepare(`
+      SELECT m.* FROM memories m
+      JOIN memories_fts fts ON m.id = fts.rowid
+      WHERE memories_fts MATCH ? AND m.is_archived = 0
+      ORDER BY bm25(memories_fts)
+      LIMIT ?
+    `).all(ftsQuery, limit) as MemoryRow[];
+  }
+
+  /**
+   * Belleklerde tam metin arama yapar.
+   * Doğrudan kullanıcıya sunulacak aramalar için.
+   * Ebbinghaus stability güncellemesi BackgroundWorker'a ertelenir (kullanıcı uyurken yapılır).
+   */
+  searchMemories(query: string, limit: number = 10): MemoryRow[] {
+    const rows = this._searchMemoriesRaw(query, limit);
+    // Stability güncellemeyi BackgroundWorker'a ertele — ana thread'i bloklamaz
+    this.deps.enqueueEbbinghausToWorker(rows.map(r => r.id));
+    return rows;
+  }
+
+  /**
+   * Semantik benzerlik araması — sorgu metnini embed eder,
+   * sqlite-vec ile cosine similarity hesaplar.
+   */
+  async semanticSearch(query: string, limit: number = 10): Promise<(MemoryRow & { similarity: number })[]> {
+    if (!this.deps.embeddingProvider) return [];
+
+    try {
+      // Sorguyu embed et
+      const [queryEmbedding] = await this.deps.embeddingProvider.embed([query]);
+      const queryArrayBuffer = Buffer.from(new Float32Array(queryEmbedding).buffer);
+
+      const threshold = getConfig().semanticSearchThreshold;
+      const results = this.deps.db.prepare(`
+        WITH matched AS (
+          SELECT rowid, vec_distance_cosine(embedding, ?) as distance
+          FROM memory_embeddings
+          WHERE embedding MATCH ? AND k = 50
+        )
+        SELECT
+          m.*,
+          (1 - w.distance) as similarity
+        FROM matched w
+        JOIN memories m ON m.id = w.rowid
+        WHERE m.is_archived = 0
+        AND (1 - w.distance) >= ?
+        ORDER BY w.distance ASC
+        LIMIT ?
+      `).all(queryArrayBuffer, queryArrayBuffer, threshold, limit) as (MemoryRow & { similarity: number })[];
+
+      this.deps.enqueueEbbinghausToWorker(results.map(r => r.id));
+      return results;
+    } catch (err) {
+      logger.warn({ err: err }, '[Memory] Semantik arama hatası:');
+      return [];
+    }
+  }
+
+  /**
+   * Hibrit arama — FTS (kelime eşleşmesi) + Semantik (anlam benzerliği) sonuçlarını birleştirir.
+   * Reciprocal Rank Fusion (RRF) ile sıralama yapar.
+   * Sonuçlar Ebbinghaus retrievability değeriyle ağırlıklandırılır.
+   */
+  async hybridSearch(query: string, limit: number = 10): Promise<MemoryRow[]> {
+    // 1. FTS arama (raw — stability güncellenmez, Ebbinghaus ağırlıklandırması doğru çalışsın)
+    const ftsResults = this._searchMemoriesRaw(query, limit);
+
+    // 2. Semantik arama
+    const semanticResults = await this.semanticSearch(query, limit);
+
+    if (semanticResults.length === 0) {
+      this.recordRetrievalDebug('hybridSearch', { query, limit, strategy: 'fts_only', ftsCount: ftsResults.length, semanticCount: 0, resultIds: ftsResults.map(item => item.id) });
+      return ftsResults;
+    }
+    if (ftsResults.length === 0) {
+      this.recordRetrievalDebug('hybridSearch', { query, limit, strategy: 'semantic_only', ftsCount: 0, semanticCount: semanticResults.length, resultIds: semanticResults.map(item => item.id) });
+      return semanticResults;
+    }
+
+    // 3. OPT F-02: Jenerik RRF fusion ile birleştir
+    const fusedResults = rrfFusion(
+      ftsResults, semanticResults,
+      (m) => m.id, (m) => m, limit,
+    );
+
+    const retained = applyRetentionToRrfWithExplain(fusedResults.scoreEntries, limit);
+    const merged = retained.results;
+    const explainById = new Map(retained.explain.map(entry => [entry.id, entry]));
+
+    this.recordRetrievalDebug('hybridSearch', {
+      query,
+      limit,
+      strategy: 'hybrid_rrf',
+      ftsCount: ftsResults.length,
+      semanticCount: semanticResults.length,
+      explain: (fusedResults.explain ?? []).map(entry => ({
+        ...entry,
+        retentionWeight: explainById.get(entry.id)?.retentionWeight,
+        finalScore: explainById.get(entry.id)?.finalScore,
+      })),
+      resultIds: merged.map(item => item.id),
+    });
+
+    this.deps.enqueueEbbinghausToWorker(merged.map(m => m.id));
+    return merged;
+  }
+
+  // ========== Mesaj Arama ==========
+
+  /**
+   * Mesajlarda tam metin arama yapar.
+   */
+  searchMessages(query: string, limit: number = 20): MessageRow[] {
+    const ftsQuery = escapeFtsQuery(query);
+    if (!ftsQuery) return [];
+
+    return this.deps.db.prepare(`
+      SELECT m.* FROM messages m
+      JOIN messages_fts fts ON m.id = fts.rowid
+      WHERE messages_fts MATCH ?
+      ORDER BY rank
+      LIMIT ?
+    `).all(ftsQuery, limit) as MessageRow[];
+  }
+
+  /**
+   * Mesajlarda semantik benzerlik araması — sorgu metnini embed eder,
+   * sqlite-vec ile cosine similarity hesaplar ve konuşma bilgisiyle zenginleştirir.
+   */
+  async semanticSearchMessages(query: string, limit: number = 10): Promise<MessageSearchRow[]> {
+    if (!this.deps.embeddingProvider) return [];
+
+    try {
+      const [queryEmbedding] = await this.deps.embeddingProvider.embed([query]);
+      const queryBuf = Buffer.from(new Float32Array(queryEmbedding).buffer);
+
+      const results = this.deps.db.prepare(`
+        WITH matched AS (
+          SELECT rowid, vec_distance_cosine(embedding, ?) as distance
+          FROM message_embeddings
+          WHERE embedding MATCH ? AND k = 50
+        )
+        SELECT
+          m.*,
+          (1 - w.distance) as similarity,
+          COALESCE(c.title, '') as conversation_title,
+          c.channel_type
+        FROM matched w
+        JOIN messages m ON m.id = w.rowid
+        JOIN conversations c ON c.id = m.conversation_id
+        WHERE m.role IN ('user', 'assistant')
+        AND w.distance <= 0.75
+        ORDER BY w.distance ASC
+        LIMIT ?
+      `).all(queryBuf, queryBuf, limit) as MessageSearchRow[];
+
+      return results;
+    } catch (err) {
+      logger.warn({ err: err }, '[Memory] Mesaj semantik arama hatası:');
+      return [];
+    }
+  }
+
+  /**
+   * Mesajlarda hibrit arama — FTS (kelime eşleşmesi) + Semantik (anlam benzerliği).
+   * Reciprocal Rank Fusion (RRF) ile sıralama yapar.
+   */
+  async hybridSearchMessages(query: string, limit: number = 10): Promise<MessageSearchRow[]> {
+    // 1. FTS arama — konuşma bilgisiyle join
+    const ftsQuery = escapeFtsQuery(query);
+    const ftsResults: MessageSearchRow[] = ftsQuery ? (this.deps.db.prepare(`
+      SELECT m.*, 0.0 as similarity, COALESCE(c.title, '') as conversation_title, c.channel_type
+      FROM messages m
+      JOIN messages_fts fts ON m.id = fts.rowid
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE messages_fts MATCH ?
+      ORDER BY rank
+      LIMIT ?
+    `).all(ftsQuery, limit) as MessageSearchRow[]) : [];
+
+    // 2. Semantik arama
+    const semanticResults = await this.semanticSearchMessages(query, limit);
+
+    if (semanticResults.length === 0) {
+      this.recordRetrievalDebug('hybridSearchMessages', { query, limit, strategy: 'fts_only', ftsCount: ftsResults.length, semanticCount: 0, resultIds: ftsResults.map(item => item.id) });
+      return ftsResults;
+    }
+    if (ftsResults.length === 0) {
+      this.recordRetrievalDebug('hybridSearchMessages', { query, limit, strategy: 'semantic_only', ftsCount: 0, semanticCount: semanticResults.length, resultIds: semanticResults.map(item => item.id) });
+      return semanticResults;
+    }
+
+    // 3. OPT F-02: Jenerik RRF fusion
+    const fused = rrfFusion(
+      ftsResults, semanticResults,
+      (m) => m.id, (m) => m, limit,
+    );
+    this.recordRetrievalDebug('hybridSearchMessages', {
+      query,
+      limit,
+      strategy: 'hybrid_rrf',
+      ftsCount: ftsResults.length,
+      semanticCount: semanticResults.length,
+      explain: fused.explain ?? [],
+      resultIds: fused.results.map(item => item.id),
+    });
+    return fused.results;
+  }
+
+  // ========== Graph-Aware Arama ==========
+
+  /**
+   * Graph-aware hibrit arama — standart hibrit arama sonuçlarının
+   * 1-hop komşularını da dahil eder.
+   *
+   * Archival Fallback: Aktif sonuçlar kalite eşiğinin altındaysa
+   * arşivlenen belleklerde de arar ve düşük importance ile yeniden aktif eder (re-learning).
+   *
+   * Stability Reinforcement: Context'e giren tüm aktif bellekler için
+   * updateStabilityOnAccess çağrılır — Ebbinghaus spaced repetition.
+   */
+  async graphAwareSearch(query: string, limit: number = 10, maxDepth: number = 2): Promise<GraphAwareSearchResult> {
+    const QUALITY_MIN_RESULTS = 3;
+    const ARCHIVAL_LIMIT = 5;
+
+    // 1. Standart hibrit arama
+    const directResults = await this.hybridSearch(query, Math.min(limit, 7));
+
+    if (directResults.length === 0) {
+      // Aktif bellekte hiç sonuç yok — arşive bak
+      const archivalResults = await this.archivalSearch(query, ARCHIVAL_LIMIT);
+      if (archivalResults.length > 0) {
+        this.dearchiveMemories(archivalResults);
+      }
+      this.recordRetrievalDebug('graphAwareSearch', { query, limit, maxDepth, directCount: 0, neighborCount: 0, archivalCount: archivalResults.length, expandedFromIds: [], activeIds: [], archivalIds: archivalResults.map(item => item.id) });
+      return { active: [], archival: archivalResults };
+    }
+
+    // 2. Her sonucun komşularını topla (Çok Sekmeli / Multi-hop BFS)
+    const resultIds = new Set(directResults.map(m => m.id));
+    const neighborMemories: MemoryRow[] = [];
+    const expandedMemoryIds = new Set<number>();
+
+    let currentWave = directResults.slice(0, 5);
+    for (let depth = 0; depth < maxDepth; depth++) {
+      const nextWave: MemoryRow[] = [];
+      // OPT F-01: Batch komşu sorgusu — N+1 yerine tek sorgu
+      const waveIds = currentWave.map(m => m.id);
+      const batchNeighbors = this.deps.graphManager.getMemoryNeighborsBatch(waveIds, 3);
+      for (const mem of currentWave) {
+        const neighbors = batchNeighbors.get(mem.id) || [];
+        for (const n of neighbors) {
+          if (!resultIds.has(n.id) && (n.confidence ?? 0) >= 0.4) {
+            resultIds.add(n.id);
+            neighborMemories.push(n);
+            expandedMemoryIds.add(mem.id);
+            nextWave.push(n);
+          }
+        }
+      }
+      currentWave = nextWave.slice(0, 5); // Context patlamasını önle
+    }
+
+    // 3. İlişki güçlendirme artık Ebbinghaus worker'a bırakılıyor (adım 5).
+    // Daha önce burada yapılan reinforceRelationsOnAccess çağrısı,
+    // updateStabilityOnAccess → reinforceConnectedMemories ile TEKRAR çalışıyordu (double boost bug).
+
+    // 4. Birleştir: direkt sonuçlar önce, komşular sonra
+    const combined = [...directResults, ...neighborMemories].slice(0, limit);
+
+    // 5. Ebbinghaus Reinforcement — context'e giren bellekler için TaskQueue'ya ertele
+    this.deps.enqueueEbbinghausToWorker(combined.map(m => m.id));
+
+    // 6. Archival Fallback — aktif sonuç kalitesi düşükse arşive bak
+    let archivalResults: MemoryRow[] = [];
+    if (directResults.length < QUALITY_MIN_RESULTS) {
+      archivalResults = await this.archivalSearch(query, ARCHIVAL_LIMIT);
+      if (archivalResults.length > 0) {
+        this.dearchiveMemories(archivalResults);
+      }
+    }
+
+    this.recordRetrievalDebug('graphAwareSearch', {
+      query,
+      limit,
+      maxDepth,
+      directCount: directResults.length,
+      neighborCount: neighborMemories.length,
+      archivalCount: archivalResults.length,
+      expandedFromIds: [...expandedMemoryIds],
+      activeIds: combined.map(item => item.id),
+      archivalIds: archivalResults.map(item => item.id),
+    });
+
+    return { active: combined, archival: archivalResults };
+  }
+
+  // ========== Archival Memory Search ==========
+
+  /**
+   * Arşivlenen belleklerde FTS tam metin araması (iç kullanım).
+   */
+  private _searchMemoriesRawArchival(query: string, limit: number = 5): MemoryRow[] {
+    const ftsQuery = escapeFtsQuery(query);
+    if (!ftsQuery) return [];
+
+    return this.deps.db.prepare(`
+      SELECT m.* FROM memories m
+      JOIN memories_fts fts ON m.id = fts.rowid
+      WHERE memories_fts MATCH ? AND m.is_archived = 1
+      ORDER BY bm25(memories_fts)
+      LIMIT ?
+    `).all(ftsQuery, limit) as MemoryRow[];
+  }
+
+  /**
+   * Arşivlenen belleklerde semantik benzerlik araması.
+   */
+  private async semanticSearchArchival(query: string, limit: number = 5): Promise<(MemoryRow & { similarity: number })[]> {
+    if (!this.deps.embeddingProvider) return [];
+
+    try {
+      const [queryEmbedding] = await this.deps.embeddingProvider.embed([query]);
+      const queryArrayBuffer = Buffer.from(new Float32Array(queryEmbedding).buffer);
+
+      return this.deps.db.prepare(`
+        WITH matched AS (
+          SELECT rowid, vec_distance_cosine(embedding, ?) as distance
+          FROM memory_embeddings
+          WHERE embedding MATCH ? AND k = 50
+        )
+        SELECT
+          m.*,
+          (1 - w.distance) as similarity
+        FROM matched w
+        JOIN memories m ON m.id = w.rowid
+        WHERE m.is_archived = 1
+        AND w.distance <= 0.4
+        ORDER BY w.distance ASC
+        LIMIT ?
+      `).all(queryArrayBuffer, queryArrayBuffer, limit) as (MemoryRow & { similarity: number })[];
+    } catch (err) {
+      logger.warn({ err: err }, '[Memory] Archival semantik arama hatası:');
+      return [];
+    }
+  }
+
+  /**
+   * Arşivlenen belleklerde hibrit arama — FTS + Semantik + RRF.
+   * Aktif hybridSearch ile aynı mantık, is_archived = 1 filtresi ile.
+   */
+  private async archivalSearch(query: string, limit: number = 5): Promise<MemoryRow[]> {
+    const ftsResults = this._searchMemoriesRawArchival(query, limit);
+    const semanticResults = await this.semanticSearchArchival(query, limit);
+
+    if (semanticResults.length === 0) return ftsResults;
+    if (ftsResults.length === 0) return semanticResults;
+
+    // OPT F-02: Jenerik RRF fusion
+    return rrfFusion(
+      ftsResults, semanticResults,
+      (m) => m.id, (m) => m, limit,
+    ).results;
+  }
+
+  /**
+   * Arşivden geri getirme (De-archive) + Re-learning mekanizması.
+   * importance = 1 (en düşük), stability = 2.0 (kırılgan), graph ilişkileri yeniden oluşturulur.
+   * max_importance korunur — importance artışı bununla cap'lenir.
+   */
+  private dearchiveMemories(memories: MemoryRow[]): void {
+    const RE_LEARN_STABILITY = 2.0;
+    const RE_LEARN_IMPORTANCE = 1;
+    const nextReview = computeNextReview(RE_LEARN_STABILITY);
+
+    const dearchiveStmt = this.deps.db.prepare(`
+      UPDATE memories
+      SET is_archived = 0,
+        importance = ?,
+        stability = ?,
+        retrievability = 1.0,
+        next_review_at = ?,
+        review_count = 0,
+        last_accessed = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+
+    const runDearchive = this.deps.db.transaction(() => {
+      for (const mem of memories) {
+        dearchiveStmt.run(RE_LEARN_IMPORTANCE, RE_LEARN_STABILITY, nextReview, mem.id);
+      }
+    });
+
+    runDearchive();
+
+    // Graph ilişkilerini yeniden oluştur (eski ilişkiler decay ile silinmiş olabilir)
+    for (const mem of memories) {
+      this.deps.graphManager.autoCreateProximityRelations(mem.id);
+    }
+
+    logger.info(`[Memory] 📦 ${memories.length} bellek arşivden geri getirildi (importance=${RE_LEARN_IMPORTANCE}, stability=${RE_LEARN_STABILITY})`);
+  }
+
+  // ========== Review ve Follow-up ==========
+
+  /**
+   * Review zamanı gelmiş bellekleri döndürür.
+   * next_review_at <= şu an, retrievability'ye göre öncelik sıralanır (en düşük önce).
+   * Sistem promptuna enjekte edilir; bu enjeksiyon stability'yi tetiklemez.
+   */
+  getMemoriesDueForReview(limit: number = 5): MemoryRow[] {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const dueMemories = this.deps.db.prepare(`
+      SELECT * FROM memories
+      WHERE is_archived = 0
+      AND next_review_at IS NOT NULL
+      AND next_review_at <= ?
+      LIMIT ?
+    `).all(nowSec, Math.max(limit * 3, limit)) as MemoryRow[];
+
+    return dueMemories
+      .sort((a, b) => computeReviewPriority(b, nowSec) - computeReviewPriority(a, nowSec))
+      .slice(0, limit);
+  }
+
+  /**
+   * Yakın geçmişteki (varsayılan: son 14 gün) "event" veya "project" kategorisindeki bellekleri döndürür.
+   * Bu bilgiler asistanın yeni bir sohbete proaktif olarak (inisiyatif alıp konuyu açarak) başlaması için kullanılır.
+   */
+  getFollowUpCandidates(days: number = 14, limit: number = 3): MemoryRow[] {
+    return this.deps.db.prepare(`
+      SELECT * FROM memories
+      WHERE is_archived = 0
+      AND category IN ('event', 'project')
+      AND updated_at >= datetime('now', '-' || ? || ' days')
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `).all(days, limit) as MemoryRow[];
+  }
+
+  // ========== Kullanıcı Bellekleri ve Mesajlar ==========
+
+  /**
+   * Kullanıcının belleklerini önem ve kullanım skoruna göre döndürür.
+   * Scoring: importance * 2 + access_count
+   */
+  getUserMemories(limit: number = 50): MemoryRow[] {
+    return this.deps.db.prepare(`
+      SELECT * FROM memories
+      WHERE is_archived = 0
+      ORDER BY (importance * 2 + access_count) DESC, updated_at DESC
+      LIMIT ?
+    `).all(limit) as MemoryRow[];
+  }
+
+  /**
+   * Son N saat içindeki kullanıcı mesajlarını döndürür (tüm konuşmalardan).
+   * Günlük bağlam oluşturmak için kullanılır — bellekte saklanmayan kısa vadeli bilgiler.
+   */
+  getRecentMessages(hours: number = 48, limit: number = 30, excludeConversationId?: string): RecentMessage[] {
+    if (excludeConversationId) {
+      return this.deps.db.prepare(`
+        SELECT m.role, m.content, m.created_at, COALESCE(c.title, '') as conversation_title
+        FROM messages m
+        JOIN conversations c ON c.id = m.conversation_id
+        WHERE m.role IN ('user', 'assistant')
+        AND m.created_at >= datetime('now', '-' || ? || ' hours')
+        AND m.conversation_id != ?
+        ORDER BY m.created_at DESC
+        LIMIT ?
+      `).all(hours, excludeConversationId, limit) as RecentMessage[];
+    }
+    return this.deps.db.prepare(`
+      SELECT m.role, m.content, m.created_at, COALESCE(c.title, '') as conversation_title
+      FROM messages m
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.role IN ('user', 'assistant')
+      AND m.created_at >= datetime('now', '-' || ? || ' hours')
+      ORDER BY m.created_at DESC
+      LIMIT ?
+    `).all(hours, limit) as RecentMessage[];
+  }
+
+  // ========== Embedding Backfill ==========
+
+  /**
+   * Embedding'i hesaplanmamış bellekleri bulur ve batch olarak hesaplar.
+   */
+  async ensureAllEmbeddings(): Promise<number> {
+    return this._ensureEmbeddingsGeneric(
+      `SELECT m.id, m.content FROM memories m
+       LEFT JOIN memory_embeddings me ON m.id = me.rowid
+       WHERE me.rowid IS NULL`,
+      'memory_embeddings',
+      'bellek',
+    );
+  }
+
+  /**
+   * Embedding'i hesaplanmamış mesajları bulur ve batch olarak hesaplar.
+   */
+  async ensureAllMessageEmbeddings(): Promise<number> {
+    return this._ensureEmbeddingsGeneric(
+      `SELECT m.id, m.content FROM messages m
+       LEFT JOIN message_embeddings me ON m.id = me.rowid
+       WHERE me.rowid IS NULL
+       AND m.role IN ('user', 'assistant')
+       AND LENGTH(m.content) > 20`,
+      'message_embeddings',
+      'mesaj',
+    );
+  }
+
+  private async _ensureEmbeddingsGeneric(
+    findMissingSql: string,
+    table: 'memory_embeddings' | 'message_embeddings',
+    label: string,
+  ): Promise<number> {
+    if (!this.deps.embeddingProvider) return 0;
+
+    const missing = this.deps.db.prepare(findMissingSql).all() as Array<{ id: number; content: string }>;
+    if (missing.length === 0) return 0;
+
+    logger.info(`[Memory] ${missing.length} ${label} için embedding hesaplanıyor...`);
+
+    const batchSize = 50;
+    let processed = 0;
+
+    for (let i = 0; i < missing.length; i += batchSize) {
+      const batch = missing.slice(i, i + batchSize);
+      try {
+        const texts = batch.map(m => m.content);
+        const embeddings = await this.deps.embeddingProvider.embed(texts);
+
+        // sqlite-vec sanal tablosu OR REPLACE desteklemez → DELETE + INSERT
+        const deleteStmt = this.deps.db.prepare(`DELETE FROM ${table} WHERE rowid = CAST(? AS INTEGER)`);
+        const insertStmt = this.deps.db.prepare(`INSERT INTO ${table} (rowid, embedding) VALUES (CAST(? AS INTEGER), ?)`);
+
+        const insertMany = this.deps.db.transaction((items: Array<{ id: number; embedding: number[] }>) => {
+          for (const item of items) {
+            const idBig = BigInt(item.id);
+            deleteStmt.run(idBig);
+            insertStmt.run(idBig, Buffer.from(new Float32Array(item.embedding).buffer));
+          }
+        });
+
+        insertMany(batch.map((m, idx) => ({ id: Number(m.id), embedding: embeddings[idx] })));
+        processed += batch.length;
+        logger.info(`[Memory] → ${processed}/${missing.length} ${label} embedding hesaplandı`);
+      } catch (err) {
+        logger.error({ err: err }, `[Memory] Batch ${label} embedding hatası (${i}-${i + batch.length}):`);
+      }
+    }
+
+    return processed;
+  }
+
+  // ========== Debug ==========
+
+  getRetrievalDebugSnapshot(flow: 'hybridSearch' | 'hybridSearchMessages' | 'graphAwareSearch' | 'promptContextBundle'): unknown {
+    return this.lastRetrievalDebug.get(flow) ?? null;
+  }
+
+  private recordRetrievalDebug(flow: 'hybridSearch' | 'hybridSearchMessages' | 'graphAwareSearch' | 'promptContextBundle', payload: unknown): void {
+    this.lastRetrievalDebug.set(flow, {
+      capturedAt: new Date().toISOString(),
+      ...((payload && typeof payload === 'object') ? payload as Record<string, unknown> : { payload }),
+    });
+    logger.debug({ flow, payload: this.lastRetrievalDebug.get(flow) }, '[Memory] Retrieval debug snapshot updated');
+  }
+}

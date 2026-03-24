@@ -200,6 +200,9 @@ export class PenceDatabase {
       CREATE INDEX IF NOT EXISTS idx_memory_entities_normalized ON memory_entities(normalized_name);
       CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
       CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at);
+      
+      -- Composite index: Konuşma mesajlarını rol ve tarih ile sıralı getirmek için
+      CREATE INDEX IF NOT EXISTS idx_messages_conv_role_created ON messages(conversation_id, role, created_at DESC);
 
       -- Anahtar-değer ayarlar tablosu
       CREATE TABLE IF NOT EXISTS settings (
@@ -514,8 +517,33 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ Migration failed (autonomous_tasks):');
       }
     }
-
-  }
+  
+    // Feedback tablosunu oluştur (yoksa)
+    const feedbackTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='feedback'"
+    ).get();
+    if (!feedbackTable) {
+      logger.info('[Database] 🚀 Migrating: Creating feedback table');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            type TEXT NOT NULL CHECK(type IN ('positive', 'negative')),
+            comment TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_feedback_conversation ON feedback(conversation_id);
+          CREATE INDEX IF NOT EXISTS idx_feedback_message ON feedback(message_id);
+        `);
+        logger.info('[Database] ✅ feedback tablosu oluşturuldu');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (feedback):');
+      }
+    }
+  
+    }
 
   /**
    * Embedding boyut tutarlılığını doğrular.

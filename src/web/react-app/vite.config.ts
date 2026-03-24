@@ -17,12 +17,26 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:3001',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:3000',
+        target: 'ws://localhost:3001',
         ws: true,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            // ECONNRESET hataları genellikle backend yeniden başlatıldığında oluşur
+            // Bu hataları sessizce loglayalım, çünkü frontend otomatik yeniden bağlanacak
+            if ('code' in err && err.code === 'ECONNRESET') {
+              console.log('[Vite Proxy] Backend bağlantısı sıfırlandı, yeniden bağlanılıyor...');
+            } else {
+              console.error('[Vite Proxy] WebSocket proxy hatası:', err.message);
+            }
+          });
+          proxy.on('proxyReqWs', (_proxyReq, _req, _socket, _options, _head) => {
+            console.log('[Vite Proxy] WebSocket bağlantısı kuruluyor...');
+          });
+        },
       }
     }
   }

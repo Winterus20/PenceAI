@@ -62,12 +62,20 @@ export function createDashboardAuthMiddleware(dashboardPassword?: string): Reque
 }
 
 export function resolveGatewayPublicDir(currentDir: string): string {
-    const developmentDir = path.join(currentDir, '../../dist/web/public_old');
-    if (fs.existsSync(developmentDir)) {
-        return developmentDir;
-    }
+  // Öncelik: React build çıktısı (dist/web/public)
+  const reactBuildDir = path.join(currentDir, '../../dist/web/public');
+  if (fs.existsSync(reactBuildDir)) {
+    return reactBuildDir;
+  }
 
-    return path.join(currentDir, '../web/public_old');
+  // Fallback: Eski vanilla JS panel (public_old)
+  const developmentDir = path.join(currentDir, '../../dist/web/public_old');
+  if (fs.existsSync(developmentDir)) {
+    return developmentDir;
+  }
+
+  // Son fallback: Kaynak dizindeki public_old
+  return path.join(currentDir, '../web/public_old');
 }
 
 export function registerRequestTracing(app: Application, onRequest: () => void): void {

@@ -49,12 +49,15 @@ export interface AppConfig {
     sensitivePaths: string[];
 
     // Advanced Settings
-    systemPrompt?: string;
-    autonomousStepLimit: number;
-    memoryDecayThreshold: number;
-    semanticSearchThreshold: number;
-    logLevel: 'debug' | 'info' | 'error';
-}
+      systemPrompt?: string;
+      autonomousStepLimit: number;
+      memoryDecayThreshold: number;
+      semanticSearchThreshold: number;
+      logLevel: 'debug' | 'info' | 'error';
+      // Gelişmiş Model Ayarları
+      temperature: number;
+      maxTokens: number;
+    }
 
 export function loadConfig(): AppConfig {
     const dbPath = process.env.DB_PATH
@@ -135,9 +138,12 @@ export function loadConfig(): AppConfig {
             const raw = process.env.LOG_LEVEL;
             if (raw && (valid as readonly string[]).includes(raw)) return raw as AppConfig['logLevel'];
             return 'info';
-        })(),
-    };
-}
+          })(),
+          // Gelişmiş Model Ayarları
+          temperature: (() => { const p = parseFloat(process.env.TEMPERATURE || '0.7'); return isNaN(p) ? 0.7 : Math.max(0, Math.min(2, p)); })(),
+          maxTokens: (() => { const p = parseInt(process.env.MAX_TOKENS || '4096', 10); return isNaN(p) ? 4096 : Math.max(256, Math.min(128000, p)); })(),
+          };
+        }
 
 // Singleton config
 let _config: AppConfig | null = null;

@@ -47,7 +47,7 @@ export const ConfirmDialog = ({ open, confirmRequest, onApprove, onDeny }: Confi
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onDeny()}>
       <DialogContent className="max-w-xl border-border/60 bg-card sm:rounded-none">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-sm uppercase tracking-[0.24em]">
+          <DialogTitle className="flex items-center gap-2 text-label">
             <AlertTriangle className="h-4 w-4 text-amber-400" />
             Araç Onayı Gerekli
           </DialogTitle>
@@ -62,7 +62,7 @@ export const ConfirmDialog = ({ open, confirmRequest, onApprove, onDeny }: Confi
             <div><span className="text-muted-foreground">İşlem:</span> {confirmRequest.operation || 'Belirtilmedi'}</div>
             <div><span className="text-muted-foreground">Hedef:</span> {confirmRequest.path || 'Belirtilmedi'}</div>
             <div className="whitespace-pre-wrap text-foreground/80">{confirmRequest.description || 'Açıklama yok'}</div>
-            <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Otomatik red: {remaining}s</div>
+            <div className="text-tool-label text-muted-foreground">Otomatik red: {remaining}s</div>
           </div>
         ) : null}
 

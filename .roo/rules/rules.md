@@ -1,0 +1,1 @@
+Her yeni sohbette #PROJECT_MAP.md dosyasını okuyup projeyle alakalı gerekli bilgileri alacaksın.

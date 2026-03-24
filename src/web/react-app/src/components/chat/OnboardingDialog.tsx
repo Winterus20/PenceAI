@@ -50,7 +50,7 @@ export const OnboardingDialog = ({ open, onCompleted }: OnboardingDialogProps) =
     <Dialog open={open}>
       <DialogContent className="max-w-2xl border-border/60 bg-card sm:rounded-none [&>button]:hidden">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-sm uppercase tracking-[0.24em]">
+          <DialogTitle className="flex items-center gap-2 text-label">
             <Sparkles className="h-4 w-4" />
             İlk Kurulum
           </DialogTitle>

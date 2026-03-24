@@ -4,13 +4,24 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { platform } from 'os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const LOG_DIR = path.join(PROJECT_ROOT, 'logs');
 
+// Windows için UTF-8 encoding desteği
+if (platform() === 'win32') {
+  try {
+    process.stdout.setDefaultEncoding?.('utf8');
+    process.stderr.setDefaultEncoding?.('utf8');
+  } catch {
+    // Eski Node.js versiyonları için sessizce geç
+  }
+}
+
 if (!fs.existsSync(LOG_DIR)) {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
+  fs.mkdirSync(LOG_DIR, { recursive: true });
 }
 
 // Trace context için AsyncLocalStorage oluşturuyoruz

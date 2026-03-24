@@ -1,6 +1,75 @@
 import { useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { useAgentStore } from '../store/agentStore';
-import type { ToolCallItem } from '../store/agentStore';
+import type { ToolCallItem, AttachmentItem } from '../store/agentStore';
+
+// WebSocket mesaj tipleri
+interface WsTokenMessage {
+	type: 'token';
+	content: string;
+}
+
+interface WsResponseMessage {
+	type: 'response';
+	content: string;
+	conversationId?: string;
+}
+
+interface WsAgentEventMessage {
+	type: 'agent_event';
+	eventType: string;
+	data: Record<string, unknown>;
+}
+
+interface WsClearStreamMessage {
+	type: 'clear_stream';
+}
+
+interface WsReplaceStreamMessage {
+	type: 'replace_stream';
+	content: string;
+}
+
+interface WsErrorMessage {
+	type: 'error';
+	message: string;
+}
+
+interface WsStatsMessage {
+	type: 'stats';
+	stats: Record<string, unknown>;
+}
+
+interface WsConfirmRequestMessage {
+	type: 'confirm_request';
+	id: string;
+	toolName: string;
+	path: string;
+	operation: string;
+	description: string;
+}
+
+interface WsToolUseMessage {
+	type: 'tool_use';
+}
+
+type WsMessage = WsTokenMessage | WsResponseMessage | WsAgentEventMessage | WsClearStreamMessage | WsReplaceStreamMessage | WsErrorMessage | WsStatsMessage | WsConfirmRequestMessage | WsToolUseMessage;
+
+// Agent event data tipleri
+interface ThinkingEventData {
+	content: string;
+}
+
+interface ToolStartEventData {
+	name: string;
+	arguments: Record<string, unknown>;
+}
+
+interface ToolEndEventData {
+	name: string;
+	result: string;
+	isError?: boolean;
+}
 
 const stripThinkTags = (text?: string) => {
     if (!text) return '';
@@ -66,7 +135,7 @@ export function useAgentSocket() {
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         // Explicitly point to backend during Vite development (port 5173) to bypass proxy flakiness
-        const wsHost = window.location.port === '5173' ? 'localhost:3000' : window.location.host;
+        const wsHost = window.location.port === '5173' ? 'localhost:3001' : window.location.host;
         const wsUrl = `${protocol}//${wsHost}/ws`;
 
         const socket = new WebSocket(wsUrl);
@@ -95,8 +164,9 @@ export function useAgentSocket() {
         };
 
         socket.onerror = (err) => {
-            if (!mounted.current) return;
-            console.error('[WS] Error:', err);
+          if (!mounted.current) return;
+          console.error('[WS] Error:', err);
+          toast.error('WebSocket bağlantı hatası oluştu');
         };
 
         socket.onmessage = (event) => {
@@ -105,13 +175,14 @@ export function useAgentSocket() {
                 const data = JSON.parse(event.data);
                 handleWsMessage(data);
             } catch (err) {
-                console.error('[WS] Message parse error:', err);
+              console.error('[WS] Message parse error:', err);
+              toast.error('Mesaj işlenirken hata oluştu');
             }
         };
     };
 
-    const handleWsMessage = (data: any) => {
-        switch (data.type) {
+    const handleWsMessage = (data: WsMessage) => {
+    switch (data.type) {
             case 'token':
                 if (!currentAssistantMessageId.current) {
                     createAssistantPlaceholder();
@@ -171,21 +242,22 @@ export function useAgentSocket() {
                 break;
 
             case 'error':
-                if (currentAssistantMessageId.current) {
-                    patchMessage(currentAssistantMessageId.current, {
-                        content: `⚠️ Hata: ${data.message}`,
-                        pending: false,
-                        toolCalls: pendingToolCalls.current.length > 0 ? [...pendingToolCalls.current] : undefined,
-                        thinking: pendingThinking.current.length > 0 ? [...pendingThinking.current] : undefined,
-                    });
-                } else {
-                    addMessage({
-                        id: crypto.randomUUID(),
-                        role: 'system',
-                        content: `⚠️ Hata: ${data.message}`,
-                        timestamp: new Date().toISOString(),
-                    });
-                }
+              toast.error(data.message || 'Bilinmeyen bir hata oluştu');
+              if (currentAssistantMessageId.current) {
+                patchMessage(currentAssistantMessageId.current, {
+                  content: `⚠️ Hata: ${data.message}`,
+                  pending: false,
+                  toolCalls: pendingToolCalls.current.length > 0 ? [...pendingToolCalls.current] : undefined,
+                  thinking: pendingThinking.current.length > 0 ? [...pendingThinking.current] : undefined,
+                });
+              } else {
+                addMessage({
+                  id: crypto.randomUUID(),
+                  role: 'system',
+                  content: `⚠️ Hata: ${data.message}`,
+                  timestamp: new Date().toISOString(),
+                });
+              }
 
                 currentAssistantMessageId.current = null;
                 pendingToolCalls.current = [];
@@ -204,10 +276,12 @@ export function useAgentSocket() {
         }
     };
 
-    const handleAgentEvent = (eventType: string, data: any) => {
-        switch (eventType) {
-            case 'thinking':
-                const cleaned = stripThinkTags(data.content);
+    const handleAgentEvent = (eventType: string, data: unknown) => {
+    const eventData = data as Record<string, unknown>;
+    switch (eventType) {
+    case 'thinking':
+    const thinkingData = eventData as Partial<ThinkingEventData>;
+    const cleaned = stripThinkTags(thinkingData.content);
                 if (cleaned) {
                     pendingThinking.current = [...pendingThinking.current, cleaned];
                     setThinking(pendingThinking.current.join('\n'));
@@ -215,11 +289,12 @@ export function useAgentSocket() {
                 }
                 break;
             case 'tool_start': {
-                pendingToolCalls.current = [
-                    ...pendingToolCalls.current,
-                    {
-                        name: data.name,
-                        arguments: data.arguments,
+            const toolStartData = eventData as Partial<ToolStartEventData>;
+            pendingToolCalls.current = [
+            ...pendingToolCalls.current,
+            {
+            name: toolStartData.name ?? '',
+            arguments: toolStartData.arguments ?? {},
                         status: 'running',
                         result: null,
                         isError: false,
@@ -229,10 +304,11 @@ export function useAgentSocket() {
                 break;
             }
             case 'tool_end': {
-                const lastRunningIndex = (() => {
-                    for (let index = pendingToolCalls.current.length - 1; index >= 0; index -= 1) {
-                        const candidate = pendingToolCalls.current[index];
-                        if (candidate.name === data.name && candidate.status === 'running') {
+            const toolEndData = eventData as Partial<ToolEndEventData>;
+            const lastRunningIndex = (() => {
+            for (let index = pendingToolCalls.current.length - 1; index >= 0; index -= 1) {
+            const candidate = pendingToolCalls.current[index];
+            if (candidate.name === toolEndData.name && candidate.status === 'running') {
                             return index;
                         }
                     }
@@ -241,16 +317,16 @@ export function useAgentSocket() {
                 })();
 
                 pendingToolCalls.current = pendingToolCalls.current.map((tool, index) => {
-                    const isMatchingTool = tool.name === data.name && tool.status === 'running';
+                const isMatchingTool = tool.name === toolEndData.name && tool.status === 'running';
                     const isLastMatch = isMatchingTool && lastRunningIndex === index;
 
                     if (!isLastMatch) return tool;
 
                     return {
-                        ...tool,
-                        status: data.isError ? 'error' : 'success',
-                        result: typeof data.result === 'string' ? data.result : JSON.stringify(data.result ?? ''),
-                        isError: !!data.isError,
+                    ...tool,
+                    status: toolEndData.isError ? 'error' : 'success',
+                    result: typeof toolEndData.result === 'string' ? toolEndData.result : JSON.stringify(toolEndData.result ?? ''),
+                    isError: !!toolEndData.isError,
                     };
                 });
                 syncAssistantMeta();
@@ -261,7 +337,7 @@ export function useAgentSocket() {
         }
     };
 
-    const sendChatPayload = (content: string, attachments: any[] = [], activeConversationId?: string, appendUserMessage = true) => {
+    const sendChatPayload = (content: string, attachments: AttachmentItem[] = [], activeConversationId?: string, appendUserMessage = true) => {
         const trimmedContent = content.trim();
         const isConnected = useAgentStore.getState().isConnected;
         const socket = ws.current;
@@ -316,7 +392,7 @@ export function useAgentSocket() {
         createAssistantPlaceholder();
         console.debug('[useAgentSocket] sendChatPayload:placeholder-created');
 
-        const wsMsg: any = { type: 'chat', content };
+        const wsMsg: { type: 'chat'; content: string; attachments?: AttachmentItem[]; conversationId?: string; newConversation?: boolean } = { type: 'chat', content };
 
         if (attachments.length > 0) {
             wsMsg.attachments = attachments.map(att => ({

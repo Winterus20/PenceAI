@@ -47,16 +47,42 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     });
 
     app.delete('/api/conversations/:id', (req, res) => {
-        try {
-            const deleted = memory.deleteConversation(req.params.id);
-            if (!deleted) {
-                return res.status(404).json({ error: 'Konuşma bulunamadı' });
-            }
-            broadcastStats();
-            res.json({ success: true });
-        } catch (err: any) {
-            res.status(500).json({ error: err.message });
+      try {
+        const deleted = memory.deleteConversation(req.params.id);
+        if (!deleted) {
+          return res.status(404).json({ error: 'Konuşma bulunamadı' });
         }
+        broadcastStats();
+        res.json({ success: true });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+  
+    // Toplu sohbet silme
+    app.delete('/api/conversations', (req, res) => {
+      const { ids } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: 'Silinecek ID\'ler (ids) bir dizi olarak verilmelidir' });
+      }
+  
+      try {
+        const results: { id: string; deleted: boolean }[] = [];
+        for (const id of ids) {
+          const deleted = memory.deleteConversation(id);
+          results.push({ id, deleted });
+        }
+        broadcastStats();
+        
+        const deletedCount = results.filter(r => r.deleted).length;
+        res.json({
+          success: true,
+          deletedCount,
+          results
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
     });
 
     app.get('/api/memories', (_req, res) => {
@@ -184,30 +210,33 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     // ============ Genel Ayarlar API ============
 
     app.get('/api/settings', (_req, res) => {
-        const env = readEnv();
-        res.json({
-            defaultLLMProvider: env.DEFAULT_LLM_PROVIDER || 'openai',
-            defaultLLMModel: env.DEFAULT_LLM_MODEL || '',
-            defaultUserName: env.DEFAULT_USER_NAME || 'Kullanıcı',
-            openaiApiKey: env.OPENAI_API_KEY || '',
-            anthropicApiKey: env.ANTHROPIC_API_KEY || '',
-            minimaxApiKey: env.MINIMAX_API_KEY || '',
-            githubToken: env.GITHUB_TOKEN || '',
-            groqApiKey: env.GROQ_API_KEY || '',
-            mistralApiKey: env.MISTRAL_API_KEY || '',
-            nvidiaApiKey: env.NVIDIA_API_KEY || '',
-            ollamaBaseUrl: env.OLLAMA_BASE_URL || 'http://localhost:11434',
-            allowShellExecution: env.ALLOW_SHELL_EXECUTION === 'true',
-            systemPrompt: env.SYSTEM_PROMPT || '',
-            autonomousStepLimit: env.AUTONOMOUS_STEP_LIMIT || '5',
-            memoryDecayThreshold: env.MEMORY_DECAY_THRESHOLD || '30',
-            semanticSearchThreshold: env.SEMANTIC_SEARCH_THRESHOLD || '0.7',
-            logLevel: env.LOG_LEVEL || 'info',
-            embeddingProvider: env.EMBEDDING_PROVIDER || 'openai',
-            embeddingModel: env.EMBEDDING_MODEL || 'text-embedding-3-small',
-            braveSearchApiKey: env.BRAVE_SEARCH_API_KEY || '',
-            baseSystemPrompt: BASE_SYSTEM_PROMPT
-        });
+      const env = readEnv();
+      res.json({
+        defaultLLMProvider: env.DEFAULT_LLM_PROVIDER || 'openai',
+        defaultLLMModel: env.DEFAULT_LLM_MODEL || '',
+        defaultUserName: env.DEFAULT_USER_NAME || 'Kullanıcı',
+        openaiApiKey: env.OPENAI_API_KEY || '',
+        anthropicApiKey: env.ANTHROPIC_API_KEY || '',
+        minimaxApiKey: env.MINIMAX_API_KEY || '',
+        githubToken: env.GITHUB_TOKEN || '',
+        groqApiKey: env.GROQ_API_KEY || '',
+        mistralApiKey: env.MISTRAL_API_KEY || '',
+        nvidiaApiKey: env.NVIDIA_API_KEY || '',
+        ollamaBaseUrl: env.OLLAMA_BASE_URL || 'http://localhost:11434',
+        allowShellExecution: env.ALLOW_SHELL_EXECUTION === 'true',
+        systemPrompt: env.SYSTEM_PROMPT || '',
+        autonomousStepLimit: env.AUTONOMOUS_STEP_LIMIT || '5',
+        memoryDecayThreshold: env.MEMORY_DECAY_THRESHOLD || '30',
+        semanticSearchThreshold: env.SEMANTIC_SEARCH_THRESHOLD || '0.7',
+        logLevel: env.LOG_LEVEL || 'info',
+        embeddingProvider: env.EMBEDDING_PROVIDER || 'openai',
+        embeddingModel: env.EMBEDDING_MODEL || 'text-embedding-3-small',
+        braveSearchApiKey: env.BRAVE_SEARCH_API_KEY || '',
+        baseSystemPrompt: BASE_SYSTEM_PROMPT,
+        // Gelişmiş Model Ayarları
+        temperature: env.TEMPERATURE || '0.7',
+        maxTokens: env.MAX_TOKENS || '4096',
+      });
     });
 
     app.post('/api/settings', (req, res) => {
@@ -215,26 +244,29 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         const updates: Record<string, string> = {};
 
         const map: Record<string, string> = {
-            defaultLLMProvider: 'DEFAULT_LLM_PROVIDER',
-            defaultLLMModel: 'DEFAULT_LLM_MODEL',
-            defaultUserName: 'DEFAULT_USER_NAME',
-            openaiApiKey: 'OPENAI_API_KEY',
-            anthropicApiKey: 'ANTHROPIC_API_KEY',
-            minimaxApiKey: 'MINIMAX_API_KEY',
-            githubToken: 'GITHUB_TOKEN',
-            groqApiKey: 'GROQ_API_KEY',
-            mistralApiKey: 'MISTRAL_API_KEY',
-            nvidiaApiKey: 'NVIDIA_API_KEY',
-            ollamaBaseUrl: 'OLLAMA_BASE_URL',
-            allowShellExecution: 'ALLOW_SHELL_EXECUTION',
-            systemPrompt: 'SYSTEM_PROMPT',
-            autonomousStepLimit: 'AUTONOMOUS_STEP_LIMIT',
-            memoryDecayThreshold: 'MEMORY_DECAY_THRESHOLD',
-            semanticSearchThreshold: 'SEMANTIC_SEARCH_THRESHOLD',
-            logLevel: 'LOG_LEVEL',
-            embeddingProvider: 'EMBEDDING_PROVIDER',
-            embeddingModel: 'EMBEDDING_MODEL',
-            braveSearchApiKey: 'BRAVE_SEARCH_API_KEY',
+          defaultLLMProvider: 'DEFAULT_LLM_PROVIDER',
+          defaultLLMModel: 'DEFAULT_LLM_MODEL',
+          defaultUserName: 'DEFAULT_USER_NAME',
+          openaiApiKey: 'OPENAI_API_KEY',
+          anthropicApiKey: 'ANTHROPIC_API_KEY',
+          minimaxApiKey: 'MINIMAX_API_KEY',
+          githubToken: 'GITHUB_TOKEN',
+          groqApiKey: 'GROQ_API_KEY',
+          mistralApiKey: 'MISTRAL_API_KEY',
+          nvidiaApiKey: 'NVIDIA_API_KEY',
+          ollamaBaseUrl: 'OLLAMA_BASE_URL',
+          allowShellExecution: 'ALLOW_SHELL_EXECUTION',
+          systemPrompt: 'SYSTEM_PROMPT',
+          autonomousStepLimit: 'AUTONOMOUS_STEP_LIMIT',
+          memoryDecayThreshold: 'MEMORY_DECAY_THRESHOLD',
+          semanticSearchThreshold: 'SEMANTIC_SEARCH_THRESHOLD',
+          logLevel: 'LOG_LEVEL',
+          embeddingProvider: 'EMBEDDING_PROVIDER',
+          embeddingModel: 'EMBEDDING_MODEL',
+          braveSearchApiKey: 'BRAVE_SEARCH_API_KEY',
+          // Gelişmiş Model Ayarları
+          temperature: 'TEMPERATURE',
+          maxTokens: 'MAX_TOKENS',
         };
 
         for (const [key, val] of Object.entries(body)) {
@@ -296,8 +328,54 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         res.json(providers);
     });
 
+    // ============ Feedback API ============
+  
+    app.post('/api/feedback', (req, res) => {
+      const { messageId, conversationId, type, comment } = req.body;
+      
+      if (!messageId || typeof messageId !== 'string') {
+        return res.status(400).json({ error: 'Mesaj ID (messageId) zorunludur' });
+      }
+      
+      if (!conversationId || typeof conversationId !== 'string') {
+        return res.status(400).json({ error: 'Konuşma ID (conversationId) zorunludur' });
+      }
+      
+      if (!type || !['positive', 'negative'].includes(type)) {
+        return res.status(400).json({ error: 'Feedback tipi (type) "positive" veya "negative" olmalıdır' });
+      }
+  
+      try {
+        // Feedback'i veritabanına kaydet
+        const feedback = memory.saveFeedback({
+          messageId,
+          conversationId,
+          type,
+          comment: comment || null,
+          timestamp: new Date().toISOString(),
+        });
+        
+        logger.info({ messageId, conversationId, type }, '[API] Feedback kaydedildi');
+        res.json({ success: true, feedback });
+      } catch (err: any) {
+        logger.error({ err }, '[API] Feedback kaydetme hatası');
+        res.status(500).json({ error: err.message });
+      }
+    });
+  
+    app.get('/api/feedback/:conversationId', (req, res) => {
+      const { conversationId } = req.params;
+      
+      try {
+        const feedbacks = memory.getFeedbacks(conversationId);
+        res.json(feedbacks);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+  
     // API 404 handler
     app.all('/api/*', (_req, res) => {
-        res.status(404).json({ error: 'API endpoint bulunamadı' });
+      res.status(404).json({ error: 'API endpoint bulunamadı' });
     });
-}
+  }

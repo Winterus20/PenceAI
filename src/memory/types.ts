@@ -95,8 +95,27 @@ export interface MemoryRow {
     retrievability: number | null;   // anlık hatırlama oranı [0,1]
     next_review_at: number | null;   // unix timestamp (saniye)
     review_count: number | null;     // toplam review sayısı
-    max_importance: number | null;   // arşivden geri gelirken importance cap (re-learning)
-}
+    max_importance: number | null; // arşivden geri gelirken importance cap (re-learning)
+  }
+  
+  // ========== Feedback Tipleri ==========
+  
+  export interface FeedbackRow {
+    id: number;
+    message_id: string;
+    conversation_id: string;
+    type: 'positive' | 'negative';
+    comment: string | null;
+    created_at: string;
+  }
+  
+  export interface FeedbackInput {
+    messageId: string;
+    conversationId: string;
+    type: 'positive' | 'negative';
+    comment?: string | null;
+    timestamp: string;
+  }
 
 export interface MemoryWriteMetadata {
     source?: string;

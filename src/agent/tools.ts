@@ -5,11 +5,151 @@ import { promisify } from 'util';
 import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import TurndownService from 'turndown';
+import { z } from 'zod';
 import { getConfig } from '../gateway/config.js';
 import { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/logger.js';
 
 const execAsync = promisify(exec);
+
+// ============================================================
+// Zod Runtime Validation Schemas
+// ============================================================
+
+/**
+ * Dosya okuma argümanları için Zod şeması
+ */
+const ReadFileArgsSchema = z.object({
+  path: z.string({
+    required_error: '"path" parametresi zorunludur',
+    invalid_type_error: '"path" parametresi bir string olmalıdır',
+  }).min(1, '"path" parametresi boş olamaz'),
+});
+
+/**
+ * Dosya yazma argümanları için Zod şeması
+ */
+const WriteFileArgsSchema = z.object({
+  path: z.string({
+    required_error: '"path" parametresi zorunludur',
+    invalid_type_error: '"path" parametresi bir string olmalıdır',
+  }).min(1, '"path" parametresi boş olamaz'),
+  content: z.string({
+    required_error: '"content" parametresi zorunludur',
+    invalid_type_error: '"content" parametresi bir string olmalıdır',
+  }),
+});
+
+/**
+ * Dizin listeleme argümanları için Zod şeması
+ */
+const ListDirectoryArgsSchema = z.object({
+  path: z.string({
+    required_error: '"path" parametresi zorunludur',
+    invalid_type_error: '"path" parametresi bir string olmalıdır',
+  }).min(1, '"path" parametresi boş olamaz'),
+});
+
+/**
+ * Bellek arama argümanları için Zod şeması
+ */
+const SearchMemoryArgsSchema = z.object({
+  query: z.string({
+    required_error: '"query" parametresi zorunludur',
+    invalid_type_error: '"query" parametresi bir string olmalıdır',
+  }).min(1, '"query" parametresi boş olamaz'),
+});
+
+/**
+ * Bellek silme argümanları için Zod şeması
+ */
+const DeleteMemoryArgsSchema = z.object({
+  id: z.coerce.number({
+    required_error: '"id" parametresi zorunludur',
+    invalid_type_error: '"id" parametresi bir sayı olmalıdır',
+  }).int('"id" parametresi tam sayı olmalıdır'),
+});
+
+/**
+ * Belleğe ekleme argümanları için Zod şeması
+ */
+const SaveMemoryArgsSchema = z.object({
+  content: z.string({
+    required_error: '"content" parametresi zorunludur',
+    invalid_type_error: '"content" parametresi bir string olmalıdır',
+  }).min(1, '"content" parametresi boş olamaz'),
+  category: z.string().optional().default('preference'),
+  importance: z.coerce.number().int().min(1).max(10).optional().default(5),
+});
+
+/**
+ * Konuşma arama argümanları için Zod şeması
+ */
+const SearchConversationArgsSchema = z.object({
+  query: z.string({
+    required_error: '"query" parametresi zorunludur',
+    invalid_type_error: '"query" parametresi bir string olmalıdır',
+  }).min(1, '"query" parametresi boş olamaz'),
+});
+
+/**
+ * Web araç argümanları için Zod şeması
+ */
+const WebToolArgsSchema = z.object({
+  url: z.string({
+    required_error: '"url" parametresi zorunludur',
+    invalid_type_error: '"url" parametresi bir string olmalıdır',
+  }).min(1, '"url" parametresi boş olamaz'),
+  mode: z.enum(['quick', 'deep'], {
+    errorMap: () => ({ message: '"mode" parametresi "quick" veya "deep" olmalıdır' }),
+  }).optional().default('quick'),
+});
+
+/**
+ * Shell komut argümanları için Zod şeması
+ */
+const ExecuteShellArgsSchema = z.object({
+  command: z.string({
+    required_error: '"command" parametresi zorunludur',
+    invalid_type_error: '"command" parametresi bir string olmalıdır',
+  }).min(1, '"command" parametresi boş olamaz'),
+  cwd: z.string().optional(),
+});
+
+/**
+ * Web arama argümanları için Zod şeması
+ */
+const WebSearchArgsSchema = z.object({
+  query: z.string({
+    required_error: '"query" parametresi zorunludur',
+    invalid_type_error: '"query" parametresi bir string olmalıdır',
+  }).min(1, '"query" parametresi boş olamaz'),
+  count: z.coerce.number().int().min(1).max(10).optional().default(5),
+  freshness: z.string().optional(),
+});
+
+/**
+ * Zod validation hatasını Türkçe hata mesajına dönüştürür
+ */
+function formatZodError(error: z.ZodError): string {
+  const errors = error.errors.map(err => {
+    const field = err.path.join('.') || 'bilinmeyen alan';
+    return `${field}: ${err.message}`;
+  });
+  return `⚠️ Doğrulama hatası: ${errors.join(', ')}`;
+}
+
+/**
+ * Zod şeması ile argümanları doğrular
+ * @returns Doğrulanmış argümanlar veya hata mesajı string'i
+ */
+function validateArgs<T>(schema: z.ZodSchema<T>, args: Record<string, unknown>): { success: true; data: T } | { success: false; error: string } {
+  const result = schema.safeParse(args);
+  if (result.success) {
+    return { success: true, data: result.data };
+  }
+  return { success: false, error: formatZodError(result.error) };
+}
 
 export interface ToolExecutor {
     name: string;
@@ -78,174 +218,205 @@ export function createBuiltinTools(
     }
 
     const tools: ToolExecutor[] = [
-        // --- Dosya Okuma ---
-        {
-            name: 'readFile',
-            async execute(args) {
-                const filePath = args.path as string;
-                validatePath(filePath);
-                let handle: fs.FileHandle | null = null;
-                try {
-                    const stats = await fs.stat(filePath);
-                    const MAX_BYTES = 128000;
-
-                    handle = await fs.open(filePath, 'r');
-                    const buffer = Buffer.alloc(MAX_BYTES);
-                    const { bytesRead } = await handle.read(buffer, 0, MAX_BYTES, 0);
-                    let content = buffer.toString('utf-8', 0, bytesRead);
-
-                    if (stats.size > MAX_BYTES) {
-                        content += `\n\n... [Dosya çok büyük, ilk ${MAX_BYTES} byte gösterildi. Toplam boyut: ${stats.size} bytelar]`;
-                    }
-                    return content;
-                } catch (err: any) {
-                    return `Hata: Dosya okunamadı — ${err.message}`;
-                } finally {
-                    if (handle) {
-                        try {
-                            await handle.close();
-                        } catch (e) {
-                            // Ignored
-                        }
-                    }
-                }
-            },
+      // --- Dosya Okuma ---
+      {
+        name: 'readFile',
+        async execute(args) {
+          // Zod runtime validation
+          const validation = validateArgs(ReadFileArgsSchema, args);
+          if (!validation.success) return validation.error;
+          
+          const { path: filePath } = validation.data;
+          validatePath(filePath);
+          let handle: fs.FileHandle | null = null;
+          try {
+            const stats = await fs.stat(filePath);
+            const MAX_BYTES = 128000;
+  
+            handle = await fs.open(filePath, 'r');
+            const buffer = Buffer.alloc(MAX_BYTES);
+            const { bytesRead } = await handle.read(buffer, 0, MAX_BYTES, 0);
+            let content = buffer.toString('utf-8', 0, bytesRead);
+  
+            if (stats.size > MAX_BYTES) {
+              content += `\n\n... [Dosya çok büyük, ilk ${MAX_BYTES} byte gösterildi. Toplam boyut: ${stats.size} bytelar]`;
+            }
+            return content;
+          } catch (err: unknown) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          return `Hata: Dosya okunamadı — ${error.message}`;
+          } finally {
+            if (handle) {
+              try {
+                await handle.close();
+              } catch (e) {
+                // Ignored
+              }
+            }
+          }
         },
-
-        // --- Dosya Yazma ---
-        {
-            name: 'writeFile',
-            async execute(args) {
-                const filePath = args.path as string;
-                const content = args.content as string;
-                validatePath(filePath);
-
-                // Hassas dizin onay kontrolü
-                const rejection = await requireConfirmation(
-                    confirmCallback, 'writeFile', filePath, 'write',
-                    `"${filePath}" dosyasına yazma`, sensitivePaths,
-                );
-                if (rejection) return rejection;
-
-                try {
-                    // Dizini oluştur
-                    await fs.mkdir(path.dirname(filePath), { recursive: true });
-                    await fs.writeFile(filePath, content, 'utf-8');
-                    return `✅ Dosya başarıyla yazıldı: ${filePath}`;
-                } catch (err: any) {
-                    return `Hata: Dosya yazılamadı — ${err.message}`;
-                }
-            },
+      },
+  
+      // --- Dosya Yazma ---
+      {
+        name: 'writeFile',
+        async execute(args) {
+          // Zod runtime validation
+          const validation = validateArgs(WriteFileArgsSchema, args);
+          if (!validation.success) return validation.error;
+          
+          const { path: filePath, content } = validation.data;
+          validatePath(filePath);
+  
+          // Hassas dizin onay kontrolü
+          const rejection = await requireConfirmation(
+            confirmCallback, 'writeFile', filePath, 'write',
+            `"${filePath}" dosyasına yazma`, sensitivePaths,
+          );
+          if (rejection) return rejection;
+  
+          try {
+            // Dizini oluştur
+            await fs.mkdir(path.dirname(filePath), { recursive: true });
+            await fs.writeFile(filePath, content, 'utf-8');
+            return `✅ Dosya başarıyla yazıldı: ${filePath}`;
+          } catch (err: unknown) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          return `Hata: Dosya yazılamadı — ${error.message}`;
+          }
         },
-
-        // --- Dizin Listeleme ---
-        {
-            name: 'listDirectory',
-            async execute(args) {
-                const dirPath = args.path as string;
-                validatePath(dirPath);
-                try {
-                    const entries = await fs.readdir(dirPath, { withFileTypes: true });
-                    const lines = entries.map(e => {
-                        const icon = e.isDirectory() ? '📁' : '📄';
-                        return `${icon} ${e.name}`;
-                    });
-                    return lines.join('\n') || '(Boş dizin)';
-                } catch (err: any) {
-                    return `Hata: Dizin listelenemedi — ${err.message}`;
-                }
-            },
+      },
+  
+      // --- Dizin Listeleme ---
+      {
+        name: 'listDirectory',
+        async execute(args) {
+          // Zod runtime validation
+          const validation = validateArgs(ListDirectoryArgsSchema, args);
+          if (!validation.success) return validation.error;
+          
+          const { path: dirPath } = validation.data;
+          validatePath(dirPath);
+          try {
+            const entries = await fs.readdir(dirPath, { withFileTypes: true });
+            const lines = entries.map(e => {
+              const icon = e.isDirectory() ? '📁' : '📄';
+              return `${icon} ${e.name}`;
+            });
+            return lines.join('\n') || '(Boş dizin)';
+          } catch (err: unknown) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          return `Hata: Dizin listelenemedi — ${error.message}`;
+          }
         },
-
-        // --- Bellek Arama (Graph-Aware: FTS + Semantik + Bağlamsal) ---
-        {
-            name: 'searchMemory',
-            async execute(args) {
-                const query = args.query as string;
-                try {
-                    const result = await memoryManager.graphAwareSearch(query, 10);
-                    const combined = [...result.active, ...result.archival];
-
-                    if (combined.length === 0) {
-                        return 'Bellekte eşleşen kayıt bulunamadı.';
-                    }
-                    return combined.map((r, i) => `${i + 1}. [ID:${r.id}] [${r.category}] ${r.content} (önem: ${r.importance}, erişim: ${r.access_count})`).join('\n');
-                } catch (err: any) {
-                    return `Hata: Arama yapılamadı — ${err.message}`;
-                }
-            },
+      },
+  
+      // --- Bellek Arama (Graph-Aware: FTS + Semantik + Bağlamsal) ---
+      {
+        name: 'searchMemory',
+        async execute(args) {
+          // Zod runtime validation
+          const validation = validateArgs(SearchMemoryArgsSchema, args);
+          if (!validation.success) return validation.error;
+          
+          const { query } = validation.data;
+          try {
+            const result = await memoryManager.graphAwareSearch(query, 10);
+            const combined = [...result.active, ...result.archival];
+  
+            if (combined.length === 0) {
+              return 'Bellekte eşleşen kayıt bulunamadı.';
+            }
+            return combined.map((r, i) => `${i + 1}. [ID:${r.id}] [${r.category}] ${r.content} (önem: ${r.importance}, erişim: ${r.access_count})`).join('\n');
+          } catch (err: unknown) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          return `Hata: Arama yapılamadı — ${error.message}`;
+          }
         },
+      },
 
         // --- Bellek Silme ---
         {
-            name: 'deleteMemory',
-            async execute(args) {
-                const memoryId = Number(args.id);
-                if (isNaN(memoryId)) return 'Hata: Geçersiz bellek ID (sayı olmalı)';
-                try {
-                    const deleted = memoryManager.deleteMemory(memoryId);
-                    if (deleted) {
-                        return `✅ Bellek silindi (ID: ${memoryId})`;
-                    }
-                    return `⚠️ Bellek bulunamadı veya erişim reddedildi (ID: ${memoryId})`;
-                } catch (err: any) {
-                    return `Hata: Bellek silinemedi — ${err.message}`;
-                }
-            },
+          name: 'deleteMemory',
+          async execute(args) {
+            // Zod runtime validation
+            const validation = validateArgs(DeleteMemoryArgsSchema, args);
+            if (!validation.success) return validation.error;
+            
+            const { id: memoryId } = validation.data;
+            try {
+              const deleted = memoryManager.deleteMemory(memoryId);
+              if (deleted) {
+                return `✅ Bellek silindi (ID: ${memoryId})`;
+              }
+              return `⚠️ Bellek bulunamadı veya erişim reddedildi (ID: ${memoryId})`;
+            } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            return `Hata: Bellek silinemedi — ${error.message}`;
+            }
+          },
         },
-
+    
         // --- Belleğe Ekleme (DENEYSEL) ---
         {
-            name: 'saveMemory',
-            async execute(args) {
-                // Not: Deneysel olarak eklendi, ileride kaldırılabilir.
-                const content = args.content as string;
-                if (!content) return 'Hata: İçerik boş olamaz.';
-                const category = typeof args.category === 'string' ? args.category : 'preference';
-                const importance = Number(args.importance) || 5;
-
-                try {
-                    const result = await memoryManager.addMemory(content, category, importance, mergeFn);
-                    return `✅ Bilgi başarıyla kaydedildi/birleştirildi (ID: ${result.id})${result.isUpdate ? ' [Mevcut bilgi güncellendi]' : ''}`;
-                } catch (err: any) {
-                    return `Hata: Bilgi kaydedilemedi — ${err.message}`;
-                }
-            },
+          name: 'saveMemory',
+          async execute(args) {
+            // Zod runtime validation
+            const validation = validateArgs(SaveMemoryArgsSchema, args);
+            if (!validation.success) return validation.error;
+            
+            // Not: Deneysel olarak eklendi, ileride kaldırılabilir.
+            const { content, category, importance } = validation.data;
+    
+            try {
+              const result = await memoryManager.addMemory(content, category, importance, mergeFn);
+              return `✅ Bilgi başarıyla kaydedildi/birleştirildi (ID: ${result.id})${result.isUpdate ? ' [Mevcut bilgi güncellendi]' : ''}`;
+            } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            return `Hata: Bilgi kaydedilemedi — ${error.message}`;
+            }
+          },
         },
-
+    
         // --- Konuşma Geçmişinde Arama (Hibrit: FTS + Semantik) ---
         {
-            name: 'searchConversation',
-            async execute(args) {
-                const query = args.query as string;
-                try {
-                    const results = await memoryManager.hybridSearchMessages(query, 20);
-                    if (results.length === 0) {
-                        return 'Geçmiş konuşmalarda eşleşen mesaj bulunamadı.';
-                    }
-                    return results.map((r, i) => {
-                        const dateStr = typeof r.created_at === 'string' && !r.created_at.endsWith('Z') ? r.created_at.replace(' ', 'T') + 'Z' : r.created_at;
-                        const time = new Date(dateStr).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' });
-                        const role = r.role === 'user' ? '👤' : '🤖';
-                        const content = r.content.length > 200 ? r.content.substring(0, 200) + '...' : r.content;
-                        const sim = r.similarity > 0 ? ` [benzerlik: ${(r.similarity * 100).toFixed(0)}%]` : '';
-                        const title = r.conversation_title ? ` "${r.conversation_title}"` : '';
-                        return `${i + 1}. ${role} [${time}]${sim} (conv:${r.conversation_id.substring(0, 8)}${title})\n   ${content}`;
-                    }).join('\n\n');
-                } catch (err: any) {
-                    return `Hata: Konuşma araması yapılamadı — ${err.message}`;
-                }
-            },
+          name: 'searchConversation',
+          async execute(args) {
+            // Zod runtime validation
+            const validation = validateArgs(SearchConversationArgsSchema, args);
+            if (!validation.success) return validation.error;
+            
+            const { query } = validation.data;
+            try {
+              const results = await memoryManager.hybridSearchMessages(query, 20);
+              if (results.length === 0) {
+                return 'Geçmiş konuşmalarda eşleşen mesaj bulunamadı.';
+              }
+              return results.map((r, i) => {
+                const dateStr = typeof r.created_at === 'string' && !r.created_at.endsWith('Z') ? r.created_at.replace(' ', 'T') + 'Z' : r.created_at;
+                const time = new Date(dateStr).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' });
+                const role = r.role === 'user' ? '👤' : '🤖';
+                const content = r.content.length > 200 ? r.content.substring(0, 200) + '...' : r.content;
+                const sim = r.similarity > 0 ? ` [benzerlik: ${(r.similarity * 100).toFixed(0)}%]` : '';
+                const title = r.conversation_title ? ` "${r.conversation_title}"` : '';
+                return `${i + 1}. ${role} [${time}]${sim} (conv:${r.conversation_id.substring(0, 8)}${title})\n ${content}`;
+              }).join('\n\n');
+            } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            return `Hata: Konuşma araması yapılamadı — ${error.message}`;
+            }
+          },
         },
-
+    
         // --- Web Okuyucu (Quick & Deep Scan) ---
         {
-            name: 'webTool',
-            async execute(args) {
-                const url = args.url as string;
-                const mode = args.mode as string || 'quick';
-
-                if (!url) return 'Hata: "url" parametresi zorunludur.';
+          name: 'webTool',
+          async execute(args) {
+            // Zod runtime validation
+            const validation = validateArgs(WebToolArgsSchema, args);
+            if (!validation.success) return validation.error;
+            
+            const { url, mode } = validation.data;
 
                 try {
                     if (mode === 'deep') {
@@ -287,8 +458,8 @@ export function createBuiltinTools(
                         // JS tabanlı gereksiz elementleri parse öncesi temizlemek performansı artırabilir
                         const scripts = document.querySelectorAll('script');
                         const styles = document.querySelectorAll('style');
-                        scripts.forEach((s: any) => s.remove());
-                        styles.forEach((s: any) => s.remove());
+                        scripts.forEach((s: unknown) => { if (s && typeof (s as { remove?: () => void }).remove === 'function') (s as { remove: () => void }).remove(); });
+                        styles.forEach((s: unknown) => { if (s && typeof (s as { remove?: () => void }).remove === 'function') (s as { remove: () => void }).remove(); });
 
                         const reader = new Readability(document);
                         const article = reader.parse();
@@ -311,8 +482,9 @@ export function createBuiltinTools(
                         }
                         return finalContent;
                     }
-                } catch (err: any) {
-                    return `Hata: webTool çalıştırılamadı — ${err.message}`;
+                } catch (err: unknown) {
+                const error = err instanceof Error ? err : new Error(String(err));
+                return `Hata: webTool çalıştırılamadı — ${error.message}`;
                 }
             }
         },
@@ -320,15 +492,18 @@ export function createBuiltinTools(
 
     // --- Kabuk Komutu ---
     if (config.allowShellExecution) {
-        tools.push({
-            name: 'executeShell',
-            async execute(args) {
-                const command = args.command as string;
-                const cwd = args.cwd as string | undefined;
-
-                // Hassas dizin onay kontrolü (cwd + komut içindeki yollar)
-                // 1) cwd kontrolü
-                const checkPath = cwd || process.cwd();
+      tools.push({
+        name: 'executeShell',
+        async execute(args) {
+          // Zod runtime validation
+          const validation = validateArgs(ExecuteShellArgsSchema, args);
+          if (!validation.success) return validation.error;
+          
+          const { command, cwd } = validation.data;
+  
+          // Hassas dizin onay kontrolü (cwd + komut içindeki yollar)
+          // 1) cwd kontrolü
+          const checkPath = cwd || process.cwd();
                 const cwdRejection = await requireConfirmation(
                     confirmCallback, 'executeShell', checkPath, 'execute',
                     `"${command}" komutu (dizin: ${checkPath})`, sensitivePaths,
@@ -389,8 +564,9 @@ export function createBuiltinTools(
                 if (cwd) {
                     try {
                         validatePath(cwd);
-                    } catch (e: any) {
-                        return `⛔ Güvenlik: cwd parametresi geçersiz — ${e.message}`;
+                    } catch (e: unknown) {
+                    const error = e instanceof Error ? e : new Error(String(e));
+                    return `⛔ Güvenlik: cwd parametresi geçersiz — ${error.message}`;
                     }
                 }
 
@@ -411,8 +587,9 @@ export function createBuiltinTools(
                     }
 
                     return result || '(Komut çıktı üretmedi)';
-                } catch (err: any) {
-                    return `Hata: Komut çalıştırılamadı — ${err.message}`;
+                } catch (err: unknown) {
+                const error = err instanceof Error ? err : new Error(String(err));
+                return `Hata: Komut çalıştırılamadı — ${error.message}`;
                 }
             },
         });
@@ -420,20 +597,24 @@ export function createBuiltinTools(
 
     // --- Web Arama (Brave Search) ---
     if (config.braveSearchApiKey) {
-        tools.push({
-            name: 'webSearch',
-            async execute(args) {
-                const query = args.query as string;
-                const count = Math.min(Number(args.count) || 5, 10);
-                const freshness = args.freshness as string | undefined;
-
-                try {
-                    const params = new URLSearchParams({
-                        q: query,
-                        count: String(count),
-                        search_lang: 'tr',
-                    });
-                    if (freshness) params.set('freshness', freshness);
+      tools.push({
+        name: 'webSearch',
+        async execute(args) {
+          // Zod runtime validation
+          const validation = validateArgs(WebSearchArgsSchema, args);
+          if (!validation.success) return validation.error;
+          
+          const { query, freshness } = validation.data;
+          const count = validation.data.count ?? 5;
+          const safeCount = Math.min(count, 10);
+  
+          try {
+            const params = new URLSearchParams({
+              q: query,
+              count: String(safeCount),
+              search_lang: 'tr',
+            });
+            if (freshness) params.set('freshness', freshness);
 
                     const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
                         headers: {
