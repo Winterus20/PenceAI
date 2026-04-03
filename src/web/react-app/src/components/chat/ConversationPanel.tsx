@@ -27,7 +27,6 @@ export interface ConversationPanelProps {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   sortOrder: SortOrder;
-  setSortOrder: (order: SortOrder) => void;
   conversations: ConversationItem[];
   activeConversationId: string | null;
   pinnedConversations: string[];
@@ -51,7 +50,6 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
   searchQuery,
   setSearchQuery,
   sortOrder,
-  setSortOrder,
   conversations,
   activeConversationId,
   pinnedConversations,
@@ -118,25 +116,21 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
   const renderConversationItem = (conversation: ConversationItem, isPinned: boolean) => (
     <div
       key={conversation.id}
-      className={`w-full border transition-colors ${activeConversationId === conversation.id ? 'border-foreground/40 bg-white/[0.07]' : 'border-border/60 bg-white/[0.03] hover:bg-white/[0.06]'}`}
+      className={`group w-full rounded-lg transition-colors ${activeConversationId === conversation.id ? 'bg-white/10' : 'hover:bg-white/5'}`}
     >
-      <div className="flex items-start justify-between gap-2 p-3">
+      <div className="flex items-center justify-between gap-2 p-2 px-3">
         <button
           type="button"
           onClick={() => handleLoadConversation(conversation.id)}
-          className="min-w-0 flex-1 text-left"
+          className="min-w-0 flex-1 text-left flex items-center gap-2"
         >
-          <div className="truncate font-medium text-foreground/90">{conversation.title || conversation.user_name || 'Sohbet'}</div>
-          <div className="mt-1 flex flex-wrap gap-2 text-label-sm uppercase text-muted-foreground">
-            <span>{conversation.message_count || 0} mesaj</span>
-            <span>{new Date(normalizeTimestamp(conversation.updated_at || conversation.created_at)).toLocaleDateString('tr-TR')}</span>
-          </div>
+          <div className="truncate text-[14px] font-normal text-foreground/90">{conversation.title || conversation.user_name || 'Sohbet'}</div>
         </button>
-        <div className="flex gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7 rounded-none" onClick={() => onTogglePinned(conversation.id)}>
+        <div className="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
+          <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md hover:bg-white/10 text-muted-foreground hover:text-foreground" onClick={() => onTogglePinned(conversation.id)}>
             {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 rounded-none text-destructive" onClick={() => onDeleteConversation(conversation.id)}>
+          <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md hover:bg-red-500/20 text-muted-foreground hover:text-red-400" onClick={() => onDeleteConversation(conversation.id)}>
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -145,68 +139,68 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
   );
 
   return (
-    <>
-      {/* Navigasyon Butonları */}
-      <nav className="border-b border-border/60 p-2">
-        <div className="flex gap-1">
-          <button
-            onClick={() => handleViewChange('chat')}
-            className={`flex flex-1 flex-col items-center gap-1 rounded-lg px-2 py-2.5 text-xs font-medium transition-all duration-200 ${
-              activeView === 'chat'
-                ? 'bg-purple-600/20 text-purple-400 border border-purple-500/50'
-                : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'
-            }`}
-          >
-            <MessageSquare className="h-4 w-4" />
-            <span className={isMobile ? '' : 'hidden sm:inline'}>Sohbet</span>
-          </button>
-          <button
-            onClick={() => handleViewChange('channels')}
-            className={`flex flex-1 flex-col items-center gap-1 rounded-lg px-2 py-2.5 text-xs font-medium transition-all duration-200 ${
-              activeView === 'channels'
-                ? 'bg-purple-600/20 text-purple-400 border border-purple-500/50'
-                : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'
-            }`}
-          >
-            <Radio className="h-4 w-4" />
-            <span className={isMobile ? '' : 'hidden sm:inline'}>Kanallar</span>
-          </button>
-        </div>
-      </nav>
-
-      {/* Arama ve Yeni Sohbet */}
-      <div className="border-b border-border/60 p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              className="h-10 w-full border border-input bg-card/70 pl-9 pr-3 text-sm"
-              placeholder="Konuşma ara..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-          <Button variant="outline" className="rounded-none" onClick={onNewChat}>
-            <Plus className="h-4 w-4" />
+    <div className="flex flex-col h-full bg-sidebar">
+      {/* Header: Toggle & New Chat (ChatGPT Style) */}
+      <div className="flex items-center justify-between p-3">
+        <div className="flex items-center gap-2">
+          {/* Toggle sidebar button is handled externally, but we keep Search here */}
+          <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground" onClick={() => {
+            const el = document.getElementById('search-input');
+            if (el) el.focus();
+          }} title="Konuşma Ara">
+            <Search size={18} />
           </Button>
         </div>
-        <select
-          className="h-10 w-full border border-input bg-card/70 px-3 text-sm"
-          value={sortOrder}
-          onChange={(e) => setSortOrder(e.target.value as SortOrder)}
-        >
-          <option value="newest">En yeni</option>
-          <option value="oldest">En eski</option>
-          <option value="messages">Mesaj sayısı</option>
-        </select>
+        <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground" onClick={onNewChat} title="Yeni Sohbet">
+          <Plus size={18} />
+        </Button>
       </div>
 
+      <div className="px-3 pb-2">
+        <div className="relative flex-1 group">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within:text-foreground" />
+          <input
+            id="search-input"
+            className="h-9 w-full rounded-xl bg-white/5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:bg-white/10 focus:outline-none focus:ring-1 focus:ring-white/20 transition-all"
+            placeholder="Konuşma ara..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* Navigasyon (Proje Özel) */}
+      <nav className="px-3 pb-2 flex gap-1">
+        <button
+          onClick={() => handleViewChange('chat')}
+          className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-2 py-2 text-xs font-medium transition-all duration-200 ${
+            activeView === 'chat'
+              ? 'bg-white/10 text-foreground'
+              : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
+          }`}
+        >
+          <MessageSquare className="h-4 w-4" />
+          <span className={isMobile ? '' : 'hidden sm:inline'}>Sohbet</span>
+        </button>
+        <button
+          onClick={() => handleViewChange('channels')}
+          className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-2 py-2 text-xs font-medium transition-all duration-200 ${
+            activeView === 'channels'
+              ? 'bg-white/10 text-foreground'
+              : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
+          }`}
+        >
+          <Radio className="h-4 w-4" />
+          <span className={isMobile ? '' : 'hidden sm:inline'}>Kanallar</span>
+        </button>
+      </nav>
+
       {/* Sohbet Listesi */}
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="flex-1 overflow-y-auto subtle-scrollbar px-3 pb-4">
         {groupedConversations.pinned.length ? (
           <div className="mb-6">
-            <div className="mb-2 px-2 text-meta">Sabitlenmiş</div>
-            <div className="space-y-2">
+            <div className="mb-1 px-2 text-xs font-semibold text-muted-foreground">Sabitlenmiş</div>
+            <div className="space-y-[2px]">
               {groupedConversations.pinned.map((conversation) => renderConversationItem(conversation, true))}
             </div>
           </div>
@@ -215,7 +209,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
         {[
           ['today', 'Bugün'],
           ['yesterday', 'Dün'],
-          ['thisWeek', 'Bu Hafta'],
+          ['thisWeek', 'Önceki 7 Gün'],
           ['older', 'Daha Eski'],
         ].map(([key, label]) => {
           const items = groupedConversations.groups[key] || [];
@@ -223,8 +217,8 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
 
           return (
             <div key={key} className="mb-6">
-              <div className="mb-2 px-2 text-meta">{label}</div>
-              <div className="space-y-2">
+              <div className="mb-1 px-2 text-xs font-semibold text-muted-foreground">{label}</div>
+              <div className="space-y-[2px]">
                 {items.map((conversation) => renderConversationItem(conversation, false))}
               </div>
             </div>
@@ -234,41 +228,39 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
 
       {/* İstatistikler */}
       {stats && (
-        <div className="border-t border-border/60 px-4 py-3">
+        <div className="px-4 py-3 mx-2 mb-2 rounded-xl bg-white/5 border border-white/5">
           <div className="flex items-center justify-around text-center">
             <div className="flex flex-col">
-              <span className="text-lg font-semibold text-foreground">{stats.conversations || 0}</span>
-              <span className="text-stats">Sohbet</span>
+              <span className="text-sm font-semibold text-foreground">{stats.conversations || 0}</span>
+              <span className="text-[10px] text-muted-foreground uppercase">Sohbet</span>
             </div>
-            <div className="h-8 w-px bg-border/60" />
             <div className="flex flex-col">
-              <span className="text-lg font-semibold text-foreground">{stats.messages || 0}</span>
-              <span className="text-stats">Mesaj</span>
+              <span className="text-sm font-semibold text-foreground">{stats.messages || 0}</span>
+              <span className="text-[10px] text-muted-foreground uppercase">Mesaj</span>
             </div>
-            <div className="h-8 w-px bg-border/60" />
             <div className="flex flex-col">
-              <span className="text-lg font-semibold text-foreground">{stats.memories || 0}</span>
-              <span className="text-stats">Bellek</span>
+              <span className="text-sm font-semibold text-foreground">{stats.memories || 0}</span>
+              <span className="text-[10px] text-muted-foreground uppercase">Bellek</span>
             </div>
           </div>
         </div>
       )}
 
       {/* Bağlantı Durumu */}
-      <div className="border-t border-border/60 px-4 py-3">
+      <div className="px-4 py-3 border-t border-white/5">
         <div className="flex items-center gap-2">
           <span
             className={`h-2.5 w-2.5 rounded-full ${
               isConnected
-                ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]'
-                : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]'
+                ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]'
+                : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]'
             }`}
           />
-          <span className="text-sm text-muted-foreground">
-            {isConnected ? 'Bağlı' : 'Bağlantı Kesik'}
+          <span className="text-sm font-medium text-foreground/80">
+            {isConnected ? 'Bağlantı Kuruldu' : 'Bağlantı Bekleniyor...'}
           </span>
         </div>
       </div>
-    </>
+    </div>
   );
 };

@@ -221,7 +221,7 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
     	<div
     		key={msg.id}
     		className={cn(
-    			"flex flex-col group animate-in slide-in-from-bottom-4 duration-700 ease-out py-3",
+    			"flex flex-col group animate-in slide-in-from-bottom-2 fade-in duration-300 ease-out py-3",
     			isUser ? "items-end text-right" : "items-start text-left"
     		)}
     	>
@@ -374,17 +374,14 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
 
     if (messages.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center h-full min-h-[50vh] text-center p-8 animate-in fade-in duration-1000">
-                <h3 className="text-3xl font-light tracking-tighter mb-4 text-foreground/80">Merhaba! Ben PençeAI</h3>
-                <p className="max-w-xl text-sm text-foreground/50 font-light tracking-wide leading-7">
-                    Kişisel AI asistanınız. Sohbet başlatabilir, geçmiş konuşmaları açabilir, bellekleri yönetebilir ve araç kullanımını canlı izleyebilirsiniz.
-                </p>
-                <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+            <div className="flex flex-col items-center justify-center h-full min-h-[60vh] text-center p-8 animate-in fade-in duration-1000 mt-[10vh]">
+                <h3 className="text-3xl md:text-3xl font-semibold tracking-tight mb-8 text-foreground">Ne üzerinde çalışıyorsun?</h3>
+                <div className="mt-8 max-w-2xl flex flex-wrap items-center justify-center gap-3">
                     {quickActions.map((action) => (
                         <Button
                             key={action}
                             variant="outline"
-                            className="rounded-none border-border/70 bg-transparent text-label-sm uppercase text-foreground/70 hover:bg-accent/50"
+                            className="rounded-xl border border-white/10 bg-white/5 text-[13px] font-normal text-foreground/70 hover:bg-white/10 hover:text-foreground hover:border-white/20 px-4 py-2 h-auto"
                             onClick={() => onQuickAction?.(action)}
                         >
                             {action}

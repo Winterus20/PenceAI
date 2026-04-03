@@ -11,12 +11,8 @@ function App() {
 
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-  }, [theme]);
+    root.classList.add('dark');
+  }, []);
 
   // View bazlı render
   const renderView = () => {
@@ -40,14 +36,14 @@ function App() {
         toastOptions={{
           duration: 4000,
           style: {
-            background: theme === 'dark' ? '#1f1f1f' : '#ffffff',
-            color: theme === 'dark' ? '#fff' : '#1a1a1a',
-            border: theme === 'dark' ? '1px solid #333' : '1px solid #e5e5e5',
+            background: '#212121',
+            color: '#fff',
+            border: '1px solid #2f2f2f',
           },
           error: {
             style: {
-              background: theme === 'dark' ? '#2a1a1a' : '#fef2f2',
-              border: theme === 'dark' ? '1px solid #5c2020' : '1px solid #fecaca',
+              background: '#2a1a1a',
+              border: '1px solid #5c2020',
             },
             iconTheme: {
               primary: '#ff4b4b',
@@ -56,8 +52,8 @@ function App() {
           },
           success: {
             style: {
-              background: theme === 'dark' ? '#1a2a1a' : '#f0fdf4',
-              border: theme === 'dark' ? '1px solid #205c20' : '1px solid #bbf7d0',
+              background: '#1a2a1a',
+              border: '1px solid #205c20',
             },
             iconTheme: {
               primary: '#4caf50',

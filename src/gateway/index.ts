@@ -4,19 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
-import { platform } from 'os';
 
-// Windows için UTF-8 encoding desteği
-if (platform() === 'win32') {
-  // Windows CMD/PowerShell'de UTF-8 code page aktif et
-  // Bu, Türkçe karakterlerin ve emojilerin düzgün görüntülenmesini sağlar
-  try {
-    process.stdout.setDefaultEncoding?.('utf8');
-    process.stderr.setDefaultEncoding?.('utf8');
-  } catch {
-    // Eski Node.js versiyonları için sessizce geç
-  }
-}
 
 import { getConfig, loadConfig } from './config.js';
 

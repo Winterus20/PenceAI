@@ -5,28 +5,28 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { platform } from 'os';
+import { execSync } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 const LOG_DIR = path.join(PROJECT_ROOT, 'logs');
 
-// Windows için UTF-8 encoding desteği
+// Windows için UTF-8 encoding desteği - en başta çalıştırılmalı
 if (platform() === 'win32') {
-  try {
-    process.stdout.setDefaultEncoding?.('utf8');
-    process.stderr.setDefaultEncoding?.('utf8');
-  } catch {
-    // Eski Node.js versiyonları için sessizce geç
-  }
+	try {
+		execSync('chcp 65001', { stdio: 'ignore' });
+	} catch {
+		// Sessizce geç
+	}
 }
 
 if (!fs.existsSync(LOG_DIR)) {
-  fs.mkdirSync(LOG_DIR, { recursive: true });
+	fs.mkdirSync(LOG_DIR, { recursive: true });
 }
 
 // Trace context için AsyncLocalStorage oluşturuyoruz
 interface TraceContext {
-    traceId: string;
+	traceId: string;
 }
 export const asyncLocalStorage = new AsyncLocalStorage<TraceContext>();
 
@@ -38,50 +38,53 @@ const targets = [];
 
 // 1. Terminal çıktısı (Geliştirmede pino-pretty, prod'da standart JSON)
 if (!isProd) {
-    targets.push({
-        target: 'pino-pretty',
-        level: logLevel,
-        options: {
-            colorize: true,
-            translateTime: 'SYS:standard',
-            ignore: 'pid,hostname',
-            messageFormat: '{msg} {if traceId}[trace: {traceId}]{end}', // Trace ID'yi ekranda daha rahat görmek için
-        }
-    });
+	targets.push({
+		target: 'pino-pretty',
+		level: logLevel,
+		options: {
+			colorize: true,
+			translateTime: 'SYS:standard',
+			ignore: 'pid,hostname',
+			messageFormat: '{msg} {if traceId}[trace: {traceId}]{end}',
+			// Windows için encoding desteği
+			destination: 1, // stdout - bu pino-pretty'nin doğru stream'e yazmasını sağlar
+			sync: true, // Senkron yazım Windows için daha güvenli
+		}
+	});
 }
 
 // 2. Roll (Rotasyon) Transport - Günlük olarak 100MB sınırında loglar `logs/` altına kaydedilecek
 targets.push({
-    target: 'pino-roll',
-    level: logLevel,
-    options: {
-        file: path.join(LOG_DIR, 'penceai'),
-        size: '100m', // 100MB limit (size is used, limit is deprecated)
-        frequency: 'daily', // Günlük rotasyon
-        extension: '.log',
-        mkdir: true
-    }
+	target: 'pino-roll',
+	level: logLevel,
+	options: {
+		file: path.join(LOG_DIR, 'penceai'),
+		size: '100m', // 100MB limit (size is used, limit is deprecated)
+		frequency: 'daily', // Günlük rotasyon
+		extension: '.log',
+		mkdir: true
+	}
 });
 
 const transport = pino.transport({ targets });
 
 export const logger = pino(
-    {
-        level: logLevel,
-        mixin() {
-            const context = asyncLocalStorage.getStore();
-            return context ? { traceId: context.traceId } : {};
-        },
-    },
-    transport
+	{
+		level: logLevel,
+		mixin() {
+			const context = asyncLocalStorage.getStore();
+			return context ? { traceId: context.traceId } : {};
+		},
+	},
+	transport
 );
 
 /**
  * Belirli bir traceID (veya uuid ile rastgele üretilecek) içerecek şekilde context çalıştırır.
  */
 export function runWithTraceId<T>(action: () => T, traceId?: string): T {
-    const context: TraceContext = {
-        traceId: traceId || uuidv4(),
-    };
-    return asyncLocalStorage.run(context, action);
+	const context: TraceContext = {
+		traceId: traceId || uuidv4(),
+	};
+	return asyncLocalStorage.run(context, action);
 }

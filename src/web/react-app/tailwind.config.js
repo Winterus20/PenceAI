@@ -50,6 +50,7 @@ export default {
           '4': 'hsl(var(--chart-4))',
           '5': 'hsl(var(--chart-5))'
         },
+        sidebar: 'hsl(var(--sidebar))',
         // Surface colors for glass-panel components
         surface: {
           'border': 'rgba(255, 255, 255, 0.06)',

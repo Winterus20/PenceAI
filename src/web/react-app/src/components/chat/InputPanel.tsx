@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Send, Paperclip, Plus, Loader2 } from 'lucide-react';
+import { Send, Plus, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { AttachmentItem } from '../../store/agentStore';
@@ -12,7 +12,6 @@ export interface InputPanelProps {
   pendingAttachments: AttachmentItem[];
   setPendingAttachments: React.Dispatch<React.SetStateAction<AttachmentItem[]>>;
   onSend: (contentOverride?: string) => void;
-  onNewChat: () => void;
   onFileSelection: (files: File[]) => void;
 }
 
@@ -23,7 +22,6 @@ export const InputPanel: React.FC<InputPanelProps> = ({
   pendingAttachments,
   setPendingAttachments,
   onSend,
-  onNewChat,
   onFileSelection,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,66 +63,74 @@ export const InputPanel: React.FC<InputPanelProps> = ({
   };
 
   return (
-    <div className="w-full flex justify-center pb-6 pt-4 px-4 bg-gradient-to-t from-background via-background/95 to-transparent z-40 relative">
-      <div
-        className={`max-w-3xl w-full flex flex-col relative group border border-border/60 bg-card/20 p-4 transition-colors`}
-      >
+    <div className="w-full flex justify-center pb-6 pt-2 z-40 relative">
+      <div className="max-w-3xl w-full flex flex-col relative bg-[#2f2f2f] rounded-[26px] border border-transparent focus-within:border-white/10 transition-colors shadow-sm">
+        
+        {/* Attachments preview area */}
         {pendingAttachments.length ? (
-          <div className="mb-3 flex flex-wrap gap-2">
+          <div className="px-4 pt-4 pb-1 flex flex-wrap gap-3">
             {pendingAttachments.map((attachment, index) => (
-              <div key={`${attachment.fileName}-${index}`} className="flex items-center gap-2 border border-border/60 bg-background/40 px-3 py-2 text-sm">
-                <span className="max-w-48 truncate">{attachment.fileName}</span>
-                <span className="text-xs text-muted-foreground">{formatFileSize(attachment.size)}</span>
+              <div key={`${attachment.fileName}-${index}`} className="flex flex-col relative group rounded-xl border border-white/10 bg-[#212121] p-2 w-16 h-16 justify-center items-center shadow-sm">
+                <span className="text-[10px] font-medium truncate w-full text-center text-foreground/80 px-1" title={attachment.fileName}>
+                  {attachment.fileName.length > 8 ? attachment.fileName.substring(0, 8) + '...' : attachment.fileName}
+                </span>
+                <span className="text-[9px] text-muted-foreground mt-1">{formatFileSize(attachment.size)}</span>
                 <button
                   type="button"
-                  className="text-muted-foreground hover:text-foreground"
+                  className="absolute -top-2 -right-2 bg-foreground text-background hover:bg-foreground/80 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
                   onClick={() => removeAttachment(index)}
                 >
-                  ✕
+                  <X size={12} strokeWidth={3} />
                 </button>
               </div>
             ))}
           </div>
         ) : null}
 
-        <Textarea
-          ref={textareaRef}
-          value={input}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          placeholder="Mesajınızı yazın veya dosya bırakın..."
-          className="min-h-[44px] w-full resize-none bg-transparent border-0 focus-visible:ring-0 rounded-none px-0 py-3 text-base font-light placeholder:text-foreground/20 transition-all duration-500"
-          rows={1}
-        />
+        <div className="flex items-end gap-2 px-3 py-3">
+          {/* File Attachment Button */}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="flex-shrink-0 h-8 w-8 rounded-full bg-white/5 hover:bg-white/10 text-foreground" 
+            onClick={() => fileInputRef.current?.click()}
+            title="Dosya Ekle"
+          >
+            <Plus size={18} strokeWidth={2.5} />
+          </Button>
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="hidden"
-          multiple
-          onChange={handleFileInputChange}
-        />
+          {/* Text Area */}
+          <Textarea
+            ref={textareaRef}
+            value={input}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder="Ne üzerinde çalışıyorsun? (Sohbet veya dosya bırak...)"
+            className="flex-1 min-h-[32px] max-h-[200px] resize-none bg-transparent border-0 focus-visible:ring-0 rounded-none px-1 py-1 text-[15px] font-normal placeholder:text-muted-foreground/80 transition-all subtle-scrollbar"
+            rows={1}
+            style={{ lineHeight: '32px' }}
+          />
 
-        <div className="mt-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Button variant="outline" className="rounded-none" onClick={() => fileInputRef.current?.click()}>
-              <Paperclip className="h-4 w-4" />
-              Dosya Ekle
-            </Button>
-            <Button variant="outline" className="rounded-none" onClick={onNewChat}>
-              <Plus className="h-4 w-4" />
-              Yeni Sohbet
-            </Button>
-          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            multiple
+            onChange={handleFileInputChange}
+          />
 
-          <div className="flex items-center z-50">
+          {/* Action Buttons (Send) */}
+          <div className="flex-shrink-0 flex items-center justify-center h-8 w-8 mb-0.5">
             {isReceiving ? (
-              <Loader2 className="animate-spin w-4 h-4 text-foreground/40" />
+              <Loader2 className="animate-spin w-5 h-5 text-foreground/50" />
             ) : (
-              <Button onClick={() => onSend()} disabled={!input.trim() && pendingAttachments.length === 0} className="rounded-none">
-                <Send className="h-4 w-4" />
-                Gönder
+              <Button 
+                onClick={() => onSend()} 
+                disabled={!input.trim() && pendingAttachments.length === 0} 
+                className={`h-8 w-8 rounded-full p-0 transition-all flex items-center justify-center border-0 ${input.trim() || pendingAttachments.length ? 'bg-white text-black hover:bg-gray-200' : 'bg-[#1e1e1e] text-white/30'}`}
+              >
+                 <Send className="h-4 w-4 relative right-[1px]" strokeWidth={2} />
               </Button>
             )}
           </div>

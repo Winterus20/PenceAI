@@ -4,65 +4,37 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 0%;
+    --background: 0 0% 13%; /* #212121 */
+    --foreground: 0 0% 98%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 0%;
+    --card: 0 0% 13%; /* #212121 */
+    --card-foreground: 0 0% 98%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 0%;
+    --popover: 0 0% 13%;
+    --popover-foreground: 0 0% 98%;
 
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
 
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
+    --secondary: 0 0% 18%; /* lighter gray for hover/buttons `#2f2f2f` */
+    --secondary-foreground: 0 0% 98%;
 
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 40%;
+    --muted: 0 0% 18%;
+    --muted-foreground: 0 0% 65%;
 
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    --accent: 0 0% 18%;
+    --accent-foreground: 0 0% 98%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --radius: 1rem;
-  }
-
-  .dark {
-    --background: 0 0% 7%;
-    --foreground: 0 0% 96%;
-
-    --card: 0 0% 10%;
-    --card-foreground: 0 0% 96%;
-
-    --popover: 0 0% 9%;
-    --popover-foreground: 0 0% 96%;
-
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 7%;
-
-    --secondary: 0 0% 14%;
-    --secondary-foreground: 0 0% 96%;
-
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 58%;
-
-    --accent: 0 0% 16%;
-    --accent-foreground: 0 0% 98%;
-
-    --destructive: 0 72% 52%;
-    --destructive-foreground: 0 0% 98%;
-
-    --border: 0 0% 22%;
+    --border: 0 0% 18%; /* #2f2f2f */
     --input: 0 0% 18%;
     --ring: 0 0% 68%;
-  
+    --radius: 1rem;
+    
+    --sidebar: 0 0% 9%; /* #171717 */
+
     /* Category colors for memory graph */
     --category-preference: #8b5cf6;
     --category-fact: #3b82f6;
@@ -88,21 +60,41 @@
     --edge-has-entity: #334155;
   }
 
+  .dark {
+    /* Identical to root to ensure dark mode is always active */
+    --background: 0 0% 13%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 13%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 13%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 18%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 18%;
+    --muted-foreground: 0 0% 65%;
+    --accent: 0 0% 18%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 0 0% 68%;
+    --sidebar: 0 0% 9%;
+  }
+
   * {
     border-color: hsl(var(--border) / 1);
   }
   
   html {
-    color-scheme: light dark;
+    color-scheme: dark;
   }
   
   html,
   html.dark {
     color-scheme: dark;
-  }
-  
-  html:not(.dark) {
-    color-scheme: light;
   }
   
   body {
@@ -113,21 +105,6 @@
     letter-spacing: -0.015em;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
-    transition: background-color 0.3s ease, color 0.3s ease;
-  }
-  
-  /* Dark mode gradient overlay */
-  html.dark body {
-    background:
-      radial-gradient(circle at top, hsl(0 0% 24% / 0.2), transparent 38%),
-      linear-gradient(180deg, hsl(var(--background) / 1) 0%, hsl(0 0% 6% / 1) 100%);
-  }
-  
-  /* Light mode gradient overlay */
-  html:not(.dark) body {
-    background:
-      radial-gradient(circle at top, hsl(0 0% 80% / 0.15), transparent 38%),
-      linear-gradient(180deg, hsl(var(--background) / 1) 0%, hsl(0 0% 96% / 1) 100%);
   }
   
   ::selection {
@@ -184,25 +161,30 @@
   }
 
   .subtle-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(0 0% 100% / 0.16) transparent;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(0 0% 100% / 0.16) transparent;
+  scrollbar-gutter: stable;
   }
-
+  
   .subtle-scrollbar::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+  width: 8px;
+  height: 8px;
   }
-
+  
   .subtle-scrollbar::-webkit-scrollbar-thumb {
-    background: hsl(0 0% 100% / 0.12);
-    border-radius: 999px;
-    border: 2px solid transparent;
-    background-clip: padding-box;
+  background: hsl(0 0% 100% / 0.12);
+  border-radius: 999px;
+  border: none;
   }
-
+  
   .subtle-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-    }
+  background: transparent;
+  margin: 0;
+  }
+  
+  .subtle-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+  }
   
     /* Temperature Slider Styles */
     .slider-surface {

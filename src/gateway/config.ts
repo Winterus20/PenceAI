@@ -98,10 +98,10 @@ export function loadConfig(): AppConfig {
             if (raw && (validEmbeddingProviders as readonly string[]).includes(raw)) {
                 return raw as AppConfig['embeddingProvider'];
             }
-            if (raw) logger.warn(`[Config] Geçersiz EMBEDDING_PROVIDER: "${raw}". Geçerli değerler: ${validEmbeddingProviders.join(', ')}. Varsayılan: minimax`);
-            return 'minimax' as AppConfig['embeddingProvider'];
-        })(),
-        embeddingModel: process.env.EMBEDDING_MODEL || 'embo-01',
+            if (raw) logger.warn(`[Config] Geçersiz EMBEDDING_PROVIDER: "${raw}". Geçerli değerler: ${validEmbeddingProviders.join(', ')}. Varsayılan: openai`);
+            return 'openai' as AppConfig['embeddingProvider'];
+            })(),
+            embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
 
         telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || undefined,
         telegramAllowedUsers: process.env.TELEGRAM_ALLOWED_USERS

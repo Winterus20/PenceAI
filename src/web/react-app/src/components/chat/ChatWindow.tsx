@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Settings, BookOpen, History, BrainCircuit, Wrench, Download, Menu, X, Moon, Sun } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Settings, BookOpen, BrainCircuit, Wrench, Menu, X, Moon, Sun } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 import { useAgentSocket } from '../../hooks/useAgentSocket';
 import { useConversations } from '../../hooks/useConversations';
@@ -67,7 +67,6 @@ export const ChatWindow = () => {
     searchQuery,
     setSearchQuery,
     sortOrder,
-    setSortOrder,
   } = useConversationFilters();
 
   // UI State
@@ -81,8 +80,12 @@ export const ChatWindow = () => {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // Thinking enabled sync
+  const prevThinkingRef = useRef(showThinking);
   useEffect(() => {
-    setThinkingEnabled(showThinking);
+    if (prevThinkingRef.current !== showThinking) {
+      prevThinkingRef.current = showThinking;
+      setThinkingEnabled(showThinking);
+    }
   }, [showThinking, setThinkingEnabled]);
 
   // Mesaj alma sonrası konuşmaları yenile
@@ -201,90 +204,8 @@ export const ChatWindow = () => {
     setInput(content);
   };
 
-  const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
-
-  const exportConversation = (format: 'md' | 'json') => {
-    if (!messages.length) return;
-    const title = activeConversation?.title || activeConversation?.user_name || 'Sohbet';
-    const now = new Date().toISOString().slice(0, 10);
-
-    const payload = format === 'md'
-      ? `# ${title}\n\n${messages.map((message) => `## ${message.role}\n\n${message.content}`).join('\n\n')}`
-      : JSON.stringify({ title, exportedAt: now, messages }, null, 2);
-
-    const blob = new Blob([payload], { type: format === 'md' ? 'text/markdown' : 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `${title.replace(/[^\w\-. ]/g, '_')}-${now}.${format}`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
-  };
-
   return (
-    <div className="flex flex-col h-screen bg-background text-foreground transition-colors duration-500">
-      <header className="flex-none h-14 px-4 md:px-6 flex items-center justify-between fixed top-0 left-0 right-0 z-50 w-full border-b border-border/60 bg-background/95 backdrop-blur pointer-events-none">
-        <div className="flex items-center gap-3 pointer-events-auto">
-          {/* Mobil Menü Butonu */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 rounded-none md:hidden hover:bg-accent/40"
-            onClick={() => setIsMobileSidebarOpen(true)}
-            aria-label="Menüyü aç"
-          >
-            <Menu size={18} strokeWidth={1.5} />
-          </Button>
-          <span className="text-sm font-semibold tracking-tighter uppercase text-foreground/90 select-none">
-            PençeAI
-          </span>
-          <div className="flex items-center gap-1.5 opacity-50">
-            <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-foreground' : 'bg-destructive'} transition-colors duration-500`} />
-            <span className="text-meta font-medium">{isConnected ? 'Bağlı' : 'Offline'}</span>
-          </div>
-          <span className="hidden md:block text-label text-muted-foreground">
-            {activeConversation?.title || activeConversation?.user_name || 'Yeni Sohbet'}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity duration-300 pointer-events-auto">
-          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-none hover:bg-accent/40" onClick={() => setShowConversations((prev) => !prev)}>
-            <History size={14} strokeWidth={1.5} />
-          </Button>
-          <Button variant={showThinking ? 'secondary' : 'ghost'} size="icon" className="h-8 w-8 rounded-none hover:bg-accent/40" onClick={() => setShowThinking((prev) => !prev)}>
-            <BrainCircuit size={14} strokeWidth={1.5} />
-          </Button>
-          <Button variant={showTools ? 'secondary' : 'ghost'} size="icon" className="h-8 w-8 rounded-none hover:bg-accent/40" onClick={() => setShowTools((prev) => !prev)}>
-            <Wrench size={14} strokeWidth={1.5} />
-          </Button>
-          {messages.length ? (
-            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-none hover:bg-accent/40" onClick={() => exportConversation(window.confirm('Tamam → Markdown, İptal → JSON') ? 'md' : 'json')}>
-              <Download size={14} strokeWidth={1.5} />
-            </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-9 rounded-full border border-white/12 bg-white/[0.05] px-3 text-muted-foreground hover:border-white/20 hover:bg-white/[0.08] hover:text-foreground"
-            onClick={() => setIsMemoryOpen(true)}
-          >
-            <BookOpen size={14} strokeWidth={1.5} />
-            <span className="hidden sm:inline">Bellek</span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-9 rounded-full border border-white/12 bg-white/[0.05] px-3 text-muted-foreground hover:border-white/20 hover:bg-white/[0.08] hover:text-foreground"
-            onClick={() => setIsSettingsOpen(true)}
-          >
-            <Settings size={14} strokeWidth={1.5} />
-            <span className="hidden sm:inline">Ayarlar</span>
-          </Button>
-        </div>
-      </header>
-
+    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden selection:bg-primary/20">
       <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
       <MemoryDialog open={isMemoryOpen} onOpenChange={setIsMemoryOpen} />
       <OnboardingDialog open={onboardingOpen} onCompleted={() => setOnboardingOpen(false)} />
@@ -296,62 +217,109 @@ export const ChatWindow = () => {
         onDeny={() => confirmRequest && respondToConfirmation(confirmRequest.id, false)}
       />
 
-      <div className="flex flex-1 overflow-hidden pt-14">
-        {showConversations ? (
-          <aside className="hidden w-full max-w-sm border-r border-border/60 bg-card/55 md:flex md:flex-col">
-            <ConversationPanel
-              activeView={activeView}
-              setActiveView={setActiveView}
-              searchQuery={searchQuery}
-              setSearchQuery={setSearchQuery}
-              sortOrder={sortOrder}
-              setSortOrder={setSortOrder}
-              conversations={conversations}
-              activeConversationId={activeConversationId}
-              pinnedConversations={pinnedConversations}
-              onNewChat={handleNewChat}
-              onLoadConversation={loadConversation}
-              onTogglePinned={togglePinned}
-              onDeleteConversation={deleteConversation}
-              stats={stats}
-              isConnected={isConnected}
-            />
-          </aside>
-        ) : null}
-
-        <div className="flex min-w-0 flex-1 flex-col">
-          <MessagePanel
-            messages={messages}
-            showThinking={showThinking}
-            showTools={showTools}
-            isReceiving={isReceiving}
+      {/* Desktop Sidebar */}
+      {showConversations ? (
+        <aside className="hidden md:flex flex-col w-[260px] flex-shrink-0 bg-sidebar border-r border-border/60 transition-all duration-300">
+          <ConversationPanel
+            activeView={activeView}
+            setActiveView={setActiveView}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            sortOrder={sortOrder}
+            conversations={conversations}
             activeConversationId={activeConversationId}
-            feedbacks={feedbacks}
-            onRegenerate={handleRegenerate}
-            onQuickAction={handleQuickAction}
-            onEditMessage={handleEditMessage}
-            onSendFeedback={(messageId, type) => sendFeedback(messageId, activeConversationId || '', type)}
+            pinnedConversations={pinnedConversations}
+            onNewChat={handleNewChat}
+            onLoadConversation={loadConversation}
+            onTogglePinned={togglePinned}
+            onDeleteConversation={deleteConversation}
+            stats={stats}
+            isConnected={isConnected}
           />
+        </aside>
+      ) : null}
 
-          <div
-            className={`max-w-3xl w-full flex flex-col relative group border ${isDragOver ? 'border-foreground/50 bg-card/50' : 'border-border/60 bg-card/20'} p-4 transition-colors mx-auto`}
-            onDragOver={(e) => { e.preventDefault(); handleDragOver(); }}
-            onDragLeave={handleDragLeave}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleDrop(Array.from(e.dataTransfer.files || []));
-            }}
-          >
-            <InputPanel
-              input={input}
-              setInput={setInput}
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 relative h-full">
+        {/* Top Header inside main content */}
+        <header className="flex-none h-14 px-3 md:px-4 flex items-center justify-between z-10 w-full relative">
+          <div className="flex items-center gap-2">
+            {!showConversations && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 md:flex hidden hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground"
+                onClick={() => setShowConversations(true)}
+              >
+                <Menu size={18} />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10 md:hidden flex hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground"
+              onClick={() => setIsMobileSidebarOpen(true)}
+            >
+              <Menu size={18} />
+            </Button>
+            
+            <button className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/5 transition-colors text-lg font-semibold text-foreground/90">
+              PençeAI
+              <span className="text-muted-foreground text-sm font-normal">v0.1</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <Button variant={showThinking ? 'secondary' : 'ghost'} size="icon" className="h-10 w-10 rounded-full hover:bg-white/5 text-muted-foreground hover:text-foreground" onClick={() => setShowThinking((prev) => !prev)} title="Düşünme Modu">
+              <BrainCircuit size={18} />
+            </Button>
+            <Button variant={showTools ? 'secondary' : 'ghost'} size="icon" className="h-10 w-10 rounded-full hover:bg-white/5 text-muted-foreground hover:text-foreground" onClick={() => setShowTools((prev) => !prev)} title="Araçlar">
+              <Wrench size={18} />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full hover:bg-white/5 text-muted-foreground hover:text-foreground" onClick={() => setIsMemoryOpen(true)} title="Bellek">
+              <BookOpen size={18} />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full hover:bg-white/5 text-muted-foreground hover:text-foreground" onClick={() => setIsSettingsOpen(true)} title="Ayarlar">
+              <Settings size={18} />
+            </Button>
+          </div>
+        </header>
+
+        {/* Messages & Input */}
+        <div className="flex flex-1 overflow-hidden relative">
+          <div className="flex w-full flex-col max-w-3xl mx-auto px-4">
+            <MessagePanel
+              messages={messages}
+              showThinking={showThinking}
+              showTools={showTools}
               isReceiving={isReceiving}
-              pendingAttachments={pendingAttachments}
-              setPendingAttachments={() => {}}
-              onSend={handleSend}
-              onNewChat={handleNewChat}
-              onFileSelection={handleFileSelection}
+              activeConversationId={activeConversationId}
+              feedbacks={feedbacks}
+              onRegenerate={handleRegenerate}
+              onQuickAction={handleQuickAction}
+              onEditMessage={handleEditMessage}
+              onSendFeedback={(messageId, type) => sendFeedback(messageId, activeConversationId || '', type)}
             />
+
+            <div
+              className={`w-full mt-auto relative rounded-3xl transition-colors ${isDragOver ? 'bg-primary/5 ring-2 ring-primary/50' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); handleDragOver(); }}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => {
+                e.preventDefault();
+                handleDrop(Array.from(e.dataTransfer.files || []));
+              }}
+            >
+              <InputPanel
+                input={input}
+                setInput={setInput}
+                isReceiving={isReceiving}
+                pendingAttachments={pendingAttachments}
+                setPendingAttachments={() => {}}
+                onSend={handleSend}
+                onFileSelection={handleFileSelection}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -393,7 +361,6 @@ export const ChatWindow = () => {
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
               sortOrder={sortOrder}
-              setSortOrder={setSortOrder}
               conversations={conversations}
               activeConversationId={activeConversationId}
               pinnedConversations={pinnedConversations}

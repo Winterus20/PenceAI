@@ -100,6 +100,21 @@ export function useAgentSocket() {
     // Benzersiz bir referansla mount durumunu takip edelim
     const mounted = useRef(true);
     const reconnectTimeout = useRef<number | null>(null);
+    const reconnectAttempts = useRef(0);
+    const tokenBuffer = useRef<string>('');
+    const flushTokenInterval = useRef<number | null>(null);
+
+    const flushTokens = () => {
+        if (tokenBuffer.current && currentAssistantMessageId.current) {
+            appendToMessage(currentAssistantMessageId.current, tokenBuffer.current);
+            tokenBuffer.current = '';
+        }
+    };
+
+    const flushAndClearTokens = () => {
+        flushTokens();
+        tokenBuffer.current = '';
+    };
 
     const syncAssistantMeta = () => {
         const assistantId = currentAssistantMessageId.current;
@@ -146,6 +161,7 @@ export function useAgentSocket() {
                 socket.close();
                 return;
             }
+            reconnectAttempts.current = 0; // Bağlantı başarılı olunca deneme sayısını sıfırla
             setConnected(true);
             console.log('[WS] Connected to PenceAI Gateway');
 
@@ -159,8 +175,15 @@ export function useAgentSocket() {
 
             setConnected(false);
             setReceiving(false);
-            console.log('[WS] Disconnected, attempting reconnect in 3s...');
-            reconnectTimeout.current = window.setTimeout(connect, 3000);
+            
+            // Exponential Backoff Stratejisi
+            const baseDelay = 1000;
+            const maxDelay = 30000; // Maksimum 30 saniye
+            const delay = Math.min(baseDelay * Math.pow(2, reconnectAttempts.current), maxDelay);
+            reconnectAttempts.current += 1;
+            
+            console.log(`[WS] Disconnected, attempting reconnect in ${delay}ms...`);
+            reconnectTimeout.current = window.setTimeout(connect, delay);
         };
 
         socket.onerror = (err) => {
@@ -188,11 +211,12 @@ export function useAgentSocket() {
                     createAssistantPlaceholder();
                 }
                 if (currentAssistantMessageId.current) {
-                    appendToMessage(currentAssistantMessageId.current, data.content || '');
+                    tokenBuffer.current += data.content || '';
                 }
                 break;
 
             case 'response':
+                flushAndClearTokens();
                 if (currentAssistantMessageId.current) {
                     patchMessage(currentAssistantMessageId.current, {
                         content: data.content ?? '',
@@ -242,6 +266,7 @@ export function useAgentSocket() {
                 break;
 
             case 'error':
+              flushAndClearTokens();
               toast.error(data.message || 'Bilinmeyen bir hata oluştu');
               if (currentAssistantMessageId.current) {
                 patchMessage(currentAssistantMessageId.current, {
@@ -448,6 +473,10 @@ export function useAgentSocket() {
 
     useEffect(() => {
         mounted.current = true;
+        
+        // Düzenli aralıklarla tokenları DOM'a bas (Buffer optimizasyonu)
+        flushTokenInterval.current = window.setInterval(flushTokens, 50);
+
         // Strict Mode'da ardışık mount/unmount sırasında çift websocket açmayı ve 
         // "WebSocket is closed before the connection is established" hatasını önlemek için küçük bir gecikme ekliyoruz.
         const connectTimer = window.setTimeout(() => {
@@ -458,6 +487,7 @@ export function useAgentSocket() {
             mounted.current = false;
             clearTimeout(connectTimer);
             if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
+            if (flushTokenInterval.current) clearInterval(flushTokenInterval.current);
 
             if (ws.current) {
                 ws.current.onclose = null; // Unmount tetiklendiğinde reconnect'i engelle

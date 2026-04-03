@@ -36,7 +36,7 @@ export const MessagePanel: React.FC<MessagePanelProps> = ({
   }, [messages, isReceiving]);
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto">
+    <div ref={scrollRef} className="flex-1 overflow-y-auto subtle-scrollbar">
       <MessageStream
         messages={messages}
         showThinking={showThinking}
