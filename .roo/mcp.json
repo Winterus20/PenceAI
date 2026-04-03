@@ -1,0 +1,40 @@
+{
+	"mcpServers": {
+		"puppeteer": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@modelcontextprotocol/server-puppeteer"
+			],
+			"alwaysAllow": [
+				"puppeteer_screenshot",
+				"puppeteer_click",
+				"puppeteer_evaluate"
+			],
+			"disabled": true
+		},
+		"brave-search": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@modelcontextprotocol/server-brave-search"
+			],
+			"env": {
+				"BRAVE_API_KEY": "BSApI4tMxcbeoOnuW4H9SSxPRKF480W"
+			},
+			"alwaysAllow": [
+				"brave_web_search"
+			]
+		},
+		"playwright": {
+			"command": "npx",
+			"args": [
+				"-y",
+				"@playwright/mcp@0.0.38"
+			],
+			"alwaysAllow": [
+				"browser_navigate"
+			]
+		}
+	}
+}

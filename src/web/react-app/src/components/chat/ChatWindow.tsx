@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Settings, BookOpen, History, BrainCircuit, Wrench, Download, Menu, X, Moon, Sun } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
-import type { AttachmentItem } from '../../store/agentStore';
 import { useAgentSocket } from '../../hooks/useAgentSocket';
+import { useConversations } from '../../hooks/useConversations';
+import { useMessageBuilder } from '../../hooks/useMessageBuilder';
+import { useFileUpload } from '../../hooks/useFileUpload';
+import { useConversationFilters } from '../../hooks/useConversationFilters';
 import { SettingsDialog } from './SettingsDialog';
 import { MemoryDialog } from './MemoryDialog';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -13,21 +16,9 @@ import { ConversationPanel } from './ConversationPanel';
 import { MessagePanel } from './MessagePanel';
 import { InputPanel } from './InputPanel';
 import hotToast from 'react-hot-toast';
-import { normalizeTimestamp } from '@/lib/utils';
-
-const STORAGE_KEYS = {
-  pinnedConversations: 'pencePinned',
-};
-
-const stripThinkTags = (text?: string) => {
-  if (!text) return '';
-  return text
-    .replace(/<tool_call>[\s\S]*?<\/think>/gi, '')
-    .replace(/<\/?think>/gi, '')
-    .trim();
-};
 
 export const ChatWindow = () => {
+  // Agent Store
   const {
     messages,
     isReceiving,
@@ -41,66 +32,67 @@ export const ChatWindow = () => {
     stats,
     theme,
     setMessages,
-    clearMessages,
-    setConversations,
-    setActiveConversationId,
-    removeConversation,
     setActiveView,
     sendFeedback,
     hideToast,
     toggleTheme,
   } = useAgentStore();
+
+  // WebSocket
   const { sendMessage, regenerateLastResponse, setThinkingEnabled, respondToConfirmation } = useAgentSocket();
+
+  // Custom Hooks
+  const {
+    pinnedConversations,
+    loadConversations,
+    loadConversation: loadConversationFromHook,
+    deleteConversation,
+    togglePinned,
+    handleNewChat: handleNewChatFromHook,
+  } = useConversations();
+
+  const { buildRenderableMessages } = useMessageBuilder();
+
+  const {
+    pendingAttachments,
+    isDragOver,
+    handleFileSelection,
+    handleDrop,
+    handleDragOver,
+    handleDragLeave,
+    clearAttachments,
+  } = useFileUpload({ maxFiles: 10, maxSize: 25 * 1024 * 1024 });
+
+  const {
+    searchQuery,
+    setSearchQuery,
+    sortOrder,
+    setSortOrder,
+  } = useConversationFilters();
+
+  // UI State
   const [input, setInput] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMemoryOpen, setIsMemoryOpen] = useState(false);
   const [showConversations, setShowConversations] = useState(true);
   const [showThinking, setShowThinking] = useState(false);
   const [showTools, setShowTools] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'messages'>('newest');
-  const [pendingAttachments, setPendingAttachments] = useState<AttachmentItem[]>([]);
-  const [isDragOver, setIsDragOver] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [pinnedConversations, setPinnedConversations] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return [];
-    try {
-      return JSON.parse(window.localStorage.getItem(STORAGE_KEYS.pinnedConversations) || '[]');
-    } catch {
-      return [];
-    }
-  });
 
+  // Thinking enabled sync
   useEffect(() => {
     setThinkingEnabled(showThinking);
   }, [showThinking, setThinkingEnabled]);
 
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEYS.pinnedConversations, JSON.stringify(pinnedConversations));
-  }, [pinnedConversations]);
-
-  const loadConversations = useCallback(async () => {
-    try {
-      const response = await fetch('/api/conversations');
-      const data = await response.json();
-      setConversations(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error('Konuşmalar alınamadı:', error);
-      hotToast.error('Konuşmalar yüklenirken bir hata oluştu');
-    }
-  }, [setConversations]);
-
-  useEffect(() => {
-    void loadConversations();
-  }, [loadConversations]);
-
+  // Mesaj alma sonrası konuşmaları yenile
   useEffect(() => {
     if (!isReceiving) {
       void loadConversations();
     }
   }, [isReceiving, loadConversations]);
 
+  // Onboarding kontrolü
   useEffect(() => {
     const loadOnboardingState = async () => {
       try {
@@ -118,120 +110,29 @@ export const ChatWindow = () => {
     void loadOnboardingState();
   }, []);
 
-  const buildRenderableMessages = useCallback((rawMessages: any[]) => {
-    const renderable: any[] = [];
-    let pendingTools: any[] = [];
-    let pendingThinkingEntries: string[] = [];
-
-    rawMessages.forEach((message) => {
-      if (message.role === 'user') {
-        const attachments = Array.isArray(message.attachments)
-          ? message.attachments.map((attachment: any) => ({
-              ...attachment,
-              previewUrl: attachment.mimeType?.startsWith('image/') && attachment.data
-                ? `data:${attachment.mimeType};base64,${attachment.data}`
-                : null,
-            }))
-          : undefined;
-
-        renderable.push({
-          id: crypto.randomUUID(),
-          role: 'user',
-          content: message.content || '',
-          timestamp: normalizeTimestamp(message.timestamp),
-          attachments,
-        });
-        return;
-      }
-
-      if (message.role === 'assistant') {
-        if (Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
-          const cleanedThinking = stripThinkTags(message.content);
-          if (cleanedThinking) {
-            pendingThinkingEntries = [...pendingThinkingEntries, cleanedThinking];
-          }
-
-          pendingTools = [
-            ...pendingTools,
-            ...message.toolCalls.map((toolCall: any) => ({
-              name: toolCall.name,
-              arguments: toolCall.arguments,
-              status: 'success',
-              result: null,
-              isError: false,
-            })),
-          ];
-          return;
-        }
-
-        renderable.push({
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: message.content || '',
-          timestamp: normalizeTimestamp(message.timestamp),
-          toolCalls: pendingTools.length ? pendingTools : undefined,
-          thinking: pendingThinkingEntries.length ? pendingThinkingEntries : undefined,
-        });
-        pendingTools = [];
-        pendingThinkingEntries = [];
-        return;
-      }
-
-      if (message.role === 'tool' && Array.isArray(message.toolResults)) {
-        pendingTools = pendingTools.map((tool) => {
-          const match = message.toolResults.find((toolResult: any) => toolResult.name === tool.name && tool.result == null);
-          if (!match) return tool;
-
-          return {
-            ...tool,
-            result: typeof match.result === 'string' ? match.result : JSON.stringify(match.result ?? ''),
-            isError: !!match.isError,
-            status: match.isError ? 'error' : 'success',
-          };
-        });
-      }
-    });
-
-    if (pendingTools.length || pendingThinkingEntries.length) {
-      renderable.push({
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: '⏳ İşlem devam ediyor...',
-        timestamp: new Date().toISOString(),
-        toolCalls: pendingTools.length ? pendingTools : undefined,
-        thinking: pendingThinkingEntries.length ? pendingThinkingEntries : undefined,
-        pending: true,
-      });
-    }
-
-    return renderable;
-  }, []);
-
-  const loadConversation = useCallback(async (conversationId: string) => {
-    try {
-      const response = await fetch(`/api/conversations/${conversationId}/messages`);
-      const data = await response.json();
-      setMessages(buildRenderableMessages(Array.isArray(data) ? data : []));
-      setActiveConversationId(conversationId);
-    } catch (error) {
-      console.error('Konuşma yüklenemedi:', error);
-      hotToast.error('Konuşma yüklenirken bir hata oluştu');
-    }
-  }, [buildRenderableMessages, setActiveConversationId, setMessages]);
+  // Konuşma yükleme wrapper'ı - mesajları set eder
+  const loadConversation = useCallback(
+    async (conversationId: string) => {
+      const rawMessages = await loadConversationFromHook(conversationId);
+      setMessages(buildRenderableMessages(rawMessages));
+    },
+    [loadConversationFromHook, buildRenderableMessages, setMessages]
+  );
 
   // Sayfa yüklendiğinde aktif sohbetin mesajlarını yükle
   useEffect(() => {
     if (activeConversationId && messages.length === 0 && conversations.length > 0) {
       const conversationExists = conversations.some(c => c.id === activeConversationId);
       if (conversationExists) {
-        loadConversation(activeConversationId);
+        void loadConversation(activeConversationId);
       }
     }
   }, [activeConversationId, conversations, messages.length, loadConversation]);
 
+  // Yeni sohbet başlat
   const handleNewChat = () => {
-    clearMessages();
-    setActiveConversationId(null);
+    handleNewChatFromHook();
+    clearAttachments();
   };
 
   const handleSend = (contentOverride?: string | React.MouseEvent<HTMLButtonElement>) => {
@@ -268,7 +169,7 @@ export const ChatWindow = () => {
 
     sendMessage(contentToSend, pendingAttachments, activeConversationId ?? undefined);
     setInput('');
-    setPendingAttachments([]);
+    clearAttachments();
   };
 
   const handleQuickAction = (content: string) => {
@@ -298,59 +199,6 @@ export const ChatWindow = () => {
 
   const handleEditMessage = (content: string) => {
     setInput(content);
-  };
-
-  const handleFileSelection = async (files: File[]) => {
-    const MAX_FILES = 10;
-    const MAX_SIZE = 25 * 1024 * 1024;
-
-    const remainingSlots = Math.max(0, MAX_FILES - pendingAttachments.length);
-    const selectedFiles = files.slice(0, remainingSlots);
-
-    const loadedAttachments = await Promise.all(selectedFiles.map((file) => new Promise<any | null>((resolve) => {
-      if (file.size > MAX_SIZE) {
-        resolve(null);
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = String(reader.result || '');
-        resolve({
-          fileName: file.name,
-          mimeType: file.type || 'application/octet-stream',
-          size: file.size,
-          data: result.split(',')[1],
-          previewUrl: file.type.startsWith('image/') ? result : null,
-        });
-      };
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
-    })));
-
-    setPendingAttachments((current) => [...current, ...loadedAttachments.filter(Boolean)]);
-  };
-
-  const togglePinned = (conversationId: string) => {
-    setPinnedConversations((current) => current.includes(conversationId)
-      ? current.filter((id) => id !== conversationId)
-      : [conversationId, ...current]);
-  };
-
-  const deleteConversation = async (conversationId: string) => {
-    if (!window.confirm('Bu sohbet silinsin mi?')) return;
-
-    try {
-      await fetch(`/api/conversations/${conversationId}`, { method: 'DELETE' });
-      removeConversation(conversationId);
-      if (conversationId === activeConversationId) {
-        handleNewChat();
-      }
-      await loadConversations();
-    } catch (error) {
-      console.error('Konuşma silinemedi:', error);
-      hotToast.error('Konuşma silinirken bir hata oluştu');
-    }
   };
 
   const activeConversation = conversations.find((conversation) => conversation.id === activeConversationId);
@@ -487,13 +335,11 @@ export const ChatWindow = () => {
 
           <div
             className={`max-w-3xl w-full flex flex-col relative group border ${isDragOver ? 'border-foreground/50 bg-card/50' : 'border-border/60 bg-card/20'} p-4 transition-colors mx-auto`}
-            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-            onDragLeave={() => setIsDragOver(false)}
+            onDragOver={(e) => { e.preventDefault(); handleDragOver(); }}
+            onDragLeave={handleDragLeave}
             onDrop={(e) => {
               e.preventDefault();
-              setIsDragOver(false);
-              const files = Array.from(e.dataTransfer.files || []);
-              void handleFileSelection(files);
+              handleDrop(Array.from(e.dataTransfer.files || []));
             }}
           >
             <InputPanel
@@ -501,7 +347,7 @@ export const ChatWindow = () => {
               setInput={setInput}
               isReceiving={isReceiving}
               pendingAttachments={pendingAttachments}
-              setPendingAttachments={setPendingAttachments}
+              setPendingAttachments={() => {}}
               onSend={handleSend}
               onNewChat={handleNewChat}
               onFileSelection={handleFileSelection}

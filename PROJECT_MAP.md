@@ -1,7 +1,7 @@
 # PenceAI Proje Haritası
 
-> **Son Güncelleme:** 21 Mart 2026
-> **Versiyon:** 1.0.1
+> **Son Güncelleme:** 24 Mart 2026
+> **Versiyon:** 1.0.2
 > **Lisans:** MIT
 
 ---
@@ -574,6 +574,12 @@ class TaskQueue {
 | [`ExportDialog.tsx`](src/web/react-app/src/components/chat/ExportDialog.tsx) | Dışa aktarma dialogu |
 | [`ImageLightbox.tsx`](src/web/react-app/src/components/chat/ImageLightbox.tsx) | Resim görüntüleyici |
 | [`OnboardingDialog.tsx`](src/web/react-app/src/components/chat/OnboardingDialog.tsx) | İlk kurulum |
+| [`ConversationPanel.tsx`](src/web/react-app/src/components/chat/ConversationPanel.tsx) | Konuşma paneli |
+| [`InputPanel.tsx`](src/web/react-app/src/components/chat/InputPanel.tsx) | Giriş paneli |
+| [`MessagePanel.tsx`](src/web/react-app/src/components/chat/MessagePanel.tsx) | Mesaj paneli |
+| [`LLMSettings.tsx`](src/web/react-app/src/components/chat/LLMSettings.tsx) | LLM ayarları |
+| [`MemorySettings.tsx`](src/web/react-app/src/components/chat/MemorySettings.tsx) | Bellek ayarları |
+| [`SecuritySettings.tsx`](src/web/react-app/src/components/chat/SecuritySettings.tsx) | Güvenlik ayarları |
 
 ##### UI Bileşenleri (`src/components/ui/`)
 
@@ -585,6 +591,14 @@ class TaskQueue {
 | `textarea.tsx` | Radix UI |
 | `scroll-area.tsx` | Radix UI |
 | [`Toast.tsx`](src/web/react-app/src/components/ui/Toast.tsx) | Bildirim bileşeni |
+| [`ErrorBoundary.tsx`](src/web/react-app/src/components/ui/ErrorBoundary.tsx) | Hata sınırı bileşeni |
+| [`skeleton.tsx`](src/web/react-app/src/components/ui/skeleton.tsx) | Yükleme iskeleti |
+
+##### Styles Klasörü (`src/web/react-app/src/styles/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`dialog.ts`](src/web/react-app/src/styles/dialog.ts) | Dialog stilleri |
 
 #### Eski Arayüz (`src/web/public_old/`)
 
@@ -595,6 +609,14 @@ class TaskQueue {
 | [`style.css`](src/web/public_old/style.css) | Eski stiller |
 | [`app/core.js`](src/web/public_old/app/core.js) | Eski çekirdek |
 | [`app/dashboard.js`](src/web/public_old/app/dashboard.js) | Eski dashboard |
+| [`app/constants.js`](src/web/public_old/app/constants.js) | Uygulama sabitleri |
+| [`lib/d3.v7.min.js`](src/web/public_old/lib/d3.v7.min.js) | D3.js kütüphanesi |
+| [`lib/github-dark.min.css`](src/web/public_old/lib/github-dark.min.css) | Highlight.js teması |
+| [`lib/highlight.min.js`](src/web/public_old/lib/highlight.min.js) | Kod vurgulama |
+| [`lib/katex.min.css`](src/web/public_old/lib/katex.min.css) | KaTeX stilleri |
+| [`lib/katex.min.js`](src/web/public_old/lib/katex.min.js) | Matematik render |
+| [`lib/marked-katex-extension.js`](src/web/public_old/lib/marked-katex-extension.js) | Marked-KaTeX entegrasyonu |
+| [`lib/marked.min.js`](src/web/public_old/lib/marked.min.js) | Markdown parser |
 
 ---
 
