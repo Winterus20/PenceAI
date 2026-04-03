@@ -395,7 +395,7 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
     return (
       <div
         ref={virtuosoRef}
-        className="h-full w-full max-w-3xl mx-auto px-4 md:px-8"
+        className="h-full w-full px-4 md:px-8"
       >
         <Virtuoso
           data={messages}

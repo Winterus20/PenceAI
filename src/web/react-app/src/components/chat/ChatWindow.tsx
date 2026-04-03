@@ -287,7 +287,7 @@ export const ChatWindow = () => {
 
         {/* Messages & Input */}
         <div className="flex flex-1 overflow-hidden relative">
-          <div className="flex w-full flex-col max-w-3xl mx-auto px-4">
+          <div className="flex w-full flex-col h-full">
             <MessagePanel
               messages={messages}
               showThinking={showThinking}
@@ -302,7 +302,7 @@ export const ChatWindow = () => {
             />
 
             <div
-              className={`w-full mt-auto relative rounded-3xl transition-colors ${isDragOver ? 'bg-primary/5 ring-2 ring-primary/50' : ''}`}
+              className={`w-full mt-auto relative px-4 transition-colors ${isDragOver ? 'bg-primary/5 ring-2 ring-primary/50' : ''}`}
               onDragOver={(e) => { e.preventDefault(); handleDragOver(); }}
               onDragLeave={handleDragLeave}
               onDrop={(e) => {
