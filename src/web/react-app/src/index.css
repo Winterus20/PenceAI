@@ -243,3 +243,48 @@
   .animate-slide-in-left {
     animation: slide-in-left 0.3s ease-out forwards;
   }
+  
+  /* Prose List Styles - Markdown listeleri için */
+  .prose ul {
+    list-style-type: disc;
+    padding-left: 1.5rem;
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  
+  .prose ol {
+    list-style-type: decimal;
+    padding-left: 1.5rem;
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  
+  .prose ul li,
+  .prose ol li {
+    margin-top: 0.375rem;
+    margin-bottom: 0.375rem;
+    padding-left: 0.375rem;
+  }
+  
+  .prose ul li::marker,
+  .prose ol li::marker {
+    color: hsl(0 0% 100% / 0.5);
+  }
+  
+  .prose ul ul {
+    list-style-type: circle;
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
+  
+  .prose ul ul ul {
+    list-style-type: square;
+  }
+  
+  .prose ol ol {
+    list-style-type: lower-alpha;
+  }
+  
+  .prose ol ol ol {
+    list-style-type: lower-roman;
+  }
