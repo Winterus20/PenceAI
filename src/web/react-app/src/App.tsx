@@ -4,9 +4,9 @@ import { ChatWindow } from './components/chat/ChatWindow';
 import { ChannelsView } from './components/chat/ChannelsView';
 import { useAgentStore } from './store/agentStore';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
+import { QueryProvider } from './providers/QueryProvider';
 
 function App() {
-  const theme = useAgentStore((state) => state.theme);
   const activeView = useAgentStore((state) => state.activeView);
 
   useEffect(() => {
@@ -26,12 +26,13 @@ function App() {
   };
 
   return (
-    <ErrorBoundary>
-      <div className="min-h-screen w-full bg-background text-foreground font-sans selection:bg-primary/20">
-        <main className="flex flex-col h-screen w-full overflow-hidden">
-          {renderView()}
-        </main>
-      <Toaster
+    <QueryProvider>
+      <ErrorBoundary>
+        <div className="min-h-screen w-full bg-background text-foreground font-sans selection:bg-primary/20">
+          <main className="flex flex-col h-screen w-full overflow-hidden">
+            {renderView()}
+          </main>
+          <Toaster
         position="bottom-right"
         toastOptions={{
           duration: 4000,
@@ -62,8 +63,9 @@ function App() {
           },
         }}
       />
-    </div>
-    </ErrorBoundary>
+        </div>
+      </ErrorBoundary>
+    </QueryProvider>
   );
 }
 

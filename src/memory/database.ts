@@ -543,6 +543,150 @@ export class PenceDatabase {
       }
     }
   
+    // ========== GraphRAG Faz 1 Migration ==========
+
+    // GraphRAG: memory_relations tablosuna weight, is_directional, last_scored_at kolonları
+    if (relTableInfo.length > 0 && !relTableInfo.some((col: any) => col.name === 'weight')) {
+      logger.info('[Database] 🚀 GraphRAG Migration: Adding weight column to memory_relations');
+      try {
+        this.db.exec("ALTER TABLE memory_relations ADD COLUMN weight REAL DEFAULT 1.0");
+        this.db.exec("UPDATE memory_relations SET weight = 1.0 WHERE weight IS NULL");
+        logger.info('[Database] ✅ weight kolonu eklendi');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ GraphRAG migration failed (weight):');
+      }
+    }
+    if (relTableInfo.length > 0 && !relTableInfo.some((col: any) => col.name === 'is_directional')) {
+      logger.info('[Database] 🚀 GraphRAG Migration: Adding is_directional column to memory_relations');
+      try {
+        this.db.exec("ALTER TABLE memory_relations ADD COLUMN is_directional INTEGER DEFAULT 0");
+        this.db.exec("UPDATE memory_relations SET is_directional = 0 WHERE is_directional IS NULL");
+        logger.info('[Database] ✅ is_directional kolonu eklendi');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ GraphRAG migration failed (is_directional):');
+      }
+    }
+    if (relTableInfo.length > 0 && !relTableInfo.some((col: any) => col.name === 'last_scored_at')) {
+      logger.info('[Database] 🚀 GraphRAG Migration: Adding last_scored_at column to memory_relations');
+      try {
+        this.db.exec("ALTER TABLE memory_relations ADD COLUMN last_scored_at DATETIME");
+        logger.info('[Database] ✅ last_scored_at kolonu eklendi');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ GraphRAG migration failed (last_scored_at):');
+      }
+    }
+
+    // GraphRAG: graph_traversal_cache tablosu
+    const traversalCacheTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='graph_traversal_cache'"
+    ).get();
+    if (!traversalCacheTable) {
+      logger.info('[Database] 🚀 GraphRAG Migration: Creating graph_traversal_cache table');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS graph_traversal_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_hash TEXT NOT NULL,
+            max_depth INTEGER NOT NULL,
+            node_ids TEXT NOT NULL,
+            relation_ids TEXT NOT NULL,
+            score REAL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME,
+            UNIQUE(query_hash, max_depth)
+          );
+          CREATE INDEX IF NOT EXISTS idx_graph_cache_hash ON graph_traversal_cache(query_hash);
+          CREATE INDEX IF NOT EXISTS idx_graph_cache_expires ON graph_traversal_cache(expires_at);
+        `);
+        logger.info('[Database] ✅ graph_traversal_cache tablosu oluşturuldu');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ GraphRAG migration failed (graph_traversal_cache):');
+      }
+    }
+
+    // GraphRAG: Yeni indeksler
+    logger.info('[Database] 🚀 GraphRAG Migration: Creating new indexes');
+    try {
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_relations_type_confidence ON memory_relations(relation_type, confidence);
+        CREATE INDEX IF NOT EXISTS idx_relations_source_target ON memory_relations(source_memory_id, target_memory_id);
+        CREATE INDEX IF NOT EXISTS idx_relations_weight ON memory_relations(weight);
+      `);
+      logger.info('[Database] ✅ GraphRAG indeksleri oluşturuldu');
+    } catch (err) {
+      logger.error({ err: err }, '[Database] ❌ GraphRAG migration failed (indexes):');
+    }
+
+    // ========== GraphRAG Faz 2 Migration ==========
+
+    // GraphRAG Faz 2: graph_communities tablosu
+    const communitiesTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='graph_communities'"
+    ).get();
+    if (!communitiesTable) {
+      logger.info('[Database] 🚀 GraphRAG Faz 2 Migration: Creating graph_communities table');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS graph_communities (
+            id TEXT PRIMARY KEY,
+            modularity_score REAL,
+            dominant_relation_types TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+        logger.info('[Database] ✅ graph_communities tablosu oluşturuldu');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ GraphRAG Faz 2 migration failed (graph_communities):');
+      }
+    }
+
+    // GraphRAG Faz 2: graph_community_members tablosu
+    const communityMembersTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='graph_community_members'"
+    ).get();
+    if (!communityMembersTable) {
+      logger.info('[Database] 🚀 GraphRAG Faz 2 Migration: Creating graph_community_members table');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS graph_community_members (
+            community_id TEXT REFERENCES graph_communities(id),
+            node_id INTEGER NOT NULL,
+            PRIMARY KEY (community_id, node_id)
+          );
+          CREATE INDEX IF NOT EXISTS idx_community_members_node ON graph_community_members(node_id);
+          CREATE INDEX IF NOT EXISTS idx_community_members_community ON graph_community_members(community_id);
+        `);
+        logger.info('[Database] ✅ graph_community_members tablosu oluşturuldu');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ GraphRAG Faz 2 migration failed (graph_community_members):');
+      }
+    }
+
+    // GraphRAG Faz 2: graph_community_summaries tablosu
+    const summariesTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='graph_community_summaries'"
+    ).get();
+    if (!summariesTable) {
+      logger.info('[Database] 🚀 GraphRAG Faz 2 Migration: Creating graph_community_summaries table');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS graph_community_summaries (
+            community_id TEXT PRIMARY KEY REFERENCES graph_communities(id),
+            summary TEXT NOT NULL,
+            key_entities TEXT NOT NULL,
+            key_relations TEXT NOT NULL,
+            topics TEXT NOT NULL,
+            generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_community_summaries_generated ON graph_community_summaries(generated_at);
+        `);
+        logger.info('[Database] ✅ graph_community_summaries tablosu oluşturuldu');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ GraphRAG Faz 2 migration failed (graph_community_summaries):');
+      }
+    }
+
     }
 
   /**

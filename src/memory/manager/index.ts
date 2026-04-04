@@ -23,6 +23,7 @@ import { logger } from '../../utils/logger.js';
 import type { TaskQueue } from '../../autonomous/queue.js';
 import { MemoryGraphManager } from '../graph.js';
 import { MemoryRetrievalOrchestrator } from '../retrievalOrchestrator.js';
+import { GraphRAGEngine } from '../graphRAG/GraphRAGEngine.js';
 import {
   type MemoryRow,
   type MessageRow,
@@ -35,6 +36,20 @@ import {
   type FeedbackInput,
   DEFAULT_USER_NAME,
 } from '../types.js';
+
+// Spreading Activation tipleri
+interface SpreadingActivationConfig {
+  decayFactor: number;
+  maxIterations: number;
+  minActivation: number;
+  relationTypeWeights: Record<string, number>;
+}
+
+interface SpreadingActivationResult {
+  nodeActivations: Map<number, number>;
+  iterations: number;
+  converged: boolean;
+}
 
 // Alt modüller
 import { ConversationManager } from './ConversationManager.js';
@@ -73,6 +88,7 @@ export class MemoryManager {
   private embeddingProvider: EmbeddingProvider | null = null;
   private graph: MemoryGraphManager;
   private taskQueue: TaskQueue | null = null;
+  private graphRAGEngine: GraphRAGEngine | null = null;
 
   // Alt modüller
   private conversationManager: ConversationManager;
@@ -123,7 +139,7 @@ export class MemoryManager {
     };
     this.retrievalService = new RetrievalService(retrievalDeps);
 
-    // Retrieval Orchestrator
+    // Retrieval Orchestrator (graphRAGEngine setGraphRAGEngine ile sonradan set edilir)
     this.retrievalOrchestrator = new MemoryRetrievalOrchestrator({
       graphAwareSearch: (query, limit, maxDepth) => this.graphAwareSearch(query, limit, maxDepth),
       getRecentConversationSummaries: (limit) => this.conversationManager.getRecentConversationSummaries(limit),
@@ -132,11 +148,21 @@ export class MemoryManager {
       getRecentMessages: (hours, limit, excludeConversationId) => this.getRecentMessages(hours, limit, excludeConversationId),
       getUserMemories: (limit) => this.getUserMemories(limit),
       getMemoryNeighborsBatch: (memoryIds, limitPerNode) => this.graph.getMemoryNeighborsBatch(memoryIds, limitPerNode),
+      getSpreadingActivationConfig: () => this.getSpreadingActivationConfigForOrchestrator(),
       getBehaviorDiscoveryConfig: () => ({ retrieval: { state: 'shadow' } }),
       prioritizeConversationMemories: (memories, recentMessages, activeConversationId, limit) =>
         this.prioritizeConversationMemories(memories, recentMessages, activeConversationId, limit),
       recordDebug: (payload) => this.recordRetrievalDebug('promptContextBundle', payload),
+      graphRAGEngine: () => this.graphRAGEngine ?? undefined,
     });
+  }
+
+  /**
+   * GraphRAG engine'i set eder (Agent runtime tarafından çağrılır).
+   */
+  setGraphRAGEngine(engine: GraphRAGEngine): void {
+    this.graphRAGEngine = engine;
+    logger.info('[Memory] GraphRAG engine connected');
   }
 
   /**
@@ -507,6 +533,186 @@ export class MemoryManager {
       LIMIT 1
     `);
     return stmt.get(messageId) as FeedbackRow | null;
+  }
+
+  // ========== Spreading Activation ==========
+
+  /**
+   * Spreading Activation config döndürür.
+   * RetrievalOrchestrator ile uyumlu olması için Partial config döner.
+   */
+  getSpreadingActivationConfig(): Partial<SpreadingActivationConfig> {
+    return {
+      decayFactor: 0.85,
+      maxIterations: 10,
+      minActivation: 0.01,
+      relationTypeWeights: {
+        'related_to': 1.0,
+        'part_of': 0.9,
+        'caused_by': 0.8,
+        'associated_with': 0.7,
+        'shared_entity': 0.6,
+        'default': 0.5,
+      },
+    };
+  }
+
+  /**
+   * RetrievalOrchestrator için spreading activation config döndürür.
+   * RetrievalSpreadingActivationConfig formatında config sağlar.
+   */
+  private getSpreadingActivationConfigForOrchestrator(): Partial<import('../retrievalOrchestrator.js').RetrievalSpreadingActivationConfig> {
+    return {
+      enabled: true,
+      rolloutState: 'soft',
+      seedLimit: 5,
+      neighborsPerSeed: 10,
+      maxCandidates: 15,
+      maxHopDepth: 2,
+      seedConfidenceFloor: 0.65,
+      seedScoreFloor: 1.0,
+      candidateConfidenceFloor: 0.6,
+      relationConfidenceFloor: 0.5,
+      minEffectiveBonus: 0.02,
+      hopDecay: 0.7,
+      activationScale: 0.08,
+      maxCandidateBonus: 0.15,
+    };
+  }
+
+  /**
+   * Klasik iterative spreading activation algoritması.
+   *
+   * Seed node'lardan başlayarak graph üzerinde activation yayar.
+   * Her iterasyonda komşulara activation aktarılır, decay uygulanır.
+   * Convergence sağlanana veya maxIterations'a ulaşılana kadar devam eder.
+   *
+   * @param seedNodeIds - Başlangıç node ID'leri
+   * @param config - Opsiyonel konfigürasyon override'ları
+   * @returns Activation sonuçları (nodeActivations, iterations, converged)
+   */
+  computeSpreadingActivation(
+    seedNodeIds: number[],
+    config?: Partial<SpreadingActivationConfig>
+  ): SpreadingActivationResult {
+    const cfg = this.buildSpreadingActivationConfig(config);
+    const activations = new Map<number, number>();
+
+    if (seedNodeIds.length === 0) {
+      return { nodeActivations: activations, iterations: 0, converged: true };
+    }
+
+    // Seed node'larına başlangıç aktivasyonu
+    const seedActivation = 1.0 / seedNodeIds.length;
+    for (const id of seedNodeIds) {
+      activations.set(id, seedActivation);
+    }
+
+    let currentActivations = new Map(activations);
+    let iterations = 0;
+    let converged = false;
+
+    for (let iter = 0; iter < cfg.maxIterations; iter++) {
+      iterations++;
+      const newActivations = new Map(currentActivations);
+      let maxChange = 0;
+
+      // Aktif node'ları getir (minActivation üstü)
+      const activeNodeIds = Array.from(currentActivations.keys())
+        .filter(id => currentActivations.get(id)! > cfg.minActivation);
+
+      if (activeNodeIds.length === 0) {
+        converged = true;
+        break;
+      }
+
+      // Batch neighbor retrieval
+      const neighbors = this.getMemoryNeighborsBatch(activeNodeIds, 20);
+
+      // Activation yayma
+      for (const sourceId of activeNodeIds) {
+        const sourceActivation = currentActivations.get(sourceId) ?? 0;
+        if (sourceActivation <= cfg.minActivation) continue;
+
+        const sourceNeighbors = neighbors.get(sourceId) || [];
+        if (sourceNeighbors.length === 0) continue;
+
+        // Toplam ağırlık hesapla
+        const totalWeight = sourceNeighbors.reduce((sum, n) => {
+          const relWeight = cfg.relationTypeWeights[n.relation_type] ?? cfg.relationTypeWeights['default'];
+          return sum + ((n.confidence ?? 0.7) * relWeight);
+        }, 0);
+
+        if (totalWeight === 0) continue;
+
+        // Komşulara activation dağıt
+        for (const neighbor of sourceNeighbors) {
+          const relWeight = cfg.relationTypeWeights[neighbor.relation_type] ?? cfg.relationTypeWeights['default'];
+          const neighborConfidence = neighbor.confidence ?? 0.7;
+
+          const propagatedActivation = (
+            sourceActivation
+            * cfg.decayFactor
+            * neighborConfidence
+            * relWeight
+          ) / totalWeight;
+
+          const currentNeighborActivation = newActivations.get(neighbor.id) ?? 0;
+          const newActivation = Math.min(1.0, currentNeighborActivation + propagatedActivation);
+          newActivations.set(neighbor.id, newActivation);
+
+          maxChange = Math.max(maxChange, Math.abs(newActivation - currentNeighborActivation));
+        }
+      }
+
+      currentActivations = newActivations;
+
+      // Convergence kontrolü
+      if (maxChange < cfg.minActivation) {
+        converged = true;
+        break;
+      }
+    }
+
+    // Min activation altındaki node'ları temizle
+    for (const [id, activation] of currentActivations) {
+      if (activation < cfg.minActivation) {
+        currentActivations.delete(id);
+      }
+    }
+
+    logger.debug({
+      seedCount: seedNodeIds.length,
+      resultCount: currentActivations.size,
+      iterations,
+      converged,
+    }, '[Memory] Spreading activation completed');
+
+    return {
+      nodeActivations: currentActivations,
+      iterations,
+      converged,
+    };
+  }
+
+  /**
+   * Spreading Activation config oluşturur.
+   */
+  private buildSpreadingActivationConfig(overrides?: Partial<SpreadingActivationConfig>): SpreadingActivationConfig {
+    return {
+      decayFactor: 0.85,
+      maxIterations: 10,
+      minActivation: 0.01,
+      relationTypeWeights: {
+        'related_to': 1.0,
+        'part_of': 0.9,
+        'caused_by': 0.8,
+        'associated_with': 0.7,
+        'shared_entity': 0.6,
+        'default': 0.5,
+      },
+      ...overrides,
+    };
   }
 }
 

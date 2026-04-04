@@ -14,7 +14,14 @@
   "start": "node dist/gateway/index.js",
   "cli": "tsx src/cli/index.ts",
   "maintenance": "tsx src/cli/maintenance.ts",
-  "test": "jest --config jest.config.js"
+  "test": "jest --config jest.config.js",
+  "graphrag:status": "tsx src/cli/maintenance.ts graphrag-status",
+  "graphrag:advance": "tsx src/cli/maintenance.ts graphrag-advance",
+  "graphrag:set-phase": "tsx src/cli/maintenance.ts graphrag-set-phase",
+  "graphrag:readiness": "tsx src/cli/maintenance.ts graphrag-readiness",
+  "graphrag:go-full": "tsx src/cli/maintenance.ts graphrag-go-full",
+  "graphrag:emergency-rollback": "tsx src/cli/maintenance.ts graphrag-emergency-rollback",
+  "graphrag:metrics": "tsx src/cli/maintenance.ts graphrag-metrics"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

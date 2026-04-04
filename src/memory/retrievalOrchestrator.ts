@@ -6,6 +6,8 @@ import type {
     MemoryRow,
     MemoryType,
 } from './types.js';
+import { GraphRAGEngine, type GraphRAGResult, BehaviorDiscoveryShadow } from './graphRAG/index.js';
+import { logger } from '../utils/logger.js';
 
 type MemoryRelationNeighbor = MemoryRow & {
     relation_type: string;
@@ -117,6 +119,12 @@ export interface PromptContextBundle {
     reviewMemories: MemoryRow[];
     followUpCandidates: MemoryRow[];
     recentMessages: Array<{ role: string; content: string; created_at: string; conversation_title: string }>;
+    // GraphRAG results (null when GraphRAG is disabled or not triggered)
+    graphRAG: {
+        memories: MemoryRow[];
+        communitySummaries: Array<{ communityId: string; summary: string }>;
+        graphContext: Record<string, unknown>;
+    } | null;
 }
 
 export interface PromptContextRequest {
@@ -136,12 +144,19 @@ export interface PromptContextRequest {
 }
 
 export interface PromptContextRecipe {
-    name: 'default' | 'conversation_followup' | 'preference_recall' | 'exploratory';
+    name: 'default' | 'conversation_followup' | 'preference_recall' | 'exploratory' | 'graph_rag_exploration' | 'graph_rag_deep';
     graphDepth: number;
     preferArchivalForSupplemental: boolean;
     expandFallbackPool: boolean;
     preferReviewSignals: boolean;
     preferConversationSignals: boolean;
+    // GraphRAG-specific fields
+    useGraphRAG?: boolean;
+    maxHops?: number;
+    usePageRank?: boolean;
+    useCommunities?: boolean;
+    tokenBudget?: number;
+    timeoutMs?: number;
 }
 
 export interface RetrievalOrchestratorDeps {
@@ -165,6 +180,10 @@ export interface RetrievalOrchestratorDeps {
         limit: number,
     ) => MemoryRow[];
     recordDebug: (payload: unknown) => void;
+    // GraphRAG engine (optional, backward compatible)
+    graphRAGEngine?: GraphRAGEngine | (() => GraphRAGEngine | undefined);
+    // BehaviorDiscoveryShadow (optional, for shadow comparison)
+    behaviorDiscoveryShadow?: BehaviorDiscoveryShadow;
 }
 
 interface RetrievalIntentSignals {
@@ -227,7 +246,7 @@ interface RetrievalBudgetApplication {
 
 type RetrievalSpreadingActivationRolloutState = 'off' | 'shadow' | 'soft';
 
-interface RetrievalSpreadingActivationConfig {
+export interface RetrievalSpreadingActivationConfig {
     enabled: boolean;
     rolloutState: RetrievalSpreadingActivationRolloutState;
     seedLimit: number;
@@ -1595,7 +1614,49 @@ function applyCognitiveLoadBudget(
     };
 }
 
-function selectRecipe(signals: RetrievalIntentSignals): PromptContextRecipe {
+/** GraphRAG-enabled recipe tanımları */
+const GRAPH_RAG_RECIPES: Record<string, PromptContextRecipe> = {
+    graph_rag_exploration: {
+        name: 'graph_rag_exploration',
+        graphDepth: 2,
+        preferArchivalForSupplemental: true,
+        expandFallbackPool: true,
+        preferReviewSignals: false,
+        preferConversationSignals: false,
+        useGraphRAG: true,
+        maxHops: 2,
+        usePageRank: true,
+        useCommunities: true,
+        tokenBudget: 32000,
+        timeoutMs: 5000,
+    },
+    graph_rag_deep: {
+        name: 'graph_rag_deep',
+        graphDepth: 3,
+        preferArchivalForSupplemental: true,
+        expandFallbackPool: true,
+        preferReviewSignals: false,
+        preferConversationSignals: false,
+        useGraphRAG: true,
+        maxHops: 3,
+        usePageRank: true,
+        useCommunities: true,
+        tokenBudget: 48000,
+        timeoutMs: 8000,
+    },
+};
+
+function selectRecipe(signals: RetrievalIntentSignals, deps: RetrievalOrchestratorDeps): PromptContextRecipe {
+    // GraphRAG engine varsa ve analitik/keşif sinyalleri güçlüyse GraphRAG recipe seç
+    if (deps.graphRAGEngine) {
+        if (signals.hasAnalyticalCue && signals.hasExploratoryCue) {
+            return GRAPH_RAG_RECIPES.graph_rag_deep;
+        }
+        if (signals.hasExploratoryCue || signals.hasAnalyticalCue) {
+            return GRAPH_RAG_RECIPES.graph_rag_exploration;
+        }
+    }
+
     if (signals.hasPreferenceCue) {
         return {
             name: 'preference_recall',
@@ -1780,7 +1841,31 @@ export class MemoryRetrievalOrchestrator {
 
         const recentMessages = this.deps.getRecentMessages(recentHours, recentMessagesLimit, activeConversationId);
         const signals = detectIntentSignals(query, recentMessages);
-        const recipe = selectRecipe(signals);
+        const recipe = selectRecipe(signals, this.deps);
+
+        // GraphRAG retrieval (eğer enabled ve recipe gerektiriyorsa)
+        let graphRAGResult: GraphRAGResult | null = null;
+        const resolvedEngine = typeof this.deps.graphRAGEngine === 'function'
+            ? this.deps.graphRAGEngine()
+            : this.deps.graphRAGEngine;
+        if (resolvedEngine && recipe.useGraphRAG) {
+            try {
+                const result = await resolvedEngine.retrieve(query, {
+                    maxHops: recipe.maxHops ?? 2,
+                    usePageRank: recipe.usePageRank ?? true,
+                    useCommunities: recipe.useCommunities ?? true,
+                    tokenBudget: recipe.tokenBudget ?? 32000,
+                    timeoutMs: recipe.timeoutMs ?? 5000,
+                });
+                if (result.success) {
+                    graphRAGResult = result;
+                } else {
+                    logger.warn({ msg: 'GraphRAG retrieval returned unsuccessful result', error: result.error });
+                }
+            } catch (err) {
+                logger.warn({ msg: 'GraphRAG retrieval failed, falling back to standard', err });
+            }
+        }
 
         const [searchResult, conversationSummaries, reviewMemories, followUpCandidates] = await Promise.all([
             this.deps.graphAwareSearch(query, searchLimit, recipe.graphDepth),
@@ -1887,6 +1972,28 @@ export class MemoryRetrievalOrchestrator {
             review: buildMemoryExplanations('review', reviewRankedEntries, rankedReviewMemories, selectionContext),
             followUp: buildMemoryExplanations('follow_up', followUpRankedEntries, rankedFollowUpCandidates, selectionContext),
         };
+
+        // BehaviorDiscovery Shadow Comparison
+        if (this.deps.behaviorDiscoveryShadow && graphRAGResult) {
+            const startTime = Date.now();
+            const baselineResults = relevantMemories.map(m => ({ id: m.id, score: 0 }));
+            const experimentalResults = graphRAGResult.memories.map(m => ({ id: m.id, score: 0 }));
+            
+            await this.deps.behaviorDiscoveryShadow.runComparison(
+                query,
+                baselineResults,
+                experimentalResults,
+                recipe.useGraphRAG ? 'graph_rag' : 'spreading_activation',
+            );
+            
+            const duration = Date.now() - startTime;
+            // Update duration in the last comparison
+            const metrics = this.deps.behaviorDiscoveryShadow.getMetrics();
+            if (metrics.comparisons.length > 0) {
+                metrics.comparisons[metrics.comparisons.length - 1].duration = duration;
+            }
+        }
+
         const behaviorDiscovery = buildBehaviorDiscoveryTrace(
             behaviorDiscoveryConfig,
             signals,
@@ -2025,6 +2132,14 @@ export class MemoryRetrievalOrchestrator {
             reviewMemories: rankedReviewMemories,
             followUpCandidates: rankedFollowUpCandidates,
             recentMessages,
+            graphRAG: graphRAGResult ? {
+                memories: graphRAGResult.memories,
+                communitySummaries: graphRAGResult.communitySummaries.map(cs => ({
+                    communityId: cs.communityId,
+                    summary: cs.summary,
+                })),
+                graphContext: graphRAGResult.graphContext as unknown as Record<string, unknown>,
+            } : null,
         };
     }
 }

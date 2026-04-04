@@ -1,34 +1,12 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as d3 from 'd3';
+import { useMemoryGraphQuery, type GraphNode as QueryGraphNode, type GraphEdge as QueryGraphEdge, type MemoryGraph as QueryMemoryGraph, type EnrichedMemoryGraph, type MemoryGraphMetadata } from '@/hooks/queries/useMemoryGraph';
 
-// Graph data types from API
-export type GraphNode = {
-  id: string;
-  type: 'memory' | 'entity';
-  label: string;
-  fullContent?: string;
-  rawId?: number;
-  category?: string;
-  importance?: number;
-  entityType?: string;
-  x?: number;
-  y?: number;
-  fx?: number | null;
-  fy?: number | null;
-};
-
-export type GraphEdge = {
-  source: string | GraphNode;
-  target: string | GraphNode;
-  type: string;
-  confidence: number;
-  description?: string;
-};
-
-export type MemoryGraph = {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-};
+// Re-export types for backward compatibility
+export type GraphNode = QueryGraphNode;
+export type GraphEdge = QueryGraphEdge;
+export type MemoryGraph = QueryMemoryGraph;
+export type { EnrichedMemoryGraph, MemoryGraphMetadata };
 
 // Color palettes - using CSS custom properties from index.css
 export const CATEGORY_COLORS: Record<string, string> = {
@@ -48,6 +26,9 @@ export const ENTITY_TYPE_COLORS: Record<string, string> = {
   organization: 'var(--entity-organization)',
   concept: 'var(--entity-concept)',
 };
+
+// Community colors - dynamic palette
+const COMMUNITY_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'];
 
 export const EDGE_COLORS: Record<string, string> = {
   related_to: 'var(--edge-related-to)',
@@ -70,6 +51,9 @@ export const ENTITY_ICONS: Record<string, string> = {
 export interface UseMemoryGraphOptions {
   filterCategory?: string;
   onNodeClick?: (node: GraphNode) => void;
+  limit?: number;
+  includePageRank?: boolean;
+  includeCommunities?: boolean;
 }
 
 export interface UseMemoryGraphReturn {
@@ -78,7 +62,8 @@ export interface UseMemoryGraphReturn {
   loading: boolean;
   error: string | null;
   selectedNode: GraphNode | null;
-  graphData: MemoryGraph | null;
+  graphData: EnrichedMemoryGraph | null;
+  metadata: MemoryGraphMetadata | null;
   setSelectedNode: (node: GraphNode | null) => void;
   handleZoomIn: () => void;
   handleZoomOut: () => void;
@@ -94,14 +79,23 @@ export interface UseMemoryGraphReturn {
 export function useMemoryGraph({
   filterCategory = 'all',
   onNodeClick,
+  limit = 100,
+  includePageRank = true,
+  includeCommunities = true,
 }: UseMemoryGraphOptions = {}): UseMemoryGraphReturn {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [graphData, setGraphData] = useState<MemoryGraph | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   
+  // React Query'den graph verisini al (with enriched options)
+  const { data: graphData, isLoading: loading, error: fetchError, refetch: rqRefetch } = useMemoryGraphQuery({
+    limit,
+    includePageRank,
+    includeCommunities,
+  });
+  
+  const error = fetchError ? 'Bellek grafiği yüklenemedi' : null;
+
   // D3 refs for simulation and zoom
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphEdge> | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
@@ -110,26 +104,39 @@ export function useMemoryGraph({
   const nodeGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const isInitializedRef = useRef(false);
 
-  // Fetch graph data
-  const fetchGraphData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch('/api/memory-graph');
-      if (!response.ok) throw new Error('Grafik verisi alınamadı');
-      const data: MemoryGraph = await response.json();
-      setGraphData(data);
-    } catch (err) {
-      console.error('Memory graph fetch error:', err);
-      setError('Bellek grafiği yüklenemedi');
-    } finally {
-      setLoading(false);
-    }
+  // Community color mapper
+  const communityColorMap = useMemo(() => {
+    const colorMap = new Map<string, string>();
+    let colorIndex = 0;
+    return (communityId: string | null | undefined) => {
+      if (!communityId) return '#6b7280'; // Gri for no community
+      if (!colorMap.has(communityId)) {
+        colorMap.set(communityId, COMMUNITY_COLORS[colorIndex % COMMUNITY_COLORS.length]);
+        colorIndex++;
+      }
+      return colorMap.get(communityId)!;
+    };
   }, []);
 
-  useEffect(() => {
-    void fetchGraphData();
-  }, [fetchGraphData]);
+  // Helper: Node size based on importance
+  const getNodeSize = useCallback((node: GraphNode) => {
+    const baseSize = node.type === 'entity' ? 12 : 14;
+    const importanceMultiplier = 8;
+    const importance = node.importance ?? 0;
+    return baseSize + importance * importanceMultiplier;
+  }, []);
+
+  // Helper: Node opacity based on pageRank
+  const getNodeOpacity = useCallback((node: GraphNode) => {
+    const prScore = node.pageRankScore ?? 0;
+    return 0.4 + prScore * 0.6;
+  }, []);
+
+  // Helper: Edge width based on displayWeight
+  const getEdgeWidth = useCallback((edge: GraphEdge) => {
+    const displayWeight = edge.displayWeight ?? edge.confidence ?? 0.5;
+    return 1 + displayWeight * 3;
+  }, []);
 
   // Memoized filtered data - prevents unnecessary recalculations
   const filteredData = useMemo(() => {
@@ -186,66 +193,63 @@ export function useMemoryGraph({
 
   // Initialize SVG structure (only once)
   useEffect(() => {
-    if (!containerRef.current || !svgRef.current) return;
+    if (!containerRef.current || !svgRef.current || isInitializedRef.current) return;
 
     const container = containerRef.current;
     const svg = d3.select(svgRef.current);
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    // Only initialize once
-    if (!isInitializedRef.current) {
-      svg.selectAll('*').remove();
+    svg.selectAll('*').remove();
 
-      // Set SVG dimensions
-      svg.attr('width', width).attr('height', height);
+    // Set SVG dimensions
+    svg.attr('width', width).attr('height', height);
 
-      // Create defs for arrow markers
-      const defs = svg.append('defs');
-      ['supports', 'contradicts', 'caused_by', 'part_of'].forEach((type) => {
-        defs
-          .append('marker')
-          .attr('id', `arrow-${type}`)
-          .attr('viewBox', '0 -5 10 10')
-          .attr('refX', 25)
-          .attr('refY', 0)
-          .attr('markerWidth', 6)
-          .attr('markerHeight', 6)
-          .attr('orient', 'auto')
-          .append('path')
-          .attr('d', 'M0,-5L10,0L0,5')
-          .attr('fill', EDGE_COLORS[type] || '#475569');
+    // Create defs for arrow markers
+    const defs = svg.append('defs');
+    ['supports', 'contradicts', 'caused_by', 'part_of'].forEach((type) => {
+      defs
+        .append('marker')
+        .attr('id', `arrow-${type}`)
+        .attr('viewBox', '0 -5 10 10')
+        .attr('refX', 25)
+        .attr('refY', 0)
+        .attr('markerWidth', 6)
+        .attr('markerHeight', 6)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('d', 'M0,-5L10,0L0,5')
+        .attr('fill', EDGE_COLORS[type] || '#475569');
+    });
+
+    // Create container group for zoom/pan
+    const g = svg.append('g');
+    gRef.current = g;
+
+    // Create link and node groups
+    linkGroupRef.current = g.append('g').attr('class', 'links');
+    nodeGroupRef.current = g.append('g').attr('class', 'nodes');
+
+    // Zoom behavior
+    const zoom = d3
+      .zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.2, 4])
+      .on('zoom', (event) => {
+        g.attr('transform', event.transform);
       });
 
-      // Create container group for zoom/pan
-      const g = svg.append('g');
-      gRef.current = g;
+    zoomRef.current = zoom;
+    svg.call(zoom);
 
-      // Create link and node groups
-      linkGroupRef.current = g.append('g').attr('class', 'links');
-      nodeGroupRef.current = g.append('g').attr('class', 'nodes');
+    // Initial zoom to fit
+    const initialTransform = d3
+      .zoomIdentity
+      .translate(width / 2, height / 2)
+      .scale(0.8)
+      .translate(-width / 2, -height / 2);
+    svg.transition().duration(500).call(zoom.transform, initialTransform);
 
-      // Zoom behavior
-      const zoom = d3
-        .zoom<SVGSVGElement, unknown>()
-        .scaleExtent([0.2, 4])
-        .on('zoom', (event) => {
-          g.attr('transform', event.transform);
-        });
-
-      zoomRef.current = zoom;
-      svg.call(zoom);
-
-      // Initial zoom to fit
-      const initialTransform = d3
-        .zoomIdentity
-        .translate(width / 2, height / 2)
-        .scale(0.8)
-        .translate(-width / 2, -height / 2);
-      svg.transition().duration(500).call(zoom.transform, initialTransform);
-
-      isInitializedRef.current = true;
-    }
+    isInitializedRef.current = true;
 
     // Handle window resize
     const handleResize = () => {
@@ -266,7 +270,7 @@ export function useMemoryGraph({
     return () => {
       resizeObserver.disconnect();
     };
-  }, []);
+  }, [loading]);
 
   // D3 incremental rendering with join pattern
   useEffect(() => {
@@ -375,7 +379,7 @@ export function useMemoryGraph({
       .append('line')
       .attr('stroke', (d) => EDGE_COLORS[d.type] || '#475569')
       .attr('stroke-opacity', (d) => (d.type === 'has_entity' ? 0.2 : Math.max(0.3, d.confidence * 0.8)))
-      .attr('stroke-width', (d) => (d.type === 'has_entity' ? 1 : Math.max(1, d.confidence * 3)))
+      .attr('stroke-width', (d) => getEdgeWidth(d))
       .attr('stroke-dasharray', (d) =>
         d.type === 'contradicts' ? '5,5' : d.type === 'has_entity' ? '2,4' : null
       )
@@ -391,7 +395,7 @@ export function useMemoryGraph({
       .duration(300)
       .attr('stroke', (d) => EDGE_COLORS[d.type] || '#475569')
       .attr('stroke-opacity', (d) => (d.type === 'has_entity' ? 0.2 : Math.max(0.3, d.confidence * 0.8)))
-      .attr('stroke-width', (d) => (d.type === 'has_entity' ? 1 : Math.max(1, d.confidence * 3)));
+      .attr('stroke-width', (d) => getEdgeWidth(d));
 
     // Exit - remove old links with transition
     link.exit().transition().duration(200).attr('stroke-opacity', 0).remove();
@@ -409,15 +413,22 @@ export function useMemoryGraph({
       .filter((d) => d.type === 'memory')
       .append('rect')
       .attr('class', 'node-shape')
-      .attr('width', 28)
-      .attr('height', 28)
-      .attr('x', -14)
-      .attr('y', -14)
+      .attr('width', (d) => getNodeSize(d) * 2)
+      .attr('height', (d) => getNodeSize(d) * 2)
+      .attr('x', (d) => -getNodeSize(d))
+      .attr('y', (d) => -getNodeSize(d))
       .attr('rx', 6)
       .attr('ry', 6)
-      .attr('fill', (d) => CATEGORY_COLORS[d.category || ''] || '#6366f1')
-      .attr('fill-opacity', 0.8)
-      .attr('stroke', (d) => CATEGORY_COLORS[d.category || ''] || '#6366f1')
+      .attr('fill', (d) => {
+        // Use community color if available, otherwise fall back to category
+        if (d.communityId) return communityColorMap(d.communityId);
+        return CATEGORY_COLORS[d.category || ''] || '#6366f1';
+      })
+      .attr('fill-opacity', (d) => getNodeOpacity(d))
+      .attr('stroke', (d) => {
+        if (d.communityId) return communityColorMap(d.communityId);
+        return CATEGORY_COLORS[d.category || ''] || '#6366f1';
+      })
       .attr('stroke-width', 2)
       .attr('stroke-opacity', 0.4);
 
@@ -426,9 +437,13 @@ export function useMemoryGraph({
       .filter((d) => d.type === 'entity')
       .append('circle')
       .attr('class', 'node-shape')
-      .attr('r', 12)
-      .attr('fill', (d) => ENTITY_TYPE_COLORS[d.entityType || ''] || '#64748b')
-      .attr('fill-opacity', 0.9)
+      .attr('r', (d) => getNodeSize(d))
+      .attr('fill', (d) => {
+        // Use community color if available, otherwise fall back to entity type
+        if (d.communityId) return communityColorMap(d.communityId);
+        return ENTITY_TYPE_COLORS[d.entityType || ''] || '#64748b';
+      })
+      .attr('fill-opacity', (d) => getNodeOpacity(d))
       .attr('stroke', '#fff')
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6);
@@ -578,12 +593,13 @@ export function useMemoryGraph({
     loading,
     error,
     selectedNode,
-    graphData,
+    graphData: graphData ?? null,
+    metadata: graphData?.metadata ?? null,
     setSelectedNode,
     handleZoomIn,
     handleZoomOut,
     handleReset,
     handleFitToScreen,
-    refetch: fetchGraphData,
+    refetch: () => rqRefetch().then(() => {}),
   };
 }

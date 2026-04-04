@@ -23,14 +23,15 @@ Core capabilities include:
 
 - **End-to-end TypeScript architecture:** Agent, gateway, memory, router, web, and test layers share one language and type system.
 - **Agent runtime + tool loop:** [`AgentRuntime`](src/agent/runtime.ts) manages reasoning, tool calls, observations, and response generation in a unified flow.
-- **Cognitive memory layer:** [`MemoryManager`](src/memory/manager.ts) coordinates conversation history, long-term memory, retrieval orchestration, and maintenance routines.
+- **Cognitive memory layer:** [`MemoryManager`](src/memory/manager/index.ts) coordinates conversation history, long-term memory, retrieval orchestration, and maintenance routines.
 - **Episodic / semantic memory separation:** Memories are treated not only by content, but also by their functional role.
+- **GraphRAG (Graph-based Retrieval Augmented Generation):** [`src/memory/graphRAG/`](src/memory/graphRAG/) provides graph-aware retrieval with PageRank scoring, community detection, community summarization, graph expansion, caching, token pruning, and shadow-mode behavior discovery.
 - **Graph-assisted retrieval:** [`src/memory/graph.ts`](src/memory/graph.ts) and the retrieval orchestration layer support relationship-aware memory expansion.
 - **Dual-process routing:** The codebase includes infrastructure for routing between faster intuitive flows and more deliberate reasoning flows.
 - **Priming and spreading activation:** Retrieval quality is improved through nearby context, type cues, and neighboring memory links.
 - **Reconsolidation pilot:** Controlled update and rewrite behavior for semantic memory is being explored.
 - **Background job queue:** Persistent workflows support memory maintenance, embedding backfill, summarization, and deeper extraction tasks.
-- **Web interface + gateway:** An HTTP/WebSocket server works together with a React-based client.
+- **Web interface + gateway:** An HTTP/WebSocket server works together with a React-based client with React Query for data fetching and state management.
 - **Multi-provider LLM integration:** Adapters are available for OpenAI, Anthropic, Groq, Mistral, Ollama, NVIDIA, GitHub, and other providers.
 
 ## Architecture Summary
@@ -41,7 +42,7 @@ Core capabilities include:
 
 ### 2. Memory Layer
 
-[`src/memory/manager.ts`](src/memory/manager.ts) is the center of the memory system. Conversation lifecycle management, message storage, embedding generation, retrieval orchestration, review/decay processes, and graph adjacency handling all come together here.
+[`src/memory/manager/index.ts`](src/memory/manager/index.ts) is the center of the memory system. Conversation lifecycle management, message storage, embedding generation, retrieval orchestration, review/decay processes, and graph adjacency handling all come together here.
 
 In practice, the memory architecture includes:
 
@@ -52,23 +53,43 @@ In practice, the memory architecture includes:
 - Ebbinghaus-style review and forgetting logic
 - graph relationships and neighboring memory activation
 
-### 3. Gateway and Communication Layer
+### 3. GraphRAG Module
+
+[`src/memory/graphRAG/`](src/memory/graphRAG/) implements graph-based Retrieval Augmented Generation for context-aware memory retrieval:
+
+- **GraphRAGEngine:** Core graph RAG retrieval engine
+- **GraphExpander:** Graph expansion for related memory nodes
+- **GraphCache:** In-memory graph caching for performance
+- **GraphWorker:** Background graph processing tasks
+- **PageRankScorer:** PageRank-based node importance scoring
+- **CommunityDetector:** Graph community detection for memory clustering
+- **CommunitySummarizer:** Automatic summarization of detected communities
+- **TokenPruner:** Token budget management and pruning
+- **ShadowMode:** Shadow-mode testing for safe feature rollout
+- **BehaviorDiscoveryShadow:** Behavior discovery in shadow mode
+
+### 4. Gateway and Communication Layer
 
 [`src/gateway/index.ts`](src/gateway/index.ts) is the main application entry point. Configuration loading, database initialization, LLM provider startup, runtime wiring, background workers, and the web server are assembled there.
 
 [`src/gateway/bootstrap.ts`](src/gateway/bootstrap.ts) contains server helpers such as dashboard access control and the WebSocket upgrade flow.
 
-### 4. Router and Channel Abstraction
+### 5. Router and Channel Abstraction
 
 [`src/router/index.ts`](src/router/index.ts) provides the routing layer that normalizes messages from different channels and sends responses back through the appropriate transport.
 
-### 5. Web Interface
+### 6. Web Interface
 
-The React-based client lives under [`src/web/react-app`](src/web/react-app). Chat UI, settings, onboarding, and memory-related interface components are implemented there.
+The React-based client lives under [`src/web/react-app`](src/web/react-app). Chat UI, settings, onboarding, and memory-related interface components are implemented there. The frontend uses **React Query** for data fetching, caching, and state synchronization:
 
-### 6. Test Infrastructure
+- **Query hooks:** [`src/web/react-app/src/hooks/queries/`](src/web/react-app/src/hooks/queries/) for conversations, memories, settings, LLM providers, memory graph, sensitive paths, and stats
+- **Mutation hooks:** [`src/web/react-app/src/hooks/mutations/`](src/web/react-app/src/hooks/mutations/) for creating, updating, and deleting memories and conversations
+- **Service layer:** [`src/web/react-app/src/services/`](src/web/react-app/src/services/) for conversation, memory, settings, and stats operations
+- **Query provider:** [`QueryProvider`](src/web/react-app/src/providers/QueryProvider.tsx) wraps the application with React Query context
 
-The [`tests`](tests) directory contains coverage for memory typing, retrieval observability, gateway WebSocket behavior, and reconsolidation scenarios. For example, [`tests/memory/reconsolidationPilot.test.ts`](tests/memory/reconsolidationPilot.test.ts) validates semantic/episodic separation and safe reconsolidation decisions.
+### 7. Test Infrastructure
+
+The [`tests`](tests) directory contains coverage for memory typing, retrieval observability, gateway WebSocket behavior, reconsolidation scenarios, and GraphRAG functionality. For example, [`tests/memory/reconsolidationPilot.test.ts`](tests/memory/reconsolidationPilot.test.ts) validates semantic/episodic separation and safe reconsolidation decisions, while [`tests/memory/graphRAG/`](tests/memory/graphRAG/) provides comprehensive GraphRAG test coverage.
 
 ## Technology Stack
 
@@ -186,11 +207,41 @@ npm test
 │  ├─ gateway/        # HTTP/WebSocket server, bootstrap, and routes
 │  ├─ llm/            # Provider adapters
 │  ├─ memory/         # Database, retrieval, graph, and memory logic
+│  │  ├─ graphRAG/    # Graph-based Retrieval Augmented Generation
+│  │  │  ├─ GraphRAGEngine.ts    # Core graph RAG engine
+│  │  │  ├─ GraphExpander.ts     # Graph expansion
+│  │  │  ├─ GraphCache.ts        # Graph caching
+│  │  │  ├─ GraphWorker.ts       # Background graph tasks
+│  │  │  ├─ PageRankScorer.ts    # PageRank scoring
+│  │  │  ├─ CommunityDetector.ts # Community detection
+│  │  │  ├─ CommunitySummarizer.ts # Community summarization
+│  │  │  ├─ TokenPruner.ts       # Token pruning
+│  │  │  ├─ ShadowMode.ts        # Shadow mode testing
+│  │  │  ├─ BehaviorDiscoveryShadow.ts # Behavior discovery
+│  │  │  ├─ config.ts            # GraphRAG configuration
+│  │  │  ├─ index.ts             # Module exports
+│  │  │  ├─ monitoring.ts        # Monitoring utilities
+│  │  │  └─ rollback.ts          # Rollback support
+│  │  └─ manager/     # Memory manager refactored modules
+│  │     ├─ ConversationManager.ts # Conversation lifecycle
+│  │     ├─ MemoryStore.ts        # Memory storage
+│  │     └─ RetrievalService.ts   # Retrieval operations
 │  ├─ router/         # Channel abstraction and message routing
 │  ├─ utils/          # Logging and utility helpers
 │  └─ web/            # Legacy public interface and React application
+│     └─ react-app/   # React frontend
+│        └─ src/
+│           ├─ hooks/
+│           │  ├─ queries/        # React Query query hooks
+│           │  └─ mutations/      # React Query mutation hooks
+│           ├─ services/          # API service layer
+│           └─ providers/         # React Query provider
+├─ tests/
+│  ├─ benchmark/      # Performance benchmarks
+│  │  └─ graphRAG/   # GraphRAG retrieval benchmarks
+│  └─ memory/
+│     └─ graphRAG/   # GraphRAG unit and integration tests
 ├─ scripts/           # Development and debugging helper scripts
-├─ tests/             # Jest test suite
 ├─ .env.example       # Safe example environment file
 ├─ package.json       # Commands and dependencies
 └─ tsconfig.json      # TypeScript configuration
@@ -220,6 +271,10 @@ Notable implemented areas include:
 - autonomous task queue infrastructure
 - semantic / episodic memory experiments
 - pilot logic for reconsolidation and dual-process routing
+- **GraphRAG module** with graph-based retrieval, PageRank scoring, community detection, and shadow-mode testing
+- **React Query integration** for frontend data fetching, caching, and state management
+- **Memory Manager refactoring** with modular ConversationManager, MemoryStore, and RetrievalService
+- **UI improvements** including scrollbar styling, markdown rendering, and message area enhancements
 
 ## Roadmap
 
@@ -229,6 +284,9 @@ Reasonable short- and mid-term directions include:
 - refining semantic / episodic memory writing policies
 - maturing the reconsolidation pilot with more measurable safety criteria
 - making dual-process routing decisions more configurable
+- **GraphRAG production rollout:** moving from shadow-mode to active graph-based retrieval with configurable thresholds
+- **GraphRAG performance optimization:** improving PageRank computation speed and community detection scalability
+- **GraphRAG monitoring dashboard:** adding real-time graph visualization and retrieval quality metrics to the web interface
 - moving graph activation from shadow-mode behavior toward more controlled active usage
 - improving memory visibility and debug panels in the React interface
 - adding stronger authentication, rate limiting, and operational observability for production deployment

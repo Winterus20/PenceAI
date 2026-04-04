@@ -13,6 +13,11 @@ import { reloadConfig } from './config.js';
 import { BASE_SYSTEM_PROMPT } from '../agent/prompt.js';
 import { logger } from '../utils/logger.js';
 import { AgentRuntime } from '../agent/runtime.js';
+import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../memory/graphRAG/config.js';
+import { BehaviorDiscoveryShadow } from '../memory/graphRAG/BehaviorDiscoveryShadow.js';
+import { PageRankScorer } from '../memory/graphRAG/PageRankScorer.js';
+import { CommunityDetector } from '../memory/graphRAG/CommunityDetector.js';
+import type { MemoryGraph, GraphNode, GraphEdge } from '../memory/types.js';
 
 export interface RouteDeps {
     memory: MemoryManager;
@@ -20,6 +25,16 @@ export interface RouteDeps {
     router: MessageRouter;
     agent: AgentRuntime;
     broadcastStats: () => void;
+}
+
+// Global BehaviorDiscoveryShadow instance (lazy initialized)
+let behaviorDiscoveryShadow: BehaviorDiscoveryShadow | null = null;
+
+function getBehaviorDiscoveryShadow(): BehaviorDiscoveryShadow {
+    if (!behaviorDiscoveryShadow) {
+        behaviorDiscoveryShadow = new BehaviorDiscoveryShadow();
+    }
+    return behaviorDiscoveryShadow;
 }
 
 export function registerRoutes(app: Express, deps: RouteDeps): void {
@@ -155,10 +170,125 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         }
     });
 
-    app.get('/api/memory-graph', (_req, res) => {
+    app.get('/api/memory-graph', (req, res) => {
         try {
-            const graph = memory.getMemoryGraph();
-            res.json(graph);
+            const {
+                limit = 100,
+                includePageRank = 'true',
+                includeCommunities = 'true',
+            } = req.query;
+
+            const graphLimit = parseInt(limit as string, 10);
+            const doPageRank = includePageRank === 'true';
+            const doCommunities = includeCommunities === 'true';
+
+            // Mevcut graph verisi (limit graph.ts'de default 200)
+            const graphData = memory.getMemoryGraph();
+
+            // Limit uygula (frontend tarafında da filtreleme yapılabilir)
+            const limitedNodes = graphData.nodes.slice(0, graphLimit);
+            const limitedNodeIds = new Set(limitedNodes.map((n: GraphNode) => n.id));
+            const limitedEdges = graphData.edges.filter(
+                (e: GraphEdge) => limitedNodeIds.has(typeof e.source === 'string' ? e.source : e.source) &&
+                     limitedNodeIds.has(typeof e.target === 'string' ? e.target : e.target)
+            );
+            const limitedGraph: MemoryGraph = { nodes: limitedNodes, edges: limitedEdges };
+
+            // PageRank skorları ekle
+            let pageRankScores = new Map<number, number>();
+            if (doPageRank) {
+                try {
+                    const db = (memory as any).db;
+                    if (db) {
+                        const scorer = new PageRankScorer(db);
+                        const allNodeIds = limitedGraph.nodes
+                            .filter((n: GraphNode) => n.type === 'memory' && n.rawId != null)
+                            .map((n: GraphNode) => n.rawId!);
+                        if (allNodeIds.length > 0) {
+                            pageRankScores = scorer.scoreSubgraph(allNodeIds);
+                        }
+                    }
+                } catch (err) {
+                    logger.warn({ err }, '[API] PageRank computation failed:');
+                }
+            }
+
+            // Community etiketleri ekle
+            let communityMap = new Map<number, string>();
+            if (doCommunities) {
+                try {
+                    const db = (memory as any).db;
+                    if (db) {
+                        const detector = new CommunityDetector(db);
+                        const result = detector.detectCommunities();
+                        for (const community of result.communities) {
+                            for (const nodeId of community.memberNodeIds) {
+                                communityMap.set(nodeId, community.id);
+                            }
+                        }
+                    }
+                } catch (err) {
+                    logger.warn({ err }, '[API] Community detection failed:');
+                }
+            }
+
+            // Node'ları zenginleştir
+            interface EnrichedNode extends GraphNode {
+                pageRankScore: number;
+                communityId: string | null;
+                importance: number;
+            }
+            const enrichedNodes: EnrichedNode[] = limitedGraph.nodes.map((node: GraphNode) => {
+                const rawId = node.rawId ?? 0;
+                const prScore = pageRankScores.get(rawId) ?? 0;
+                const communityId = communityMap.get(rawId) ?? null;
+                const accessCount = (node as any).access_count ?? 0;
+                const importance = node.importance ?? 0;
+
+                return {
+                    ...node,
+                    pageRankScore: prScore,
+                    communityId,
+                    // Node importance: PageRank + access_count + importance
+                    importance: prScore * 0.5 + accessCount * 0.3 + importance * 0.2,
+                };
+            });
+
+            // Edge'leri zenginleştir
+            interface EnrichedEdge extends GraphEdge {
+                displayWeight: number;
+            }
+            const enrichedEdges: EnrichedEdge[] = limitedGraph.edges.map((edge: GraphEdge) => {
+                const confidence = edge.confidence ?? 0.5;
+                const weight = (edge as any).weight ?? 1.0;
+                return {
+                    ...edge,
+                    // Edge weight: confidence * weight
+                    displayWeight: confidence * weight,
+                };
+            });
+
+            // Community sayısını hesapla
+            const uniqueCommunities = new Set(communityMap.values());
+
+            // Ortalama PageRank
+            const nodesWithRawId = enrichedNodes.filter((n: EnrichedNode) => n.type === 'memory');
+            const avgPageRank = nodesWithRawId.length > 0
+                ? nodesWithRawId.reduce((sum: number, n: EnrichedNode) => sum + (n.pageRankScore ?? 0), 0) / nodesWithRawId.length
+                : 0;
+
+            res.json({
+                nodes: enrichedNodes,
+                edges: enrichedEdges,
+                metadata: {
+                    totalNodes: enrichedNodes.length,
+                    totalEdges: enrichedEdges.length,
+                    communityCount: uniqueCommunities.size,
+                    avgPageRank,
+                    includePageRank: doPageRank,
+                    includeCommunities: doCommunities,
+                },
+            });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }
@@ -373,7 +503,118 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         res.status(500).json({ error: err.message });
       }
     });
-  
+
+    // ============ GraphRAG Rollout API ============
+
+    // GET /api/graphrag/status — Mevcut GraphRAG durumunu getir
+    app.get('/api/graphrag/status', (_req, res) => {
+      const config = GraphRAGConfigManager.getConfig();
+      const phase = GraphRAGConfigManager.getCurrentPhase();
+
+      res.json({
+        phase,
+        phaseName: GraphRAGRolloutPhase[phase],
+        config,
+        enabled: config.enabled,
+        shadowMode: config.shadowMode,
+        sampleRate: config.sampleRate,
+      });
+    });
+
+    // POST /api/graphrag/advance-phase — Phase'i ilerlet
+    app.post('/api/graphrag/advance-phase', (_req, res) => {
+      try {
+        const newPhase = GraphRAGConfigManager.advancePhase();
+        res.json({
+          phase: newPhase,
+          phaseName: GraphRAGRolloutPhase[newPhase],
+          message: `GraphRAG rollout phase advanced to ${GraphRAGRolloutPhase[newPhase]}`
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // POST /api/graphrag/set-phase — Belirli bir phase'e set et
+    app.post('/api/graphrag/set-phase', (req, res) => {
+      const { phase } = req.body;
+      const phaseNum = parseInt(phase, 10);
+
+      if (!Object.values(GraphRAGRolloutPhase).includes(phaseNum) || isNaN(phaseNum)) {
+        return res.status(400).json({ error: 'Invalid phase. Use 1 (OFF), 2 (SHADOW), 3 (PARTIAL), or 4 (FULL).' });
+      }
+
+      try {
+        GraphRAGConfigManager.setRolloutPhase(phaseNum as GraphRAGRolloutPhase);
+        res.json({
+          phase: phaseNum,
+          phaseName: GraphRAGRolloutPhase[phaseNum],
+          message: `GraphRAG rollout phase set to ${GraphRAGRolloutPhase[phaseNum]}`
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // GET /api/graphrag/shadow-report — Shadow mode raporu
+    app.get('/api/graphrag/shadow-report', (_req, res) => {
+      const config = GraphRAGConfigManager.getConfig();
+      if (!config.shadowMode) {
+        return res.status(400).json({ error: 'Shadow mode is not active' });
+      }
+
+      // ShadowMode instance'ına agent üzerinden eriş
+      const shadowMode = agent.getShadowMode();
+      if (!shadowMode) {
+        return res.status(400).json({ error: 'ShadowMode instance not available' });
+      }
+
+      const report = shadowMode.generateReport();
+      res.json(report);
+    });
+
+    // ============ Behavior Discovery Shadow API ============
+
+    // GET /api/behavior-discovery/metrics — BehaviorDiscovery metrikleri
+    app.get('/api/behavior-discovery/metrics', (_req, res) => {
+      const shadow = getBehaviorDiscoveryShadow();
+      const metrics = shadow.getMetrics();
+      res.json(metrics);
+    });
+
+    // GET /api/behavior-discovery/report — BehaviorDiscovery raporu
+    app.get('/api/behavior-discovery/report', (_req, res) => {
+      const shadow = getBehaviorDiscoveryShadow();
+      const report = shadow.generateReport();
+      res.type('text/plain').send(report);
+    });
+
+    // POST /api/behavior-discovery/config — BehaviorDiscovery konfigürasyonunu güncelle
+    app.post('/api/behavior-discovery/config', (req, res) => {
+      const shadow = getBehaviorDiscoveryShadow();
+      const { enabled, sampleRate, maxComparisons, logToFile } = req.body;
+      
+      const config: Record<string, unknown> = {};
+      if (typeof enabled === 'boolean') config.enabled = enabled;
+      if (typeof sampleRate === 'number' && sampleRate >= 0 && sampleRate <= 1) config.sampleRate = sampleRate;
+      if (typeof maxComparisons === 'number' && maxComparisons > 0) config.maxComparisons = maxComparisons;
+      if (typeof logToFile === 'boolean') config.logToFile = logToFile;
+
+      if (Object.keys(config).length === 0) {
+        return res.status(400).json({ error: 'Geçerli bir konfigürasyon sağlanmalıdır' });
+      }
+
+      shadow.updateConfig(config);
+      res.json({ success: true, config: shadow.getConfig() });
+    });
+
+    // POST /api/behavior-discovery/clear — Comparisons'ı temizle
+    app.post('/api/behavior-discovery/clear', (_req, res) => {
+      const shadow = getBehaviorDiscoveryShadow();
+      shadow.clear();
+      res.json({ success: true });
+    });
+
     // API 404 handler
     app.all('/api/*', (_req, res) => {
       res.status(404).json({ error: 'API endpoint bulunamadı' });

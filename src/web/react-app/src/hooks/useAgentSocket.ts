@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { useAgentStore } from '../store/agentStore';
 import type { ToolCallItem, AttachmentItem } from '../store/agentStore';
+import { useStats } from './useStats';
 
 // WebSocket mesaj tipleri
 interface WsTokenMessage {
@@ -93,9 +94,9 @@ export function useAgentSocket() {
         patchMessage,
         setThinking,
         setActiveConversationId,
-        setStats,
         setConfirmRequest,
     } = useAgentStore();
+    const { updateStatsFromWebSocket } = useStats();
 
     // Benzersiz bir referansla mount durumunu takip edelim
     const mounted = useRef(true);
@@ -292,7 +293,7 @@ export function useAgentSocket() {
                 break;
 
             case 'stats':
-                setStats(data.stats || {});
+                updateStatsFromWebSocket(data.stats || {});
                 break;
 
             case 'confirm_request':

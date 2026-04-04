@@ -13,6 +13,12 @@ import { SecuritySettings } from './SecuritySettings';
 import { MemorySettings } from './MemorySettings';
 import { metaBadgeClassName } from '@/styles/dialog';
 import { SkeletonSettingsDialog } from '@/components/ui/skeleton';
+import { useSettings } from '@/hooks/queries/useSettings';
+import { useLLMProviders } from '@/hooks/queries/useLLMProviders';
+import { useSensitivePaths } from '@/hooks/queries/useSensitivePaths';
+import { useUpdateSettings } from '@/hooks/mutations/useUpdateSettings';
+import { useAddSensitivePath } from '@/hooks/mutations/useAddSensitivePath';
+import { useRemoveSensitivePath } from '@/hooks/mutations/useRemoveSensitivePath';
 
 type SettingsForm = {
   defaultLLMProvider: string;
@@ -68,55 +74,34 @@ const emptyForm: SettingsForm = {
 
 export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: boolean, onOpenChange: (o: boolean) => void, inline?: boolean }) => {
   const [form, setForm] = useState<SettingsForm>(emptyForm);
-  const [providers, setProviders] = useState<Array<{ name: string; models: string[] }>>([]);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [statusText, setStatusText] = useState<string>('');
-  // Hassas dizinler state
-  const [sensitivePaths, setSensitivePaths] = useState<string[]>([]);
   const [newSensitivePath, setNewSensitivePath] = useState<string>('');
-  const [pathLoading, setPathLoading] = useState(false);
 
+  // Query hooks
+  const { data: settings, isLoading: settingsLoading } = useSettings();
+  const { data: providers = [], isLoading: providersLoading } = useLLMProviders();
+  const { data: sensitivePaths = [], isLoading: pathsLoading } = useSensitivePaths();
+
+  // Mutation hooks
+  const updateSettings = useUpdateSettings();
+  const addSensitivePath = useAddSensitivePath();
+  const removeSensitivePath = useRemoveSensitivePath();
+
+  // Form'u settings ile doldur
   useEffect(() => {
-    if (!open) return;
-
-    const loadData = async () => {
-      setLoading(true);
-      setStatusText('');
-
-      try {
-        const [providersRes, settingsRes, sensitivePathsRes] = await Promise.all([
-          fetch('/api/llm/providers'),
-          fetch('/api/settings'),
-          fetch('/api/settings/sensitive-paths'),
-        ]);
-
-        const providersData = providersRes.ok ? await providersRes.json() : [];
-        const settingsData = settingsRes.ok ? await settingsRes.json() : {};
-        const sensitivePathsData = sensitivePathsRes.ok ? await sensitivePathsRes.json() : [];
-
-        setProviders(providersData);
-        setSensitivePaths(Array.isArray(sensitivePathsData) ? sensitivePathsData : []);
-        setForm({
-          ...emptyForm,
-          ...settingsData,
-          allowShellExecution: !!settingsData.allowShellExecution,
-          autonomousStepLimit: String(settingsData.autonomousStepLimit ?? emptyForm.autonomousStepLimit),
-          memoryDecayThreshold: String(settingsData.memoryDecayThreshold ?? emptyForm.memoryDecayThreshold),
-          semanticSearchThreshold: String(settingsData.semanticSearchThreshold ?? emptyForm.semanticSearchThreshold),
-          temperature: String(settingsData.temperature ?? emptyForm.temperature),
-          maxTokens: String(settingsData.maxTokens ?? emptyForm.maxTokens),
-        });
-      } catch (error) {
-        console.error('Ayarlar yüklenemedi:', error);
-        setStatusText('Ayarlar yüklenemedi.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void loadData();
-  }, [open]);
+    if (settings) {
+      setForm({
+        ...emptyForm,
+        ...settings,
+        allowShellExecution: !!settings.allowShellExecution,
+        autonomousStepLimit: String(settings.autonomousStepLimit ?? emptyForm.autonomousStepLimit),
+        memoryDecayThreshold: String(settings.memoryDecayThreshold ?? emptyForm.memoryDecayThreshold),
+        semanticSearchThreshold: String(settings.semanticSearchThreshold ?? emptyForm.semanticSearchThreshold),
+        temperature: String(settings.temperature ?? emptyForm.temperature),
+        maxTokens: String(settings.maxTokens ?? emptyForm.maxTokens),
+      });
+    }
+  }, [settings]);
 
   const modelOptions = useMemo(() => {
     const models = providers.find((provider) => provider.name === form.defaultLLMProvider)?.models ?? [];
@@ -146,69 +131,32 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
   // Hassas dizin ekleme
   const handleAddSensitivePath = async () => {
     if (!newSensitivePath.trim()) return;
-    setPathLoading(true);
     try {
-      const response = await fetch('/api/settings/sensitive-paths', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: newSensitivePath.trim() }),
-      });
-      if (response.ok) {
-        const paths = await response.json();
-        setSensitivePaths(Array.isArray(paths) ? paths : []);
-        setNewSensitivePath('');
-      } else {
-        const err = await response.json();
-        alert(err.error || 'Eklenemedi');
-      }
+      await addSensitivePath.mutateAsync(newSensitivePath.trim());
+      setNewSensitivePath('');
     } catch (error) {
       console.error('Hassas dizin eklenemedi:', error);
-    } finally {
-      setPathLoading(false);
+      alert('Eklenemedi');
     }
   };
 
   // Hassas dizin silme
   const handleRemoveSensitivePath = async (pathToRemove: string) => {
-    setPathLoading(true);
     try {
-      const response = await fetch('/api/settings/sensitive-paths', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: pathToRemove }),
-      });
-      if (response.ok) {
-        const paths = await response.json();
-        setSensitivePaths(Array.isArray(paths) ? paths : []);
-      }
+      await removeSensitivePath.mutateAsync(pathToRemove);
     } catch (error) {
       console.error('Hassas dizin kaldırılamadı:', error);
-    } finally {
-      setPathLoading(false);
     }
   };
 
   const handleSave = async () => {
-    setSaving(true);
     setStatusText('');
-
     try {
-      const response = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
-
-      if (!response.ok) {
-        throw new Error('Ayarlar kaydedilemedi.');
-      }
-
+      await updateSettings.mutateAsync(form);
       setStatusText('Ayarlar kaydedildi.');
     } catch (error) {
       console.error(error);
       setStatusText('Kaydetme sırasında hata oluştu.');
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -218,7 +166,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
             <div className="flex items-center gap-3 text-[1.7rem] font-semibold tracking-[-0.03em] text-foreground sm:text-[1.9rem]">
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-surface-xl text-surface-strong">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-purple-500/20 text-purple-400">
                 <Settings2 className="h-5 w-5" />
               </span>
               Ayarlar
@@ -235,7 +183,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
         </div>
       </div>
 
-      {loading ? (
+      {settingsLoading || providersLoading || pathsLoading ? (
         <SkeletonSettingsDialog />
       ) : (
         <div className="subtle-scrollbar min-h-0 flex-1 overflow-y-auto bg-gradient-to-b from-surface-xs to-transparent">
@@ -252,7 +200,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
                 form={form}
                 sensitivePaths={sensitivePaths}
                 newSensitivePath={newSensitivePath}
-                pathLoading={pathLoading}
+                pathLoading={addSensitivePath.isPending || removeSensitivePath.isPending}
                 updateField={updateSecurityField}
                 setNewSensitivePath={setNewSensitivePath}
                 onAddSensitivePath={handleAddSensitivePath}
@@ -272,7 +220,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
         <div className="max-w-3xl text-sm leading-6 text-surface-strong">
           {statusText || 'Kaydettiğiniz değişiklikler mevcut oturum davranışını anında etkileyebilir.'}
         </div>
-        <Button onClick={handleSave} disabled={loading || saving} className="min-w-[190px] rounded-2xl px-5 shadow-[0_12px_24px_rgba(0,0,0,0.24)]">
+        <Button onClick={handleSave} disabled={settingsLoading || providersLoading || pathsLoading || updateSettings.isPending} className="min-w-[190px] rounded-full px-5 bg-purple-600 text-white hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.4)] transition-all duration-300 border-0">
         <Save className="h-4 w-4" />
         Kaydet ve Uygula
         </Button>

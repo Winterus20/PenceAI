@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useMemoryGraph, type GraphNode } from '@/hooks/useMemoryGraph';
@@ -8,6 +9,7 @@ import { MemoryNodeDetails } from './MemoryNodeDetails';
 interface MemoryGraphViewProps {
   filterCategory?: string;
   onNodeClick?: (node: GraphNode) => void;
+  limit?: number;
 }
 
 /**
@@ -15,7 +17,22 @@ interface MemoryGraphViewProps {
  * D3.js ile force-directed graph render eder
  * Mantık useMemoryGraph hook'una taşınmıştır
  */
-export const MemoryGraphView = ({ filterCategory = 'all', onNodeClick }: MemoryGraphViewProps) => {
+export const MemoryGraphView = ({
+  filterCategory = 'all',
+  onNodeClick,
+  limit = 100,
+}: MemoryGraphViewProps) => {
+  const [includePageRank, setIncludePageRank] = useState(true);
+  const [includeCommunities, setIncludeCommunities] = useState(true);
+
+  const handleIncludePageRankChange = useCallback((checked: boolean) => {
+    setIncludePageRank(checked);
+  }, []);
+
+  const handleIncludeCommunitiesChange = useCallback((checked: boolean) => {
+    setIncludeCommunities(checked);
+  }, []);
+
   const {
     containerRef,
     svgRef,
@@ -28,7 +45,14 @@ export const MemoryGraphView = ({ filterCategory = 'all', onNodeClick }: MemoryG
     handleReset,
     handleFitToScreen,
     refetch,
-  } = useMemoryGraph({ filterCategory, onNodeClick });
+    metadata,
+  } = useMemoryGraph({
+    filterCategory,
+    onNodeClick,
+    limit,
+    includePageRank,
+    includeCommunities,
+  });
 
   if (loading) {
     return (
@@ -58,10 +82,14 @@ export const MemoryGraphView = ({ filterCategory = 'all', onNodeClick }: MemoryG
         onZoomOut={handleZoomOut}
         onReset={handleReset}
         onFitToScreen={handleFitToScreen}
+        includePageRank={includePageRank}
+        includeCommunities={includeCommunities}
+        onIncludePageRankChange={handleIncludePageRankChange}
+        onIncludeCommunitiesChange={handleIncludeCommunitiesChange}
       />
 
       {/* Legend */}
-      <MemoryGraphLegend />
+      <MemoryGraphLegend metadata={metadata} />
 
       {/* Selected Node Info Panel */}
       {selectedNode && (

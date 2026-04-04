@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Settings, BookOpen, BrainCircuit, Wrench, Menu, X, Moon, Sun } from 'lucide-react';
+import { BrainCircuit, Wrench, Menu, X, PanelLeftOpen } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 import { useAgentSocket } from '../../hooks/useAgentSocket';
 import { useConversations } from '../../hooks/useConversations';
@@ -16,6 +16,7 @@ import { ConversationPanel } from './ConversationPanel';
 import { MessagePanel } from './MessagePanel';
 import { InputPanel } from './InputPanel';
 import hotToast from 'react-hot-toast';
+import { AnimatePresence, motion } from 'framer-motion';
 
 export const ChatWindow = () => {
   // Agent Store
@@ -29,13 +30,10 @@ export const ChatWindow = () => {
     activeView,
     feedbacks,
     toast,
-    stats,
-    theme,
     setMessages,
     setActiveView,
     sendFeedback,
     hideToast,
-    toggleTheme,
   } = useAgentStore();
 
   // WebSocket
@@ -218,75 +216,90 @@ export const ChatWindow = () => {
       />
 
       {/* Desktop Sidebar */}
-      {showConversations ? (
-        <aside className="hidden md:flex flex-col w-[260px] flex-shrink-0 bg-sidebar border-r border-border/60 transition-all duration-300">
-          <ConversationPanel
-            activeView={activeView}
-            setActiveView={setActiveView}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            sortOrder={sortOrder}
-            conversations={conversations}
-            activeConversationId={activeConversationId}
-            pinnedConversations={pinnedConversations}
-            onNewChat={handleNewChat}
-            onLoadConversation={loadConversation}
-            onTogglePinned={togglePinned}
-            onDeleteConversation={deleteConversation}
-            stats={stats}
-            isConnected={isConnected}
-          />
-        </aside>
-      ) : null}
+      <AnimatePresence initial={false}>
+        {showConversations && (
+          <motion.aside 
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 260, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
+            className="hidden md:flex flex-col flex-shrink-0 bg-sidebar border-r border-border/40 overflow-hidden z-20 shadow-lg"
+          >
+            <div className="w-[260px] h-full flex flex-col">
+              <ConversationPanel
+                activeView={activeView}
+                setActiveView={setActiveView}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                sortOrder={sortOrder}
+                conversations={conversations}
+                activeConversationId={activeConversationId}
+                pinnedConversations={pinnedConversations}
+                onNewChat={handleNewChat}
+                onLoadConversation={loadConversation}
+                onTogglePinned={togglePinned}
+                onDeleteConversation={deleteConversation}
+                isConnected={isConnected}
+                onToggleSidebar={() => setShowConversations(false)}
+                onOpenMemory={() => setIsMemoryOpen(true)}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+              />
+            </div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 relative h-full">
-        {/* Top Header inside main content */}
-        <header className="flex-none h-14 px-3 md:px-4 flex items-center justify-between z-10 w-full relative">
+      <div className="flex-1 flex flex-col min-w-0 relative h-full bg-background">
+        {/* Floating Top Header inside main content */}
+        <header className="absolute top-0 left-0 right-0 h-14 px-3 md:px-4 flex items-center justify-between z-30 transition-all duration-300 bg-background/60 backdrop-blur-md border-b border-white/[0.04]">
           <div className="flex items-center gap-2">
-            {!showConversations && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 md:flex hidden hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground"
-                onClick={() => setShowConversations(true)}
-              >
-                <Menu size={18} />
-              </Button>
-            )}
+            <AnimatePresence>
+              {!showConversations && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 md:flex hidden hover:bg-white/10 rounded-lg text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => setShowConversations(true)}
+                    title="Menüyü Büyüt"
+                  >
+                    <PanelLeftOpen size={18} />
+                  </Button>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <Button
               variant="ghost"
               size="icon"
-              className="h-10 w-10 md:hidden flex hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground"
+              className="h-9 w-9 md:hidden flex hover:bg-white/10 rounded-lg text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => setIsMobileSidebarOpen(true)}
             >
               <Menu size={18} />
             </Button>
             
-            <button className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/5 transition-colors text-lg font-semibold text-foreground/90">
-              PençeAI
-              <span className="text-muted-foreground text-sm font-normal">v0.1</span>
+            <button className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-white/5 transition-colors text-lg font-semibold text-foreground/90">
+              Pençe<span className="text-purple-400">AI</span>
+              <span className="text-muted-foreground text-xs font-normal border border-white/10 rounded-full px-2 py-0.5 bg-white/5">v0.1</span>
             </button>
           </div>
 
-          <div className="flex items-center gap-1">
-            <Button variant={showThinking ? 'secondary' : 'ghost'} size="icon" className="h-10 w-10 rounded-full hover:bg-white/5 text-muted-foreground hover:text-foreground" onClick={() => setShowThinking((prev) => !prev)} title="Düşünme Modu">
-              <BrainCircuit size={18} />
+          <div className="flex items-center gap-1.5">
+            <Button variant={showThinking ? 'secondary' : 'ghost'} size="icon" className={`h-9 w-9 rounded-full transition-colors ${showThinking ? 'bg-purple-500/20 text-purple-300 hover:bg-purple-500/30' : 'hover:bg-white/10 text-muted-foreground hover:text-foreground'}`} onClick={() => setShowThinking((prev) => !prev)} title="Düşünme Modu">
+              <BrainCircuit size={16} />
             </Button>
-            <Button variant={showTools ? 'secondary' : 'ghost'} size="icon" className="h-10 w-10 rounded-full hover:bg-white/5 text-muted-foreground hover:text-foreground" onClick={() => setShowTools((prev) => !prev)} title="Araçlar">
-              <Wrench size={18} />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full hover:bg-white/5 text-muted-foreground hover:text-foreground" onClick={() => setIsMemoryOpen(true)} title="Bellek">
-              <BookOpen size={18} />
-            </Button>
-            <Button variant="ghost" size="icon" className="h-10 w-10 rounded-full hover:bg-white/5 text-muted-foreground hover:text-foreground" onClick={() => setIsSettingsOpen(true)} title="Ayarlar">
-              <Settings size={18} />
+            <Button variant={showTools ? 'secondary' : 'ghost'} size="icon" className={`h-9 w-9 rounded-full transition-colors ${showTools ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' : 'hover:bg-white/10 text-muted-foreground hover:text-foreground'}`} onClick={() => setShowTools((prev) => !prev)} title="Araçlar">
+              <Wrench size={16} />
             </Button>
           </div>
         </header>
 
         {/* Messages & Input */}
-        <div className="flex flex-1 overflow-hidden relative">
+        <div className="flex flex-1 overflow-hidden relative pt-14">
           <div className="flex w-full flex-col h-full">
             <MessagePanel
               messages={messages}
@@ -368,31 +381,12 @@ export const ChatWindow = () => {
               onLoadConversation={loadConversation}
               onTogglePinned={togglePinned}
               onDeleteConversation={deleteConversation}
-              stats={stats}
-              isConnected={isConnected}
-              isMobile={true}
-              onCloseMobile={() => setIsMobileSidebarOpen(false)}
-            />
-
-            {/* Tema Değiştirme */}
-            <div className="border-t border-border/60 px-4 py-3">
-              <button
-                onClick={toggleTheme}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                {theme === 'dark' ? (
-                  <>
-                    <Sun className="h-4 w-4" />
-                    <span>Açık Tema</span>
-                  </>
-                ) : (
-                  <>
-                    <Moon className="h-4 w-4" />
-                    <span>Koyu Tema</span>
-                  </>
-                )}
-              </button>
-            </div>
+                isConnected={isConnected}
+                isMobile={true}
+                onCloseMobile={() => setIsMobileSidebarOpen(false)}
+                onOpenMemory={() => setIsMemoryOpen(true)}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+              />
           </aside>
         </div>
       )}

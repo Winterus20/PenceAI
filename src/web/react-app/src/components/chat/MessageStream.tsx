@@ -2,7 +2,8 @@ import React, { useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Virtuoso } from 'react-virtuoso';
-import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, SquarePen, Wrench, BrainCircuit, Paperclip, ChevronDown, ChevronUp } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, SquarePen, Wrench, BrainCircuit, Paperclip, ChevronDown } from 'lucide-react';
 import type { AttachmentItem, Message, ToolCallItem } from '@/store/agentStore';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -114,20 +115,38 @@ const InlineMetaBlock: React.FC<{
     if (!visible || count === 0) return null;
 
     return (
-        <div className="mb-3 w-full max-w-[90%] border border-border/70 bg-card/50 text-sm text-foreground/80">
+        <div className="mb-3 w-full max-w-[85%] border border-border/40 bg-card/60 text-sm text-foreground/80 rounded-xl overflow-hidden shadow-sm">
             <button
                 type="button"
                 onClick={() => setExpanded((prev) => !prev)}
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-white/5 transition-colors"
             >
-                <span className="flex items-center gap-2 text-label text-muted-foreground">
+                <span className="flex items-center gap-2 text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
                     {icon}
                     {title}
-                    <span className="rounded-full border border-border/70 px-2 py-0.5 text-[10px]">{count}</span>
+                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-foreground/70">{count}</span>
                 </span>
-                {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                <motion.div
+                  animate={{ rotate: expanded ? 180 : 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <ChevronDown size={14} className="text-muted-foreground" />
+                </motion.div>
             </button>
-            {expanded && <div className="border-t border-border/70 px-4 py-3">{children}</div>}
+            <AnimatePresence initial={false}>
+              {expanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
+                >
+                  <div className="border-t border-border/40 px-4 py-3 bg-black/20">
+                    {children}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
         </div>
     );
 };
@@ -221,8 +240,8 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
     	<div
     		key={msg.id}
     		className={cn(
-    			"flex flex-col group animate-in slide-in-from-bottom-2 fade-in duration-300 ease-out py-3",
-    			isUser ? "items-end text-right" : "items-start text-left"
+    			"flex flex-col group animate-in slide-in-from-bottom-2 fade-in duration-300 ease-out py-3 w-full",
+    			isUser ? "items-end" : "items-start"
     		)}
     	>
         {!isUser && !isSystem && msg.thinking?.length ? (
@@ -232,9 +251,9 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
             count={msg.thinking.length}
             visible={showThinking}
           >
-            <div className="space-y-2 text-sm leading-6 text-foreground/75">
+            <div className="space-y-2 text-[13px] leading-relaxed text-foreground/75">
               {msg.thinking.map((entry, idx) => (
-                <div key={`${msg.id}-thinking-${idx}`} className="border border-border/50 bg-background/40 px-3 py-2">
+                <div key={`${msg.id}-thinking-${idx}`} className="border-l-2 border-purple-500/30 pl-3 py-1">
                   {entry}
                 </div>
               ))}
@@ -253,25 +272,20 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
           </InlineMetaBlock>
         ) : null}
 
-        {/* Meta Identifier */}
+        {/* Typographic Content Body (Bubble) */}
         <div className={cn(
-            "text-meta font-medium mb-3 opacity-45 select-none",
-            isUser ? "text-foreground" : isSystem ? "text-destructive" : "text-foreground"
-        )}>
-        	{isUser ? 'Sen' : isSystem ? 'Sistem' : 'PençeAI'}
-        </div>
-
-        {/* Typographic Content Body */}
-        <div className={cn(
-          "text-base md:text-lg leading-[1.8] font-light tracking-tight max-w-[90%] w-full",
+          "text-base md:text-[15.5px] leading-relaxed font-normal tracking-[-0.01em] max-w-[85%] w-fit px-5 py-3.5 shadow-sm overflow-hidden",
           isUser
-            ? "text-foreground/60"
+            ? "bg-[#2f2f2f] text-foreground/90 rounded-[22px] rounded-br-sm"
             : isSystem
-            ? "text-destructive/80 italic"
-            : "text-foreground"
+            ? "bg-destructive/10 text-destructive/80 italic border border-destructive/20 rounded-[22px]"
+            : "bg-card border border-border/40 text-foreground rounded-[22px] rounded-bl-sm"
         )}>
           <AttachmentPreview attachments={msg.attachments} onImageClick={onImageClick} />
-          <div className="prose prose-p:leading-[1.8] prose-p:mb-5 dark:prose-invert max-w-none prose-pre:bg-transparent prose-pre:border prose-pre:border-foreground/10 prose-pre:rounded-none prose-pre:p-4 prose-a:text-foreground/80 hover:prose-a:text-foreground">
+          <div className={cn(
+            "prose dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/5 prose-pre:rounded-xl prose-pre:p-4 hover:prose-a:text-foreground",
+            isUser ? "prose-p:mb-0 text-left" : "prose-p:mb-4"
+          )}>
             {msg.content ? (
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
@@ -295,14 +309,19 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
               </span>
             )}
           </div>
-          <div className="mt-4 text-label font-medium text-muted-foreground">
-            {formatTime(msg.timestamp)}
-          </div>
         </div>
 
-        {/* Ghost Actions */}
+        {/* Ghost Actions & Timestamp */}
+        <div className={cn("flex items-center gap-2 mt-2", isUser ? "flex-row-reverse" : "flex-row")}>
+          <div className="text-[11px] font-medium text-muted-foreground/50 mx-1">
+            {formatTime(msg.timestamp)}
+          </div>
+
         {!isSystem && (
-          <div className="flex items-center gap-1 mt-4 opacity-0 group-hover:opacity-100 transition-all duration-500 -translate-y-2 group-hover:translate-y-0">
+          <div className={cn(
+            "flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300",
+            isUser ? "translate-x-2 group-hover:translate-x-0" : "-translate-x-2 group-hover:translate-x-0"
+          )}>
             <Button
               variant="ghost"
               size="icon"
@@ -368,6 +387,7 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
             )}
           </div>
         )}
+        </div>
       </div>
     );
   };

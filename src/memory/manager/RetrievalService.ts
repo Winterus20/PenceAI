@@ -26,6 +26,11 @@ import { computeNextReview } from '../ebbinghaus.js';
 import type { EmbeddingProvider } from '../embeddings.js';
 import type { TaskQueue } from '../../autonomous/queue.js';
 import type { RecentMessage, PromptContextBundle, PromptContextOptions } from './types.js';
+import type { GraphExpander } from '../graphRAG/GraphExpander.js';
+import type { PageRankScorer } from '../graphRAG/PageRankScorer.js';
+import type { CommunityDetector } from '../graphRAG/CommunityDetector.js';
+import type { CommunitySummarizer } from '../graphRAG/CommunitySummarizer.js';
+import type { CommunitySummary } from '../graphRAG/CommunitySummarizer.js';
 
 export interface RetrievalDeps {
   db: Database.Database;
@@ -625,13 +630,168 @@ export class RetrievalService {
     return processed;
   }
 
+  // ========== GraphRAG Search ==========
+
+  /**
+   * GraphRAG-style hibrit arama.
+   *
+   * 1. Standard hybrid search ile initial results
+   * 2. Graph expansion: Initial results'ın komşularını bul
+   * 3. PageRank scoring ile node'ları skorla
+   * 4. Community bilgisi ekle
+   * 5. RRF fusion ile final ranking
+   */
+  async graphRAGSearch(options: {
+    query: string;
+    maxResults?: number;
+    maxHops?: number;
+    useCommunities?: boolean;
+    usePageRank?: boolean;
+    minConfidence?: number;
+  }): Promise<{
+    memories: MemoryRow[];
+    communitySummaries: CommunitySummary[];
+    graphContext: {
+      expandedNodeIds: number[];
+      edgeCount: number;
+      maxHopReached: boolean;
+    };
+    searchMetadata: {
+      duration: number;
+      cacheHit: boolean;
+      communityCount: number;
+    };
+  }> {
+    const startTime = Date.now();
+    const {
+      query,
+      maxResults = 10,
+      maxHops = 2,
+      useCommunities = true,
+      usePageRank = true,
+      minConfidence = 0.3,
+    } = options;
+
+    // GraphRAG bileşenleri deps'ten alınmalı
+    const graphExpander = (this.deps as any).graphExpander as GraphExpander | undefined;
+    const pageRankScorer = (this.deps as any).pageRankScorer as PageRankScorer | undefined;
+    const communityDetector = (this.deps as any).communityDetector as CommunityDetector | undefined;
+    const communitySummarizer = (this.deps as any).communitySummarizer as CommunitySummarizer | undefined;
+
+    if (!graphExpander) {
+      logger.warn('[RetrievalService] GraphRAG search called but GraphExpander not available');
+      const fallbackResults = await this.hybridSearch(query, maxResults);
+      return {
+        memories: fallbackResults,
+        communitySummaries: [],
+        graphContext: { expandedNodeIds: [], edgeCount: 0, maxHopReached: false },
+        searchMetadata: { duration: Date.now() - startTime, cacheHit: false, communityCount: 0 },
+      };
+    }
+
+    // 1. Standard hybrid search ile initial results
+    const initialResults = await this.hybridSearch(query, maxResults);
+    if (initialResults.length === 0) {
+      return {
+        memories: [],
+        communitySummaries: [],
+        graphContext: { expandedNodeIds: [], edgeCount: 0, maxHopReached: false },
+        searchMetadata: { duration: Date.now() - startTime, cacheHit: false, communityCount: 0 },
+      };
+    }
+
+    // 2. Graph expansion: Initial results'ın komşularını bul
+    const seedNodeIds = initialResults.map(m => m.id);
+    const expansion = graphExpander.expand({
+      seedNodeIds,
+      maxDepth: maxHops,
+      maxNodes: maxResults * 3,
+      minConfidence,
+      useCache: true,
+    });
+
+    // 3. PageRank scoring ile node'ları skorla
+    const scores = new Map<number, number>();
+    if (usePageRank && pageRankScorer) {
+      const expandedNodeIds = expansion.nodes.map(n => n.id);
+      const pageRankScores = pageRankScorer.scoreSubgraph(expandedNodeIds);
+      for (const [nodeId, score] of pageRankScores) {
+        scores.set(nodeId, score);
+      }
+    }
+
+    // 4. Community bilgisi ekle
+    let communitySummaries: CommunitySummary[] = [];
+    if (useCommunities && communitySummarizer) {
+      const expandedNodeIds = expansion.nodes.map(n => n.id);
+      const communities = communityDetector?.detectLocalCommunity(expandedNodeIds, maxHops) ?? [];
+      
+      // Her community için summary getir
+      for (const community of communities.slice(0, 3)) {
+        const summary = communitySummarizer.getSummary(community.id);
+        if (summary) {
+          communitySummaries.push(summary);
+        }
+      }
+    }
+
+    // 5. RRF fusion ile final ranking
+    const allNodes = [...initialResults, ...expansion.nodes];
+    const uniqueNodes = Array.from(new Map(allNodes.map(n => [n.id, n])).values());
+    
+    // Score'a göre sırala
+    const scoredNodes = uniqueNodes.map(node => ({
+      node,
+      score: scores.get(node.id) ?? 0,
+      isInitial: seedNodeIds.includes(node.id),
+    }));
+
+    // Initial results önce, sonra expanded nodes (score'a göre)
+    const finalResults = scoredNodes
+      .sort((a, b) => {
+        if (a.isInitial && !b.isInitial) return -1;
+        if (!a.isInitial && b.isInitial) return 1;
+        return b.score - a.score;
+      })
+      .map(s => s.node)
+      .slice(0, maxResults);
+
+    const elapsed = Date.now() - startTime;
+
+    this.recordRetrievalDebug('graphRAGSearch', {
+      query,
+      maxResults,
+      maxHops,
+      initialCount: initialResults.length,
+      expandedCount: expansion.nodes.length,
+      finalCount: finalResults.length,
+      communityCount: communitySummaries.length,
+      duration: elapsed,
+    });
+
+    return {
+      memories: finalResults,
+      communitySummaries,
+      graphContext: {
+        expandedNodeIds: expansion.nodes.map(n => n.id),
+        edgeCount: expansion.edges.length,
+        maxHopReached: expansion.maxHopReached,
+      },
+      searchMetadata: {
+        duration: elapsed,
+        cacheHit: false,
+        communityCount: communitySummaries.length,
+      },
+    };
+  }
+
   // ========== Debug ==========
 
-  getRetrievalDebugSnapshot(flow: 'hybridSearch' | 'hybridSearchMessages' | 'graphAwareSearch' | 'promptContextBundle'): unknown {
+  getRetrievalDebugSnapshot(flow: 'hybridSearch' | 'hybridSearchMessages' | 'graphAwareSearch' | 'graphRAGSearch' | 'promptContextBundle'): unknown {
     return this.lastRetrievalDebug.get(flow) ?? null;
   }
 
-  private recordRetrievalDebug(flow: 'hybridSearch' | 'hybridSearchMessages' | 'graphAwareSearch' | 'promptContextBundle', payload: unknown): void {
+  private recordRetrievalDebug(flow: 'hybridSearch' | 'hybridSearchMessages' | 'graphAwareSearch' | 'graphRAGSearch' | 'promptContextBundle', payload: unknown): void {
     this.lastRetrievalDebug.set(flow, {
       capturedAt: new Date().toISOString(),
       ...((payload && typeof payload === 'object') ? payload as Record<string, unknown> : { payload }),

@@ -224,6 +224,54 @@ export interface GraphAwareSearchResult {
     archival: MemoryRow[];
 }
 
+// ========== GraphRAG Interfaces ==========
+
+/** GraphExpander: Multi-hop BFS traversal sonucu */
+export interface GraphExpansionResult {
+    nodes: MemoryRow[];
+    edges: MemoryRelationRow[];
+    hopDistances: Map<number, number>;  // nodeId -> hop distance
+    maxHopReached: boolean;
+}
+
+/** GraphExpander: Traversal seçenekleri */
+export interface GraphExpansionOptions {
+    seedNodeIds: number[];
+    maxDepth: number;        // Default: 3
+    maxNodes: number;        // Default: 50 (performans limiti)
+    relationTypes?: string[]; // null ise tüm relation tipleri
+    minConfidence: number;   // Default: 0.3
+    useCache: boolean;       // Default: true
+}
+
+/** PageRank: Scoring seçenekleri */
+export interface PageRankOptions {
+    dampingFactor: number;       // Default: 0.85
+    maxIterations: number;       // Default: 20
+    convergenceThreshold: number; // Default: 0.001
+}
+
+/** GraphCache: Cache entry */
+export interface GraphCacheEntry {
+    queryHash: string;
+    maxDepth: number;
+    nodeIds: number[];
+    relationIds: number[];
+    score: number;
+    createdAt: Date;
+    expiresAt: Date;
+}
+
+/** GraphExpander: Neighbor query sonucu */
+export interface NeighborResult {
+    nodeId: number;
+    neighborId: number;
+    relationId: number;
+    relationType: string;
+    confidence: number;
+    weight: number;
+}
+
 // ========== Yardımcı Fonksiyonlar ==========
 
 /**

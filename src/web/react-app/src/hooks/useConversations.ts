@@ -1,6 +1,9 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import hotToast from 'react-hot-toast';
 import { useAgentStore } from '../store/agentStore';
+import { conversationService } from '@/services/conversationService';
+import { CONVERSATIONS_QUERY_KEY } from '@/hooks/queries/useConversations';
 
 const STORAGE_KEYS = {
   pinnedConversations: 'pencePinned',
@@ -8,9 +11,11 @@ const STORAGE_KEYS = {
 
 /**
  * Konuşma yönetimi için custom hook
- * Konuşma listesi yükleme, silme, pinleme ve aktif konuşma yönetimi
+ * React Query ile veri yönetimi, Zustand ile UI state yönetimi
+ * Backward compatible - aynı interface'i sağlar
  */
 export function useConversations() {
+  const queryClient = useQueryClient();
   const {
     conversations,
     activeConversationId,
@@ -35,31 +40,42 @@ export function useConversations() {
     window.localStorage.setItem(STORAGE_KEYS.pinnedConversations, JSON.stringify(pinnedConversations));
   }, [pinnedConversations]);
 
-  // Konuşmaları yükle
+  // React Query ile conversations'ı çek
+  const { data: fetchedConversations = [] } = useQuery({
+    queryKey: [CONVERSATIONS_QUERY_KEY],
+    queryFn: () => conversationService.getAll(),
+    staleTime: 1000 * 60 * 1, // 1 dakika
+    refetchOnWindowFocus: false,
+  });
+
+  // Zustand store'u React Query'den gelen verilerle senkronize et
+  useEffect(() => {
+    if (fetchedConversations.length > 0) {
+      setConversations(fetchedConversations);
+    }
+  }, [fetchedConversations, setConversations]);
+
+  // Konuşmaları yükle (React Query cache'inden veya fetch'ten)
   const loadConversations = useCallback(async () => {
     try {
-      const response = await fetch('/api/conversations');
-      const data = await response.json();
-      setConversations(Array.isArray(data) ? data : []);
+      return await queryClient.fetchQuery({
+        queryKey: [CONVERSATIONS_QUERY_KEY],
+        queryFn: () => conversationService.getAll(),
+      });
     } catch (error) {
       console.error('Konuşmalar alınamadı:', error);
       hotToast.error('Konuşmalar yüklenirken bir hata oluştu');
+      return [];
     }
-  }, [setConversations]);
-
-  // İlk yükleme
-  useEffect(() => {
-    void loadConversations();
-  }, [loadConversations]);
+  }, [queryClient]);
 
   // Belirli bir konuşmayı yükle - mesajları döndürür
   const loadConversation = useCallback(
     async (conversationId: string) => {
       try {
-        const response = await fetch(`/api/conversations/${conversationId}/messages`);
-        const data = await response.json();
+        const messages = await conversationService.getMessages(conversationId);
         setActiveConversationId(conversationId);
-        return Array.isArray(data) ? data : [];
+        return Array.isArray(messages) ? messages : [];
       } catch (error) {
         console.error('Konuşma yüklenemedi:', error);
         hotToast.error('Konuşma yüklenirken bir hata oluştu');
@@ -75,13 +91,14 @@ export function useConversations() {
       if (!window.confirm('Bu sohbet silinsin mi?')) return false;
 
       try {
-        await fetch(`/api/conversations/${conversationId}`, { method: 'DELETE' });
+        await conversationService.delete(conversationId);
         removeConversation(conversationId);
         if (conversationId === activeConversationId) {
           clearMessages();
           setActiveConversationId(null);
         }
-        await loadConversations();
+        // React Query cache'ini invalid et
+        queryClient.invalidateQueries({ queryKey: [CONVERSATIONS_QUERY_KEY] });
         return true;
       } catch (error) {
         console.error('Konuşma silinemedi:', error);
@@ -89,7 +106,7 @@ export function useConversations() {
         return false;
       }
     },
-    [activeConversationId, removeConversation, clearMessages, setActiveConversationId, loadConversations]
+    [activeConversationId, removeConversation, clearMessages, setActiveConversationId, queryClient]
   );
 
   // Pin toggle

@@ -1,7 +1,7 @@
 # PenceAI Proje Haritası
 
-> **Son Güncelleme:** 31 Mart 2026
-> **Versiyon:** 1.1.0
+> **Son Güncelleme:** 4 Nisan 2026
+> **Versiyon:** 1.2.0
 > **Lisans:** MIT
 
 ---
@@ -35,6 +35,7 @@
 - 🤖 **Otonom Düşünme**: Inner Monologue ve Merak motoru ile bağımsız düşünme
 - 🧩 **Reconsolidation Pilot**: Bellek birleştirme ve güncelleme güvenlik mekanizması
 - 📊 **Retrieval Orchestration**: Dual-process (System1/System2) bellek getirme mimarisi
+- 🕸️ **GraphRAG**: Graph-aware retrieval, PageRank skorlama, topluluk tespiti ve gölge mod test altyapısı
 
 ---
 
@@ -449,6 +450,89 @@ interface ReconsolidationGuardrailSnapshot {
 
 ---
 
+### 3.1. GraphRAG Modülü (`src/memory/graphRAG/`)
+
+Graph-augmented retrieval sistemi. Graph yapısını kullanarak daha alakalı bellekleri getirme, topluluk tespiti ve optimizasyon sağlar.
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`GraphRAGEngine.ts`](src/memory/graphRAG/GraphRAGEngine.ts) | Ana Graph RAG motoru - graph-aware retrieval |
+| [`GraphExpander.ts`](src/memory/graphRAG/GraphExpander.ts) | Graph genişletme ve node keşfi |
+| [`GraphCache.ts`](src/memory/graphRAG/GraphCache.ts) | Graph sonuçları önbellekleme |
+| [`GraphWorker.ts`](src/memory/graphRAG/GraphWorker.ts) | Arka plan graph işlemleri |
+| [`PageRankScorer.ts`](src/memory/graphRAG/PageRankScorer.ts) | PageRank tabanlı node skorlama |
+| [`CommunityDetector.ts`](src/memory/graphRAG/CommunityDetector.ts) | Topluluk tespiti (community detection) |
+| [`CommunitySummarizer.ts`](src/memory/graphRAG/CommunitySummarizer.ts) | Topluluk özetleme |
+| [`TokenPruner.ts`](src/memory/graphRAG/TokenPruner.ts) | Token budama optimizasyonu |
+| [`ShadowMode.ts`](src/memory/graphRAG/ShadowMode.ts) | Gölge mod test altyapısı |
+| [`BehaviorDiscoveryShadow.ts`](src/memory/graphRAG/BehaviorDiscoveryShadow.ts) | Davranış keşif gölge modu |
+| [`config.ts`](src/memory/graphRAG/config.ts) | GraphRAG konfigürasyonu |
+| [`index.ts`](src/memory/graphRAG/index.ts) | Modül giriş noktası |
+| [`monitoring.ts`](src/memory/graphRAG/monitoring.ts) | İzleme ve metrikler |
+| [`rollback.ts`](src/memory/graphRAG/rollback.ts) | Geri alma mekanizması |
+
+#### GraphRAG Mimarisi
+
+```typescript
+class GraphRAGEngine {
+  // Ana retrieval
+  async graphAwareSearch(query, options): Promise<GraphSearchResult[]>;
+  async spreadingActivation(seedNodes, options): Promise<Map<number, number>>;
+  
+  // Graph genişletme
+  async expandFromEntities(entities, options): Promise<GraphExpansionResult>;
+  
+  // Önbellekleme
+  getCachedResult(cacheKey): GraphCacheEntry | null;
+  setCachedResult(cacheKey, result): void;
+}
+
+class PageRankScorer {
+  computePageRank(graph, options): Map<number, number>;
+  scoreNode(nodeId, context): number;
+}
+
+class CommunityDetector {
+  detectCommunities(graph, options): Community[];
+  getCommunityForNode(nodeId): Community | null;
+}
+
+class CommunitySummarizer {
+  summarizeCommunity(community): Promise<string>;
+  generateSummary(nodes, edges): Promise<CommunitySummary>;
+}
+
+class TokenPruner {
+  pruneResults(results, maxTokens): SearchResult[];
+  estimateTokenCount(text): number;
+}
+```
+
+#### Shadow Mode Test Altyapısı
+
+```typescript
+class ShadowMode {
+  // Gölge modda yeni stratejiyi çalıştır
+  async runShadow(strategy, input): Promise<ShadowResult>;
+  
+  // Sonuçları karşılaştır
+  compareResults(baseline, shadow): ShadowComparison;
+  
+  // Metrikleri kaydet
+  recordMetrics(comparison): void;
+}
+
+class BehaviorDiscoveryShadow {
+  // Yeni davranış kalıplarını keşfet
+  async discoverPatterns(input): Promise<BehaviorPattern[]>;
+  
+  // Shadow modda karşılaştır
+  async compareWithBaseline(patterns): Promise<BehaviorComparison>;
+}
+```
+
+---
+
 ### 4. Router Modülü (`src/router/`)
 
 Mesaj yönlendirme ve semantik intent eşleştirme.
@@ -682,14 +766,13 @@ class FeedbackManager {
 | [`src/main.tsx`](src/web/react-app/src/main.tsx) | React bootstrap |
 | [`src/hooks/useAgentSocket.ts`](src/web/react-app/src/hooks/useAgentSocket.ts) | WebSocket hook |
 | [`src/hooks/useConversationFilters.ts`](src/web/react-app/src/hooks/useConversationFilters.ts) | Konuşma filtreleme hook'u |
-| [`src/hooks/useConversations.ts`](src/web/react-app/src/hooks/useConversations.ts) | Konuşma yönetimi hook'u |
 | [`src/hooks/useFileUpload.ts`](src/web/react-app/src/hooks/useFileUpload.ts) | Dosya yükleme hook'u |
-| [`src/hooks/useMemoryGraph.ts`](src/web/react-app/src/hooks/useMemoryGraph.ts) | Bellek grafiği hook'u |
 | [`src/hooks/useMessageBuilder.ts`](src/web/react-app/src/hooks/useMessageBuilder.ts) | Mesaj oluşturma hook'u |
 | [`src/hooks/useSettingsForm.ts`](src/web/react-app/src/hooks/useSettingsForm.ts) | Ayarlar form hook'u |
 | [`src/store/agentStore.ts`](src/web/react-app/src/store/agentStore.ts) | Zustand state |
 | [`src/lib/api-client.ts`](src/web/react-app/src/lib/api-client.ts) | API istemcisi |
 | [`src/lib/utils.ts`](src/web/react-app/src/lib/utils.ts) | Yardımcı fonksiyonlar |
+| [`src/lib/queryClient.ts`](src/web/react-app/src/lib/queryClient.ts) | React Query client |
 
 ##### Bileşenler (`src/components/chat/`)
 
@@ -702,7 +785,6 @@ class FeedbackManager {
 | [`ConversationSidebar.tsx`](src/web/react-app/src/components/chat/ConversationSidebar.tsx) | Konuşma kenar çubuğu |
 | [`ConversationListItem.tsx`](src/web/react-app/src/components/chat/ConversationListItem.tsx) | Konuşma listesi öğesi |
 | [`ConversationPanel.tsx`](src/web/react-app/src/components/chat/ConversationPanel.tsx) | Konuşma paneli |
-| [`ChatInput.tsx`](src/web/react-app/src/components/chat/ChatInput.tsx) | Mesaj giriş alanı |
 | [`InputPanel.tsx`](src/web/react-app/src/components/chat/InputPanel.tsx) | Giriş paneli |
 | [`ChannelsView.tsx`](src/web/react-app/src/components/chat/ChannelsView.tsx) | Kanal görünümü |
 | [`MemoryDialog.tsx`](src/web/react-app/src/components/chat/MemoryDialog.tsx) | Bellek yönetimi |
@@ -731,6 +813,46 @@ class FeedbackManager {
 | [`Toast.tsx`](src/web/react-app/src/components/ui/Toast.tsx) | Bildirim bileşeni |
 | [`ErrorBoundary.tsx`](src/web/react-app/src/components/ui/ErrorBoundary.tsx) | Hata sınırı bileşeni |
 | [`skeleton.tsx`](src/web/react-app/src/components/ui/skeleton.tsx) | Yükleme iskeleti |
+
+##### Query Hooks (`src/hooks/queries/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`useConversations.ts`](src/web/react-app/src/hooks/queries/useConversations.ts) | Konuşma listesi query |
+| [`useMemories.ts`](src/web/react-app/src/hooks/queries/useMemories.ts) | Bellek listesi query |
+| [`useSettings.ts`](src/web/react-app/src/hooks/queries/useSettings.ts) | Ayarlar query |
+| [`useLLMProviders.ts`](src/web/react-app/src/hooks/queries/useLLMProviders.ts) | LLM provider'ları query |
+| [`useMemoryGraph.ts`](src/web/react-app/src/hooks/queries/useMemoryGraph.ts) | Bellek grafiği query |
+| [`useSensitivePaths.ts`](src/web/react-app/src/hooks/queries/useSensitivePaths.ts) | Hassas dizinler query |
+| [`useStats.ts`](src/web/react-app/src/hooks/queries/useStats.ts) | İstatistikler query |
+
+##### Mutation Hooks (`src/hooks/mutations/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`useCreateMemory.ts`](src/web/react-app/src/hooks/mutations/useCreateMemory.ts) | Yeni bellek oluşturma |
+| [`useUpdateMemory.ts`](src/web/react-app/src/hooks/mutations/useUpdateMemory.ts) | Bellek güncelleme |
+| [`useDeleteMemory.ts`](src/web/react-app/src/hooks/mutations/useDeleteMemory.ts) | Bellek silme |
+| [`useDeleteConversation.ts`](src/web/react-app/src/hooks/mutations/useDeleteConversation.ts) | Konuşma silme |
+| [`useBulkDeleteConversations.ts`](src/web/react-app/src/hooks/mutations/useBulkDeleteConversations.ts) | Toplu konuşma silme |
+| [`useUpdateSettings.ts`](src/web/react-app/src/hooks/mutations/useUpdateSettings.ts) | Ayarlar güncelleme |
+| [`useAddSensitivePath.ts`](src/web/react-app/src/hooks/mutations/useAddSensitivePath.ts) | Hassas dizin ekleme |
+| [`useRemoveSensitivePath.ts`](src/web/react-app/src/hooks/mutations/useRemoveSensitivePath.ts) | Hassas dizin silme |
+
+##### Servis Katmanı (`src/services/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`conversationService.ts`](src/web/react-app/src/services/conversationService.ts) | Konuşma API servisleri |
+| [`memoryService.ts`](src/web/react-app/src/services/memoryService.ts) | Bellek API servisleri |
+| [`settingsService.ts`](src/web/react-app/src/services/settingsService.ts) | Ayarlar API servisi |
+| [`statsService.ts`](src/web/react-app/src/services/statsService.ts) | İstatistik API servisi |
+
+##### Provider (`src/providers/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`QueryProvider.tsx`](src/web/react-app/src/providers/QueryProvider.tsx) | React Query provider |
 
 ##### Store Slices (`src/store/slices/`)
 
@@ -819,13 +941,38 @@ npx tsx src/cli/maintenance.ts
 | [`memory/hybridSearch.test.ts`](tests/memory/hybridSearch.test.ts) | Hibrit arama testleri |
 | [`memory/graphSearch.test.ts`](tests/memory/graphSearch.test.ts) | Graph arama testleri |
 | [`memory/retrievalEdgeCases.test.ts`](tests/memory/retrievalEdgeCases.test.ts) | Retrieval edge case testleri |
-| [`memory/retrievalIntegration.test.ts`](tests/memory/retrievalIntegration.test.ts) | Retrieval entegrasyon testleri |
 | [`memory/reconsolidationPilot.test.ts`](tests/memory/reconsolidationPilot.test.ts) | Reconsolidation pilot testleri |
 | [`memory/retrievalOrchestrator.observability.test.ts`](tests/memory/retrievalOrchestrator.observability.test.ts) | Gözlemlenebilirlik testleri |
 | [`benchmark/retrievalBenchmark.test.ts`](tests/benchmark/retrievalBenchmark.test.ts) | Retrieval benchmark testleri |
 | [`benchmark/fixtures/benchmarkDataset.ts`](tests/benchmark/fixtures/benchmarkDataset.ts) | Benchmark veri seti |
 | [`benchmark/utils/metrics.ts`](tests/benchmark/utils/metrics.ts) | Metrik hesaplama |
 | [`benchmark/utils/baselines.ts`](tests/benchmark/utils/baselines.ts) | Baseline karşılaştırmaları |
+
+#### GraphRAG Testleri (`tests/memory/graphRAG/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`GraphRAGEngine.test.ts`](tests/memory/graphRAG/GraphRAGEngine.test.ts) | Graph RAG motor testleri |
+| [`GraphExpander.test.ts`](tests/memory/graphRAG/GraphExpander.test.ts) | Graph genişletme testleri |
+| [`GraphCache.test.ts`](tests/memory/graphRAG/GraphCache.test.ts) | Graph önbellek testleri |
+| [`GraphWorker.test.ts`](tests/memory/graphRAG/GraphWorker.test.ts) | Graph worker testleri |
+| [`PageRankScorer.test.ts`](tests/memory/graphRAG/PageRankScorer.test.ts) | PageRank skorlama testleri |
+| [`CommunityDetector.test.ts`](tests/memory/graphRAG/CommunityDetector.test.ts) | Topluluk tespiti testleri |
+| [`CommunitySummarizer.test.ts`](tests/memory/graphRAG/CommunitySummarizer.test.ts) | Topluluk özetleme testleri |
+| [`TokenPruner.test.ts`](tests/memory/graphRAG/TokenPruner.test.ts) | Token budama testleri |
+| [`ShadowMode.test.ts`](tests/memory/graphRAG/ShadowMode.test.ts) | Gölge mod testleri |
+| [`behaviorDiscoveryShadow.test.ts`](tests/memory/graphRAG/behaviorDiscoveryShadow.test.ts) | Davranış keşif testleri |
+| [`FullPhase.test.ts`](tests/memory/graphRAG/FullPhase.test.ts) | Tam faz entegrasyon testleri |
+| [`memoryGraphVisualization.test.ts`](tests/memory/graphRAG/memoryGraphVisualization.test.ts) | Görselleştirme testleri |
+| [`retrievalIntegration.test.ts`](tests/memory/graphRAG/retrievalIntegration.test.ts) | Retrieval entegrasyon testleri |
+| [`retrievalOrchestrator.integration.test.ts`](tests/memory/graphRAG/retrievalOrchestrator.integration.test.ts) | Retrieval orchestrator entegrasyon testleri |
+| [`spreadingActivation.test.ts`](tests/memory/graphRAG/spreadingActivation.test.ts) | Yayılım aktivasyon testleri |
+
+#### GraphRAG Benchmark Testleri (`tests/benchmark/graphRAG/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`retrievalBenchmark.test.ts`](tests/benchmark/graphRAG/retrievalBenchmark.test.ts) | GraphRAG retrieval benchmark testleri |
 
 ---
 
@@ -1005,6 +1152,7 @@ erDiagram
 | Build | Vite | 5.x | Build tool |
 | Styling | Tailwind CSS | 3.x | Utility-first CSS |
 | State | Zustand | 4.x | Global state yönetimi |
+| Data Fetching | @tanstack/react-query | 5.x | Server state yönetimi ve önbellekleme |
 | UI | Radix UI | 1.x | Erişilebilir bileşenler |
 | Icons | Lucide React | 0.x | İkon seti |
 
@@ -1162,12 +1310,23 @@ graph TB
         IT2[Retrieval Orchestrator]
         IT3[Hybrid Search]
         IT4[Graph Search]
+        IT5[GraphRAG Integration]
+    end
+    
+    subgraph "GraphRAG Tests"
+        GR1[GraphRAG Engine]
+        GR2[PageRank Scorer]
+        GR3[Community Detection]
+        GR4[Shadow Mode]
+        GR5[Graph Worker]
+        GR6[Token Pruner]
     end
     
     subgraph "Benchmark Tests"
         BM1[Retrieval Benchmark]
         BM2[Metrics]
         BM3[Baselines]
+        BM4[GraphRAG Benchmark]
     end
     
     subgraph "Edge Case Tests"
@@ -1181,6 +1340,10 @@ graph TB
     IT2 --> BM1
     IT3 --> EC1
     IT4 --> EC1
+    IT5 --> GR1
+    GR1 --> BM4
+    GR2 --> BM4
+    GR3 --> BM4
 ```
 
 ### Test Çalıştırma
@@ -1287,6 +1450,8 @@ MAX_TOKENS=4096
 5. **Dual-Process Retrieval**: System1 (hızlı) ve System2 (derin) bellek getirme modları
 6. **Reconsolidation Pilot**: Bellek birleştirme güvenlik mekanizması
 7. **Behavior Discovery Shadow Mode**: Yeni retrieval stratejileri gölge modda test edilir
+8. **GraphRAG Integration**: Graph-aware retrieval, PageRank skorlama ve topluluk tespiti ile bellek getirme iyileştirildi
+9. **React Query Integration**: Web arayüzü React Query ile veri yönetimi ve önbellekleme yapıyor
 
 ---
 
@@ -1300,4 +1465,4 @@ MAX_TOKENS=4096
 
 ---
 
-> Bu doküman PenceAI projesinin tamamını anlamak için tek bir referans noktası olarak hazırlanmıştır. Son güncelleme: Mart 2026.
+> Bu doküman PenceAI projesinin tamamını anlamak için tek bir referans noktası olarak hazırlanmıştır. Son güncelleme: Nisan 2026.

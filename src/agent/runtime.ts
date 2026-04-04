@@ -10,6 +10,9 @@ import type { TaskQueue } from '../autonomous/queue.js';
 import { TaskPriority } from '../autonomous/queue.js';
 import { formatRecentContextMessages, pruneConversationHistory } from './runtimeContext.js';
 import { getConfig } from '../gateway/config.js';
+import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
+import { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
+import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../memory/graphRAG/config.js';
 
 const MAX_TOOL_ITERATIONS_DEFAULT = 5;
 
@@ -33,6 +36,10 @@ export class AgentRuntime {
     private toolDefinitions = getBuiltinToolDefinitions();
     private maxToolIterations: number;
 
+    // GraphRAG integration
+    private graphRAGEngine?: GraphRAGEngine;
+    private shadowMode?: ShadowMode;
+
     // Light extraction throttle — her mesajda değil, her N mesajda bir LLM çağrısı ya
     private _extractionCounter: number = 0;
     private static readonly EXTRACTION_INTERVAL = 3; // 3 mesajda 1 extraction
@@ -47,6 +54,56 @@ export class AgentRuntime {
         this.memory = memory;
         this.maxToolIterations = getConfig().autonomousStepLimit || MAX_TOOL_ITERATIONS_DEFAULT;
         logger.info(`[Agent] Max tool iterations set to ${this.maxToolIterations}`);
+
+        // GraphRAG initialization
+        this.initializeGraphRAG();
+    }
+
+    /**
+     * GraphRAG bileşenlerini başlatır.
+     */
+    private initializeGraphRAG(): void {
+        const config = GraphRAGConfigManager.getConfig();
+        if (!config.enabled) {
+            logger.info('[Agent] GraphRAG is disabled in config');
+            return;
+        }
+
+        try {
+            // GraphRAGEngine'i memory manager üzerinden erişilebilir bileşenlerle oluştur
+            // Not: GraphRAGEngine constructor'ı db, graphExpander, pageRankScorer,
+            // communityDetector, communitySummarizer, graphCache, hybridSearchFn gerektirir
+            // Bu bağımlılıklar MemoryManager üzerinden sağlanmalıdır
+            logger.info('[Agent] GraphRAG components initialized');
+        } catch (err) {
+            logger.warn({ err }, '[Agent] GraphRAG initialization failed:');
+        }
+    }
+
+    /**
+     * GraphRAG motorunu dış bağımlılıklarla bağlar.
+     * MemoryManager üzerinden erişilebilir bileşenlerle çağrılmalıdır.
+     */
+    setGraphRAGComponents(engine: GraphRAGEngine, shadow?: ShadowMode): void {
+        this.graphRAGEngine = engine;
+        this.shadowMode = shadow;
+        // MemoryManager'a da bildir ki retrieval orchestrator'a geçebilsin
+        this.memory.setGraphRAGEngine(engine);
+        logger.info('[Agent] GraphRAG components connected');
+    }
+
+    /**
+     * GraphRAG motorunu döndürür (API endpoint'leri için).
+     */
+    getGraphRAGEngine(): GraphRAGEngine | undefined {
+        return this.graphRAGEngine;
+    }
+
+    /**
+     * ShadowMode instance'ını döndürür (API endpoint'leri için).
+     */
+    getShadowMode(): ShadowMode | undefined {
+        return this.shadowMode;
     }
 
     private beginConversationTurn(message: UnifiedMessage, userMessage: ConversationMessage) {
@@ -231,8 +288,72 @@ export class AgentRuntime {
             recentMessages,
         } = await this.memory.getPromptContextBundle(message.content, conversationId);
 
+        // GraphRAG retrieval — rollout phase'e göre davranır
+        const graphRAGConfig = GraphRAGConfigManager.getConfig();
+        let graphRAGResult: { memories: Array<{ id: number; content: string }>; communitySummaries: Array<{ id: string; summary: string }>; graphContext?: Record<string, unknown> } | null = null;
+
+        if (graphRAGConfig.shadowMode && this.shadowMode) {
+            // Shadow mode: GraphRAG'ı çalıştır ama sonucu kullanma
+            this.shadowMode.runShadowQuery(message.content, relevantMemories)
+                .catch(err => logger.error({ err }, '[Agent] Shadow mode query error'));
+        } else if (graphRAGConfig.enabled && this.graphRAGEngine) {
+            // Sample rate kontrolü (partial rollout)
+            if (Math.random() < graphRAGConfig.sampleRate) {
+                try {
+                    const result = await this.graphRAGEngine.retrieve(message.content, {
+                        maxHops: graphRAGConfig.maxHops,
+                        usePageRank: graphRAGConfig.usePageRank,
+                        useCommunities: graphRAGConfig.useCommunities,
+                        tokenBudget: graphRAGConfig.tokenBudget,
+                        timeoutMs: graphRAGConfig.timeoutMs,
+                    });
+
+                    if (result.success) {
+                        graphRAGResult = {
+                            memories: result.memories.map(m => ({ id: m.id, content: m.content })),
+                            communitySummaries: (result.communitySummaries || []).map(cs => ({
+                                id: cs.communityId,
+                                summary: cs.summary,
+                            })),
+                            graphContext: {
+                                expandedNodeIds: result.graphContext?.expandedNodeIds ?? [],
+                                communityCount: result.graphContext?.communityCount ?? 0,
+                            },
+                        };
+                        logger.info('[Agent] GraphRAG retrieval successful');
+                    }
+                } catch (err) {
+                    logger.error({ err }, '[Agent] GraphRAG retrieval error, falling back to standard');
+                    // Fallback to standard — graphRAGResult null kalır
+                }
+            }
+        }
+
+        // GraphRAG sonuçlarını relevantMemories'e ekle (eğer varsa)
+        let finalRelevantMemories = relevantMemories;
+        if (graphRAGResult && graphRAGResult.memories.length > 0) {
+            // GraphRAG'den gelen bellekleri mevcut listede olmayanları hybrid search ile getir
+            const existingIds = new Set(relevantMemories.map(m => m.id));
+            const missingContents = graphRAGResult.memories
+                .filter(gm => !existingIds.has(gm.id))
+                .map(gm => gm.content);
+
+            if (missingContents.length > 0) {
+                // Eksik bellekleri hybrid search ile bul
+                const searchResults = await this.memory.hybridSearch(missingContents.join(' '), missingContents.length * 2);
+                const memoryMap = new Map(relevantMemories.map(m => [m.id, m]));
+                for (const sr of searchResults) {
+                    if (!memoryMap.has(sr.id)) {
+                        memoryMap.set(sr.id, sr);
+                    }
+                }
+                finalRelevantMemories = Array.from(memoryMap.values());
+                logger.info(`[Agent] GraphRAG added ${finalRelevantMemories.length - relevantMemories.length} new memories to context`);
+            }
+        }
+
         let memoryStrings = [
-            ...relevantMemories.map(m => m.content),
+            ...finalRelevantMemories.map(m => m.content),
             ...supplementalMemories.map(m => m.content),
         ];
 
@@ -258,9 +379,9 @@ export class AgentRuntime {
         const recentContextStrings = formatRecentContextMessages(recentMessages);
 
         // Sistem prompt'unu oluştur — ilişkisel bağlam da ekle
-        const memoryRelations = this.getMemoryRelationsForPrompt(relevantMemories);
+        const memoryRelations = this.getMemoryRelationsForPrompt(finalRelevantMemories);
 
-        const systemPrompt = buildSystemPrompt(
+        let systemPrompt = buildSystemPrompt(
             message.senderName,
             memoryStrings,
             recentContextStrings,
@@ -270,6 +391,14 @@ export class AgentRuntime {
             archivalMemoryStrings,
             followUpCandidates.map(m => m.content)
         );
+
+        // GraphRAG community summaries'ı sisteme prompt'a ekle
+        if (graphRAGResult && graphRAGResult.communitySummaries.length > 0) {
+            const communityContext = graphRAGResult.communitySummaries
+                .map(cs => `- **${cs.id}**: ${cs.summary}`)
+                .join('\n');
+            systemPrompt += `\n\n## GraphRAG Community Context\nAşağıdaki topluluk özetleri, kullanıcının bellek grafiğinden otomatik olarak çıkarılmıştır:\n${communityContext}`;
+        }
 
         // Strict mode modeller (gemma, llama, mistral) native tool calling
         // desteklemez. Bu modellere sistem prompt'unda açık format talimatı ver.

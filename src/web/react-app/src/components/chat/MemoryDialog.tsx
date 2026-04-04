@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { BrainCircuit, Clock3, Filter, List, Loader2, Network, PencilLine, Plus, Save, Search, Tag, Trash2 } from 'lucide-react';
 import {
 Dialog,
@@ -12,14 +12,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { MemoryGraphView } from './MemoryGraphView';
 import { fieldClassName, selectClassName, textareaClassName, badgeClassName, surfaceLabelClassName } from '@/styles/dialog';
-
-type MemoryItem = {
-  id: number;
-  content: string;
-  category?: string;
-  importance?: number;
-  created_at?: string;
-};
+import { useMemories } from '@/hooks/queries/useMemories';
+import { useCreateMemory } from '@/hooks/mutations/useCreateMemory';
+import { useUpdateMemory } from '@/hooks/mutations/useUpdateMemory';
+import { useDeleteMemory } from '@/hooks/mutations/useDeleteMemory';
+import type { MemoryItem } from '@/services/memoryService';
 
 const defaultMemory = {
   id: null as number | null,
@@ -42,46 +39,35 @@ const getImportanceTone = (importance: number) => {
 type ViewMode = 'list' | 'graph';
 
 export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boolean, onOpenChange: (o: boolean) => void, inline?: boolean }) => {
-  const [memories, setMemories] = useState<MemoryItem[]>([]);
-  const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [category, setCategory] = useState('all');
   const [editorOpen, setEditorOpen] = useState(false);
   const [editor, setEditor] = useState(defaultMemory);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
 
-  const loadMemories = async (searchQuery = query) => {
-    setLoading(true);
-    try {
-      const endpoint = searchQuery.trim().length >= 2
-        ? `/api/memories/search?q=${encodeURIComponent(searchQuery.trim())}`
-        : '/api/memories';
-      const response = await fetch(endpoint);
-      const data = await response.json();
-      setMemories(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error('Bellekler alınamadı:', error);
-      setMemories([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Debounce query
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
 
+  // React Query hooks
+  const { data: memories = [], isLoading } = useMemories({
+    searchQuery: debouncedQuery,
+    enabled: open,
+  });
+
+  const createMemory = useCreateMemory();
+  const updateMemory = useUpdateMemory();
+  const deleteMemory = useDeleteMemory();
+
+  // Reset on open
   useEffect(() => {
     if (!open) return;
-    void loadMemories('');
     setQuery('');
     setCategory('all');
   }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const timer = window.setTimeout(() => {
-      void loadMemories(query);
-    }, 250);
-
-    return () => window.clearTimeout(timer);
-  }, [query, open]);
 
   const filteredMemories = useMemo(() => {
     if (category === 'all') return memories;
@@ -95,7 +81,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
     }, {});
   }, [memories]);
 
-  const openEditor = (memory?: MemoryItem) => {
+  const openEditor = useCallback((memory?: MemoryItem) => {
     if (!memory) {
       setEditor(defaultMemory);
     } else {
@@ -107,34 +93,32 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
       });
     }
     setEditorOpen(true);
-  };
+  }, []);
 
-  const saveMemory = async () => {
+  const saveMemory = useCallback(async () => {
     if (!editor.content.trim()) return;
 
-    const isUpdate = !!editor.id;
-    const response = await fetch(isUpdate ? `/api/memories/${editor.id}` : '/api/memories', {
-      method: isUpdate ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    if (editor.id) {
+      await updateMemory.mutateAsync({
+        id: editor.id,
+        data: { content: editor.content, category: editor.category, importance: editor.importance },
+      });
+    } else {
+      await createMemory.mutateAsync({
         content: editor.content,
         category: editor.category,
         importance: editor.importance,
-      }),
-    });
-
-    if (response.ok) {
-      setEditorOpen(false);
-      setEditor(defaultMemory);
-      await loadMemories(query);
+      });
     }
-  };
 
-  const deleteMemory = async (memoryId: number) => {
+    setEditorOpen(false);
+    setEditor(defaultMemory);
+  }, [editor, createMemory, updateMemory]);
+
+  const handleDeleteMemory = useCallback(async (memoryId: number) => {
     if (!window.confirm('Bu bellek silinsin mi?')) return;
-    await fetch(`/api/memories/${memoryId}`, { method: 'DELETE' });
-    await loadMemories(query);
-  };
+    await deleteMemory.mutateAsync(memoryId);
+  }, [deleteMemory]);
 
   const content = (
     <div className="glass-panel flex h-full w-full flex-col overflow-hidden text-foreground">
@@ -142,7 +126,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
             <div className="flex items-center gap-3 text-[1.7rem] font-semibold tracking-[-0.03em] text-foreground sm:text-[1.9rem]">
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/[0.04] text-white/78">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-purple-500/20 text-purple-400">
                 <BrainCircuit className="h-5 w-5" />
               </span>
               Bellek Merkezi
@@ -227,7 +211,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                         <option key={item} value={item}>{item}</option>
                       ))}
                     </select>
-                    <Button className="h-11 w-full rounded-2xl" variant="outline" onClick={() => openEditor()}>
+                    <Button className="h-11 w-full rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-foreground transition-all duration-300" variant="outline" onClick={() => openEditor()}>
                       <Plus className="h-4 w-4" />
                       Yeni Bellek
                     </Button>
@@ -295,11 +279,11 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                         />
                       </div>
                       <div className="flex flex-col gap-2 pt-1 sm:flex-row">
-                        <Button className="h-11 flex-1 rounded-2xl" onClick={() => void saveMemory()}>
+                        <Button className="h-11 flex-1 rounded-full bg-purple-600 text-white hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.4)] transition-all duration-300 border-0" onClick={() => void saveMemory()}>
                           <Save className="h-4 w-4" />
                           Kaydet
                         </Button>
-                        <Button variant="ghost" className="h-11 rounded-2xl border border-white/6 bg-white/[0.02] text-white/82 hover:border-white/12 hover:bg-white/[0.035] hover:text-white" onClick={() => setEditorOpen(false)}>
+                        <Button variant="ghost" className="h-11 rounded-full border border-white/6 bg-white/[0.02] text-white/82 hover:border-white/12 hover:bg-white/[0.035] hover:text-white transition-all duration-300" onClick={() => setEditorOpen(false)}>
                           Vazgeç
                         </Button>
                       </div>
@@ -320,7 +304,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
               <span className={badgeClassName}>{query.trim() ? `Arama: ${query.trim()}` : 'Arama filtresi yok'}</span>
             </div>
 
-            {loading ? (
+            {isLoading ? (
               <div className="section-surface flex min-h-[420px] items-center justify-center rounded-[28px] text-white/68">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Bellekler yükleniyor...
@@ -366,7 +350,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                             variant="ghost"
                             size="icon"
                             className="h-9 w-9 rounded-full border border-white/8 bg-white/[0.025] text-destructive/75 hover:border-destructive/20 hover:bg-destructive/10 hover:text-destructive"
-                            onClick={() => void deleteMemory(memory.id)}
+                            onClick={() => void handleDeleteMemory(memory.id)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>

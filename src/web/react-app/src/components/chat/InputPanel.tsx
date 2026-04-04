@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { AttachmentItem } from '../../store/agentStore';
 import { formatFileSize } from '@/lib/utils';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export interface InputPanelProps {
   input: string;
@@ -64,28 +65,41 @@ export const InputPanel: React.FC<InputPanelProps> = ({
 
   return (
     <div className="w-full flex justify-center pb-6 pt-2 z-40 relative">
-      <div className="max-w-3xl w-full flex flex-col relative bg-[#2f2f2f] rounded-[26px] border border-transparent focus-within:border-white/10 transition-colors shadow-sm">
+      <div className="max-w-3xl w-full flex flex-col relative bg-[#1c1c1c]/90 backdrop-blur-md rounded-[28px] border border-border/40 focus-within:border-purple-500/30 focus-within:ring-2 focus-within:ring-purple-500/10 focus-within:bg-[#1f1f1f]/95 transition-all duration-300 shadow-xl">
         
         {/* Attachments preview area */}
-        {pendingAttachments.length ? (
-          <div className="px-4 pt-4 pb-1 flex flex-wrap gap-3">
-            {pendingAttachments.map((attachment, index) => (
-              <div key={`${attachment.fileName}-${index}`} className="flex flex-col relative group rounded-xl border border-white/10 bg-[#212121] p-2 w-16 h-16 justify-center items-center shadow-sm">
-                <span className="text-[10px] font-medium truncate w-full text-center text-foreground/80 px-1" title={attachment.fileName}>
-                  {attachment.fileName.length > 8 ? attachment.fileName.substring(0, 8) + '...' : attachment.fileName}
-                </span>
-                <span className="text-[9px] text-muted-foreground mt-1">{formatFileSize(attachment.size)}</span>
-                <button
-                  type="button"
-                  className="absolute -top-2 -right-2 bg-foreground text-background hover:bg-foreground/80 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
-                  onClick={() => removeAttachment(index)}
+        <AnimatePresence>
+          {pendingAttachments.length > 0 && (
+            <motion.div 
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="px-4 pt-4 pb-1 flex flex-wrap gap-3 overflow-hidden origin-top"
+            >
+              {pendingAttachments.map((attachment, index) => (
+                <motion.div 
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.8, opacity: 0 }}
+                  key={`${attachment.fileName}-${index}`} 
+                  className="flex flex-col relative group rounded-xl border border-white/10 bg-[#2a2a2a] p-2 w-16 h-16 justify-center items-center shadow-sm"
                 >
-                  <X size={12} strokeWidth={3} />
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : null}
+                  <span className="text-[10px] font-medium truncate w-full text-center text-foreground/80 px-1" title={attachment.fileName}>
+                    {attachment.fileName.length > 8 ? attachment.fileName.substring(0, 8) + '...' : attachment.fileName}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground mt-1">{formatFileSize(attachment.size)}</span>
+                  <button
+                    type="button"
+                    className="absolute -top-2 -right-2 bg-foreground text-background hover:bg-foreground/80 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                    onClick={() => removeAttachment(index)}
+                  >
+                    <X size={12} strokeWidth={3} />
+                  </button>
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="flex items-end gap-2 px-3 py-3">
           {/* File Attachment Button */}
@@ -128,7 +142,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
               <Button 
                 onClick={() => onSend()} 
                 disabled={!input.trim() && pendingAttachments.length === 0} 
-                className={`h-8 w-8 rounded-full p-0 transition-all flex items-center justify-center border-0 ${input.trim() || pendingAttachments.length ? 'bg-white text-black hover:bg-gray-200' : 'bg-[#1e1e1e] text-white/30'}`}
+                className={`h-8 w-8 rounded-full p-0 transition-all duration-300 flex items-center justify-center border-0 ${input.trim() || pendingAttachments.length ? 'bg-purple-600 text-white hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.4)]' : 'bg-[#2a2a2a] text-white/30'}`}
               >
                  <Send className="h-4 w-4 relative right-[1px]" strokeWidth={2} />
               </Button>

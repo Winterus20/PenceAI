@@ -7,6 +7,7 @@ import type { StatsState, ActiveView } from '../../store/agentStore';
 import { useAgentStore } from '@/store/agentStore';
 import toast from 'react-hot-toast';
 import { normalizeTimestamp } from '@/lib/utils';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface GroupedConversations {
   pinned: ConversationItem[];
@@ -159,7 +160,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
   };
 
   return (
-    <aside className="hidden w-full max-w-sm border-r border-border/60 bg-card/55 md:flex md:flex-col">
+    <aside className="hidden w-full h-full max-w-sm bg-card/60 md:flex md:flex-col">
       {/* Navigasyon Butonları */}
       <nav className="border-b border-border/60 p-2">
         <div className="flex gap-1">
@@ -183,7 +184,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
       {/* Sohbet Arama ve Listesi - Sadece chat view'inde göster */}
       {activeView === 'chat' && (
       <>
-      <div className="border-b border-border/60 p-4">
+      <div className="border-b border-border/40 p-4 bg-background/30">
         <div className="mb-3 flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -234,21 +235,30 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
           <>
             {groupedConversations.pinned.length ? (
               <div className="mb-6">
-                <div className="mb-2 px-2 text-meta">
+                <div className="mb-2 px-2 text-meta text-purple-400/70">
                   Sabitlenmiş
                 </div>
-                <div className="space-y-2">
-                  {groupedConversations.pinned.map((conversation) => (
-                    <ConversationListItem
-                      key={conversation.id}
-                      conversation={conversation}
-                      isActive={activeConversationId === conversation.id}
-                      isPinned={true}
-                      onSelect={onSelectConversation}
-                      onTogglePin={onTogglePin}
-                      onDelete={handleDeleteWithConfirm}
-                    />
-                  ))}
+                <div className="space-y-1">
+                  <AnimatePresence initial={false}>
+                    {groupedConversations.pinned.map((conversation) => (
+                      <motion.div
+                        key={conversation.id}
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                      >
+                        <ConversationListItem
+                          conversation={conversation}
+                          isActive={activeConversationId === conversation.id}
+                          isPinned={true}
+                          onSelect={onSelectConversation}
+                          onTogglePin={onTogglePin}
+                          onDelete={handleDeleteWithConfirm}
+                        />
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
                 </div>
               </div>
             ) : null}
@@ -267,18 +277,27 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                   <div className="mb-2 px-2 text-meta">
                     {label}
                   </div>
-                  <div className="space-y-2">
-                    {items.map((conversation) => (
-                      <ConversationListItem
-                        key={conversation.id}
-                        conversation={conversation}
-                        isActive={activeConversationId === conversation.id}
-                        isPinned={pinnedConversations.includes(conversation.id)}
-                        onSelect={onSelectConversation}
-                        onTogglePin={onTogglePin}
-                        onDelete={handleDeleteWithConfirm}
-                      />
-                    ))}
+                  <div className="space-y-1">
+                    <AnimatePresence initial={false}>
+                      {items.map((conversation) => (
+                        <motion.div
+                          key={conversation.id}
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.2 }}
+                        >
+                          <ConversationListItem
+                            conversation={conversation}
+                            isActive={activeConversationId === conversation.id}
+                            isPinned={pinnedConversations.includes(conversation.id)}
+                            onSelect={onSelectConversation}
+                            onTogglePin={onTogglePin}
+                            onDelete={handleDeleteWithConfirm}
+                          />
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
                   </div>
                 </div>
               );

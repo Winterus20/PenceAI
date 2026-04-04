@@ -1,0 +1,363 @@
+/**
+ * GraphExpander — Multi-hop BFS traversal.
+ * 
+ * GraphRAG-style çok atlamalı graf genişletme yapar.
+ * Seed node'lardan başlayarak BFS ile komşuları keşfeder.
+ * Döngü dedeksiyonu, batch query optimizasyonu ve cache desteği içerir.
+ */
+
+import type Database from 'better-sqlite3';
+import type {
+  GraphExpansionResult,
+  GraphExpansionOptions,
+  MemoryRow,
+  MemoryRelationRow,
+  NeighborResult,
+} from '../types.js';
+import { GraphCache, computeQueryHash } from './GraphCache.js';
+import { logger } from '../../utils/logger.js';
+
+/** Default ayarlar */
+const DEFAULT_MAX_DEPTH = 3;
+const DEFAULT_MAX_NODES = 50;
+const FULL_PHASE_MAX_NODES = 100; // FULL phase için artırılmış limit
+const DEFAULT_MIN_CONFIDENCE = 0.3;
+const DEFAULT_USE_CACHE = true;
+
+/** Timeout: 5 saniye (FULL phase'te 8 saniye) */
+const TRAVERSAL_TIMEOUT_MS = 5000;
+const FULL_PHASE_TIMEOUT_MS = 8000;
+
+export class GraphExpander {
+  constructor(
+    private db: Database.Database,
+    private cache: GraphCache
+  ) {}
+
+  /**
+   * Ana fonksiyon: BFS ile multi-hop traversal.
+   * 
+   * @param options - Genişletme seçenekleri
+   * @returns GraphExpansionResult - Genişletilmiş node'lar ve edge'ler
+   */
+  expand(options: Partial<GraphExpansionOptions> & { isFullPhase?: boolean }): GraphExpansionResult {
+    const startTime = Date.now();
+    const isFullPhase = options.isFullPhase ?? false;
+    const timeoutMs = isFullPhase ? FULL_PHASE_TIMEOUT_MS : TRAVERSAL_TIMEOUT_MS;
+    const opts = this.normalizeOptions(options);
+
+    // Cache kontrolü
+    if (opts.useCache) {
+      const queryHash = computeQueryHash(opts);
+      const cached = this.cache.get(queryHash, opts.maxDepth);
+      if (cached) {
+        logger.debug(`[GraphExpander] Cache hit for hash: ${queryHash.substring(0, 32)}...`);
+        return this.buildResultFromCache(cached);
+      }
+    }
+
+    // BFS traversal
+    const visited = new Set<number>(opts.seedNodeIds);
+    const allNodes = new Map<number, MemoryRow>();
+    const allEdges: MemoryRelationRow[] = [];
+    const hopDistances = new Map<number, number>();
+
+    // Seed node'ları yükle
+    this.loadSeedNodes(opts.seedNodeIds, allNodes);
+
+    // Seed node'ların hop distance'ı 0
+    for (const id of opts.seedNodeIds) {
+      hopDistances.set(id, 0);
+    }
+
+    let currentLayer = [...opts.seedNodeIds];
+    let maxHopReached = false;
+
+    for (let hop = 1; hop <= opts.maxDepth; hop++) {
+      // Timeout kontrolü
+      if (Date.now() - startTime > timeoutMs) {
+        logger.warn('[GraphExpander] Traversal timeout — sonuçlar kısmi döndürülüyor');
+        break;
+      }
+
+      // maxNodes kontrolü
+      if (allNodes.size >= opts.maxNodes) {
+        maxHopReached = true;
+        logger.debug(`[GraphExpander] maxNodes limit reached (${opts.maxNodes}) at hop ${hop}`);
+        break;
+      }
+
+      // Batch query ile tüm komşuları getir
+      const neighbors = this.getNeighbors(currentLayer, opts.minConfidence, opts.relationTypes);
+
+      if (neighbors.length === 0) {
+        logger.debug(`[GraphExpander] No neighbors found at hop ${hop}`);
+        break;
+      }
+
+      const nextLayer: number[] = [];
+
+      for (const neighbor of neighbors) {
+        // Döngü dedeksiyonu: zaten ziyaret edilmiş node'ları atla
+        if (visited.has(neighbor.neighborId)) continue;
+
+        // maxNodes kontrolü
+        if (allNodes.size >= opts.maxNodes) {
+          maxHopReached = true;
+          break;
+        }
+
+        visited.add(neighbor.neighborId);
+        hopDistances.set(neighbor.neighborId, hop);
+
+        // Node bilgisini yükle
+        const node = this.loadNode(neighbor.neighborId);
+        if (node) {
+          allNodes.set(neighbor.neighborId, node);
+        }
+
+        // Edge bilgisini yükle
+        const edge = this.loadEdge(neighbor.relationId);
+        if (edge) {
+          allEdges.push(edge);
+        }
+
+        nextLayer.push(neighbor.neighborId);
+      }
+
+      currentLayer = nextLayer;
+
+      if (currentLayer.length === 0) break;
+    }
+
+    const result: GraphExpansionResult = {
+      nodes: Array.from(allNodes.values()),
+      edges: allEdges,
+      hopDistances,
+      maxHopReached,
+    };
+
+    // Cache'e kaydet
+    if (opts.useCache) {
+      const queryHash = computeQueryHash(opts);
+      const cacheEntry = {
+        queryHash,
+        maxDepth: opts.maxDepth,
+        nodeIds: Array.from(allNodes.keys()),
+        relationIds: allEdges.map(e => e.id),
+        score: this.computeResultScore(result),
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 3600 * 1000), // 1 saat TTL
+      };
+      this.cache.set(cacheEntry);
+    }
+
+    const elapsed = Date.now() - startTime;
+    logger.debug(`[GraphExpander] Expansion completed in ${elapsed}ms: ${allNodes.size} nodes, ${allEdges.length} edges`);
+
+    return result;
+  }
+
+  /**
+   * Batch query optimizasyonu: Tek SQL ile tüm komşuları getir.
+   * Her node için ayrı SQL yerine, tüm node'lar için tek query.
+   */
+  private getNeighbors(
+    nodeIds: number[],
+    minConfidence: number,
+    relationTypes?: string[]
+  ): NeighborResult[] {
+    if (nodeIds.length === 0) return [];
+
+    const placeholders = nodeIds.map(() => '?').join(',');
+
+    let relationTypeFilter = '';
+    // Query'de 4 kez placeholders kullanılıyor (source IN, target NOT IN, target IN, source NOT IN)
+    // + 1 kez minConfidence
+    // + opsiyonel relationTypes
+    const allParams: (number | string)[] = [
+      minConfidence,
+      ...nodeIds,  // source IN
+      ...nodeIds,  // target NOT IN
+      ...nodeIds,  // target IN
+      ...nodeIds,  // source NOT IN
+    ];
+
+    if (relationTypes && relationTypes.length > 0) {
+      const typePlaceholders = relationTypes.map(() => '?').join(',');
+      relationTypeFilter = `AND mr.relation_type IN (${typePlaceholders})`;
+      allParams.push(...relationTypes);
+    }
+
+    try {
+      const rows = this.db.prepare(`
+        SELECT
+          mr.source_memory_id as source_id,
+          mr.target_memory_id as target_id,
+          mr.id as relation_id,
+          mr.relation_type,
+          mr.confidence,
+          COALESCE(mr.weight, 1.0) as weight
+        FROM memory_relations mr
+        WHERE mr.confidence >= ?
+          AND (
+            (mr.source_memory_id IN (${placeholders}) AND mr.target_memory_id NOT IN (${placeholders}))
+            OR
+            (mr.target_memory_id IN (${placeholders}) AND mr.source_memory_id NOT IN (${placeholders}))
+          )
+          ${relationTypeFilter}
+        ORDER BY mr.confidence DESC
+      `).all(...allParams) as Array<{
+        source_id: number;
+        target_id: number;
+        relation_id: number;
+        relation_type: string;
+        confidence: number;
+        weight: number;
+      }>;
+
+      const results: NeighborResult[] = [];
+      const seen = new Set<number>();
+
+      for (const row of rows) {
+        // Her neighbor'ı sadece bir kez ekle
+        if (!seen.has(row.target_id)) {
+          seen.add(row.target_id);
+          results.push({
+            nodeId: row.source_id,
+            neighborId: row.target_id,
+            relationId: row.relation_id,
+            relationType: row.relation_type,
+            confidence: row.confidence,
+            weight: row.weight,
+          });
+        }
+      }
+
+      return results;
+    } catch (err) {
+      logger.warn({ err }, '[GraphExpander] getNeighbors SQL hatası:');
+      return [];
+    }
+  }
+
+  /**
+   * Seed node'larını veritabanından yükler.
+   */
+  private loadSeedNodes(ids: number[], result: Map<number, MemoryRow>): void {
+    if (ids.length === 0) return;
+
+    const placeholders = ids.map(() => '?').join(',');
+    try {
+      const rows = this.db.prepare(`
+        SELECT * FROM memories WHERE id IN (${placeholders}) AND is_archived = 0
+      `).all(...ids) as MemoryRow[];
+
+      for (const row of rows) {
+        result.set(row.id, row);
+      }
+    } catch (err) {
+      logger.warn({ err }, '[GraphExpander] loadSeedNodes hatası:');
+    }
+  }
+
+  /**
+   * Tek bir node'u veritabanından yükler.
+   */
+  private loadNode(id: number): MemoryRow | null {
+    try {
+      return this.db.prepare(`
+        SELECT * FROM memories WHERE id = ? AND is_archived = 0
+      `).get(id) as MemoryRow | undefined ?? null;
+    } catch (err) {
+      logger.warn({ err }, `[GraphExpander] loadNode(${id}) hatası:`);
+      return null;
+    }
+  }
+
+  /**
+   * Tek bir edge'i veritabanından yükler.
+   */
+  private loadEdge(id: number): MemoryRelationRow | null {
+    try {
+      return this.db.prepare(`
+        SELECT * FROM memory_relations WHERE id = ?
+      `).get(id) as MemoryRelationRow | undefined ?? null;
+    } catch (err) {
+      logger.warn({ err }, `[GraphExpander] loadEdge(${id}) hatası:`);
+      return null;
+    }
+  }
+
+  /**
+   * Cache entry'den sonuç oluşturur.
+   */
+  private buildResultFromCache(cached: { nodeIds: number[]; relationIds: number[] }): GraphExpansionResult {
+    const nodes: MemoryRow[] = [];
+    const edges: MemoryRelationRow[] = [];
+    const hopDistances = new Map<number, number>();
+
+    // Node'ları yükle
+    if (cached.nodeIds.length > 0) {
+      const placeholders = cached.nodeIds.map(() => '?').join(',');
+      try {
+        const rows = this.db.prepare(`
+          SELECT * FROM memories WHERE id IN (${placeholders}) AND is_archived = 0
+        `).all(...cached.nodeIds) as MemoryRow[];
+        for (const row of rows) {
+          nodes.push(row);
+          hopDistances.set(row.id, 0); // Cache'den gelen node'ların hop distance'ı bilinmiyor
+        }
+      } catch (err) {
+        logger.warn({ err }, '[GraphExpander] Cache node yükleme hatası:');
+      }
+    }
+
+    // Edge'leri yükle
+    if (cached.relationIds.length > 0) {
+      const placeholders = cached.relationIds.map(() => '?').join(',');
+      try {
+        const rows = this.db.prepare(`
+          SELECT * FROM memory_relations WHERE id IN (${placeholders})
+        `).all(...cached.relationIds) as MemoryRelationRow[];
+        edges.push(...rows);
+      } catch (err) {
+        logger.warn({ err }, '[GraphExpander] Cache edge yükleme hatası:');
+      }
+    }
+
+    return {
+      nodes,
+      edges,
+      hopDistances,
+      maxHopReached: false,
+    };
+  }
+
+  /**
+   * Sonucun skorunu hesaplar (cache için).
+   */
+  private computeResultScore(result: GraphExpansionResult): number {
+    if (result.nodes.length === 0) return 0;
+    // Basit skor: node sayısı * ortalama edge confidence
+    const avgConfidence = result.edges.length > 0
+      ? result.edges.reduce((sum, e) => sum + e.confidence, 0) / result.edges.length
+      : 0.5;
+    return result.nodes.length * avgConfidence;
+  }
+
+  /**
+   * Seçenekleri normalize eder (default değerler ile).
+   */
+  private normalizeOptions(options: Partial<GraphExpansionOptions> & { isFullPhase?: boolean }): GraphExpansionOptions {
+    const isFullPhase = options.isFullPhase ?? false;
+    return {
+      seedNodeIds: options.seedNodeIds ?? [],
+      maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
+      maxNodes: options.maxNodes ?? (isFullPhase ? FULL_PHASE_MAX_NODES : DEFAULT_MAX_NODES),
+      relationTypes: options.relationTypes,
+      minConfidence: options.minConfidence ?? DEFAULT_MIN_CONFIDENCE,
+      useCache: options.useCache ?? DEFAULT_USE_CACHE,
+    };
+  }
+}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Pin, PinOff, Trash2, MessageSquare, Radio } from 'lucide-react';
+import { Search, Plus, Pin, PinOff, Trash2, MessageSquare, Radio, PanelLeftClose, BookOpen, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ConversationItem, ActiveView } from '../../store/agentStore';
 
@@ -42,6 +42,9 @@ export interface ConversationPanelProps {
   isConnected: boolean;
   isMobile?: boolean;
   onCloseMobile?: () => void;
+  onToggleSidebar?: () => void;
+  onOpenMemory?: () => void;
+  onOpenSettings?: () => void;
 }
 
 export const ConversationPanel: React.FC<ConversationPanelProps> = ({
@@ -57,10 +60,12 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
   onLoadConversation,
   onTogglePinned,
   onDeleteConversation,
-  stats,
   isConnected,
   isMobile = false,
   onCloseMobile,
+  onToggleSidebar,
+  onOpenMemory,
+  onOpenSettings,
 }) => {
   const groupedConversations = React.useMemo(() => {
     const filtered = conversations
@@ -143,7 +148,11 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
       {/* Header: Toggle & New Chat (ChatGPT Style) */}
       <div className="flex items-center justify-between p-3">
         <div className="flex items-center gap-2">
-          {/* Toggle sidebar button is handled externally, but we keep Search here */}
+          {onToggleSidebar && (
+            <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground md:flex hidden" onClick={onToggleSidebar} title="Menüyü Küçült">
+              <PanelLeftClose size={18} />
+            </Button>
+          )}
           <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground" onClick={() => {
             const el = document.getElementById('search-input');
             if (el) el.focus();
@@ -226,40 +235,32 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
         })}
       </div>
 
-      {/* İstatistikler */}
-      {stats && (
-        <div className="px-4 py-3 mx-2 mb-2 rounded-xl bg-white/5 border border-white/5">
-          <div className="flex items-center justify-around text-center">
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold text-foreground">{stats.conversations || 0}</span>
-              <span className="text-[10px] text-muted-foreground uppercase">Sohbet</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold text-foreground">{stats.messages || 0}</span>
-              <span className="text-[10px] text-muted-foreground uppercase">Mesaj</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold text-foreground">{stats.memories || 0}</span>
-              <span className="text-[10px] text-muted-foreground uppercase">Bellek</span>
-            </div>
+      {/* Bağlantı Durumu Sadece Koptuğunda Gösterilecek */}
+      {!isConnected && (
+        <div className="px-4 py-3 border-t border-red-500/10 bg-red-500/5">
+          <div className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-red-500 animate-[pulse_1.5s_ease-in-out_infinite] shadow-[0_0_12px_rgba(239,68,68,0.6)]" />
+            <span className="text-sm font-medium text-red-400">Bağlantı Bekleniyor veya Koptu...</span>
           </div>
         </div>
       )}
 
-      {/* Bağlantı Durumu */}
-      <div className="px-4 py-3 border-t border-white/5">
-        <div className="flex items-center gap-2">
-          <span
-            className={`h-2.5 w-2.5 rounded-full ${
-              isConnected
-                ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]'
-                : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]'
-            }`}
-          />
-          <span className="text-sm font-medium text-foreground/80">
-            {isConnected ? 'Bağlantı Kuruldu' : 'Bağlantı Bekleniyor...'}
-          </span>
-        </div>
+      {/* Alt Bölge - Bellek ve Ayarlar */}
+      <div className="mt-auto border-t border-border/40 bg-white/[0.02] p-3 flex items-center justify-center gap-2">
+        <button
+          onClick={onOpenMemory}
+          className="flex flex-[1] items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-medium text-muted-foreground transition-all hover:bg-white/10 hover:text-foreground"
+        >
+          <BookOpen className="h-4 w-4" />
+          <span>Bellek</span>
+        </button>
+        <button
+          onClick={onOpenSettings}
+          className="flex flex-[1] items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-medium text-muted-foreground transition-all hover:bg-white/10 hover:text-foreground"
+        >
+          <Settings className="h-4 w-4" />
+          <span>Ayarlar</span>
+        </button>
       </div>
     </div>
   );
