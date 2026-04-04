@@ -163,6 +163,58 @@ export class OpenAIEmbedding implements EmbeddingProvider {
     }
 }
 
+// ========== Voyage Embedding ==========
+
+/**
+ * Voyage AI Embedding Provider.
+ * Model: voyage-3-large (3072 boyut)
+ * API: https://api.voyageai.com/v1/embeddings (OpenAI uyumlu)
+ */
+export class VoyageEmbedding implements EmbeddingProvider {
+    readonly name = 'voyage';
+    readonly dimensions = 3072;
+    private apiKey: string;
+    private model: string;
+    private baseURL = 'https://api.voyageai.com/v1';
+
+    constructor(apiKey: string, model?: string) {
+        if (!apiKey) {
+            throw new Error('Voyage AI API key sağlanmadı (embedding için gerekli)');
+        }
+        this.apiKey = apiKey;
+        this.model = model || 'voyage-3-large';
+    }
+
+    async embed(texts: string[]): Promise<number[][]> {
+        if (texts.length === 0) return [];
+
+        const response = await fetchWithRetry(`${this.baseURL}/embeddings`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: this.model,
+                input: texts,
+            }),
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`Voyage AI embedding hatası (${response.status}): ${error}`);
+        }
+
+        const data = await response.json() as {
+            data: Array<{ embedding: number[]; index: number }>;
+        };
+
+        return data.data
+            .sort((a, b) => a.index - b.index)
+            .map(d => d.embedding);
+    }
+}
+
 // ========== Yardımcı Fonksiyonlar ==========
 
 /**
@@ -179,6 +231,8 @@ export function createEmbeddingProvider(): EmbeddingProvider | null {
             return new MiniMaxEmbedding(config.minimaxApiKey || '', embeddingModel);
         case 'openai':
             return new OpenAIEmbedding(config.openaiApiKey || '', embeddingModel);
+        case 'voyage':
+            return new VoyageEmbedding(config.voyageApiKey || '', embeddingModel);
         case 'none':
             return null;
         default:

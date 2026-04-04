@@ -30,8 +30,9 @@ export interface AppConfig {
     enableNvidiaTools: boolean; // NVIDIA NIM modellerin çoğu tool_choice:"auto" desteklemez
 
     // Embedding
-    embeddingProvider: 'minimax' | 'openai' | 'none';
+    embeddingProvider: 'minimax' | 'openai' | 'voyage' | 'none';
     embeddingModel: string;
+    voyageApiKey?: string;
 
     // Channels
     telegramBotToken?: string;
@@ -93,7 +94,7 @@ export function loadConfig(): AppConfig {
         enableNvidiaTools: process.env.ENABLE_NVIDIA_TOOLS === 'true',
 
         embeddingProvider: (() => {
-            const validEmbeddingProviders = ['minimax', 'openai', 'none'] as const;
+            const validEmbeddingProviders = ['minimax', 'openai', 'voyage', 'none'] as const;
             const raw = process.env.EMBEDDING_PROVIDER;
             if (raw && (validEmbeddingProviders as readonly string[]).includes(raw)) {
                 return raw as AppConfig['embeddingProvider'];
@@ -142,6 +143,7 @@ export function loadConfig(): AppConfig {
           // Gelişmiş Model Ayarları
           temperature: (() => { const p = parseFloat(process.env.TEMPERATURE || '0.7'); return isNaN(p) ? 0.7 : Math.max(0, Math.min(2, p)); })(),
           maxTokens: (() => { const p = parseInt(process.env.MAX_TOKENS || '4096', 10); return isNaN(p) ? 4096 : Math.max(256, Math.min(128000, p)); })(),
+          voyageApiKey: process.env.VOYAGE_API_KEY || undefined,
           };
         }
 

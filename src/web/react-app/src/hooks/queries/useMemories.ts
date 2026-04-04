@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { memoryService, type MemoryItem } from '@/services/memoryService';
+import { memoryService } from '@/services/memoryService';
 
 export const MEMORIES_QUERY_KEY = 'memories';
 

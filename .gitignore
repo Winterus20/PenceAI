@@ -6,6 +6,8 @@ node_modules/
 .env
 .env.*
 !.env.example
+.env.local
+.env.*.local
 
 # Build outputs
 build/
@@ -15,6 +17,9 @@ coverage/
 tmp/
 temp/
 .cache/
+
+# TypeScript incremental build
+*.tsbuildinfo
 
 # Runtime data
 logs/
@@ -41,6 +46,9 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+*.swp
+*.swo
+*.swn
 
 # Misc runtime artifacts
 *.pid
@@ -48,4 +56,28 @@ Thumbs.db
 *.seed
 *.out
 *.err
+
+# Editor / AI assistant personal settings
+.roo/
+
+# Vite cache
+src/web/react-app/.vite/
+
+# Tailwind generated output
+src/web/react-app/src/output.css
+
+# ESLint cache
+.eslintcache
+
+# Jest snapshots
+__snapshots__/
+
+# Test output
+junit.xml
+
+# Planning & research documents (local-only)
+FUTURE_IMPLEMENTATION_PLAN.md
+TECHNOLOGY_RESEARCH_REPORT.md
+
+# GitHub Actions (kasıtlı olarak ignore — workflow yok)
 .github/

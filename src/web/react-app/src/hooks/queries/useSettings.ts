@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { settingsService, type AppConfig } from '@/services/settingsService';
+import { settingsService } from '@/services/settingsService';
 
 export const SETTINGS_QUERY_KEY = 'settings';
 

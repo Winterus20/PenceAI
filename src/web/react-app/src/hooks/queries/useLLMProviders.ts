@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { settingsService, type LLMProvider } from '@/services/settingsService';
+import { settingsService } from '@/services/settingsService';
 
 export const LLM_PROVIDERS_QUERY_KEY = 'llm-providers';
 

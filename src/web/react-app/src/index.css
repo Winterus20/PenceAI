@@ -1,89 +1,190 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  /* Border radius */
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  /* Colors - shadcn/ui tokens */
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-sidebar: hsl(var(--sidebar));
+
+  /* Chart colors */
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+
+  /* Surface colors for glass-panel components */
+  --color-surface-border: rgba(255, 255, 255, 0.06);
+  --color-surface-xs: rgba(255, 255, 255, 0.01);
+  --color-surface-sm: rgba(255, 255, 255, 0.015);
+  --color-surface: rgba(255, 255, 255, 0.02);
+  --color-surface-md: rgba(255, 255, 255, 0.025);
+  --color-surface-lg: rgba(255, 255, 255, 0.028);
+  --color-surface-xl: rgba(255, 255, 255, 0.04);
+
+  /* Text opacity colors */
+  --color-text-surface-muted: rgba(255, 255, 255, 0.42);
+  --color-text-surface: rgba(255, 255, 255, 0.62);
+  --color-text-surface-strong: rgba(255, 255, 255, 0.78);
+  --color-text-surface-emphasis: rgba(255, 255, 255, 0.92);
+
+  /* Category colors for memory graph */
+  --color-category-purple: #8b5cf6;
+  --color-category-blue: #3b82f6;
+  --color-category-green: #10b981;
+  --color-category-orange: #f59e0b;
+  --color-category-red: #ef4444;
+  --color-category-gray: #94a3b8;
+  --color-category-pink: #ec4899;
+  --color-category-cyan: #06b6d4;
+  --color-category-lime: #84cc16;
+  --color-category-violet: #a855f7;
+  --color-category-slate: #64748b;
+
+  /* Entity type colors for memory graph */
+  --color-entity-person: #ec4899;
+  --color-entity-technology: #06b6d4;
+  --color-entity-project: #f59e0b;
+  --color-entity-place: #84cc16;
+  --color-entity-organization: #a855f7;
+  --color-entity-concept: #64748b;
+
+  /* Edge colors for memory graph */
+  --color-edge-related-to: #475569;
+  --color-edge-supports: #10b981;
+  --color-edge-contradicts: #ef4444;
+  --color-edge-caused-by: #f59e0b;
+  --color-edge-part-of: #8b5cf6;
+  --color-edge-has-entity: #334155;
+
+  /* Dialog field colors */
+  --color-dialog-bg: rgba(255, 255, 255, 0.02);
+  --color-dialog-bg-hover: rgba(255, 255, 255, 0.028);
+  --color-dialog-border: rgba(255, 255, 255, 0.06);
+  --color-dialog-border-focus: rgba(255, 255, 255, 0.12);
+  --color-dialog-text: rgba(255, 255, 255, 0.92);
+  --color-dialog-text-muted: rgba(255, 255, 255, 0.42);
+  --color-dialog-text-label: rgba(255, 255, 255, 0.88);
+  --color-dialog-text-description: rgba(255, 255, 255, 0.78);
+  --color-dialog-icon-bg: rgba(255, 255, 255, 0.04);
+
+  /* Font sizes */
+  --text-meta: 10px;
+  --text-meta--line-height: 1;
+  --text-meta--letter-spacing: 0.2em;
+  --text-label: 11px;
+  --text-label--line-height: 1.2;
+  --text-label--letter-spacing: 0.22em;
+  --text-label-sm: 11px;
+  --text-label-sm--line-height: 1.2;
+  --text-label-sm--letter-spacing: 0.18em;
+}
+
+/* CSS Variables for runtime theming */
+:root {
+  --background: 0 0% 8%; /* #141414 */
+  --foreground: 0 0% 98%;
+
+  --card: 0 0% 11%; /* #1c1c1c */
+  --card-foreground: 0 0% 98%;
+
+  --popover: 0 0% 11%;
+  --popover-foreground: 0 0% 98%;
+
+  --primary: 0 0% 98%;
+  --primary-foreground: 0 0% 9%;
+
+  --secondary: 0 0% 16%; 
+  --secondary-foreground: 0 0% 98%;
+
+  --muted: 0 0% 16%;
+  --muted-foreground: 0 0% 65%;
+
+  --accent: 0 0% 16%;
+  --accent-foreground: 0 0% 98%;
+
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+
+  --border: 0 0% 16%; 
+  --input: 0 0% 16%;
+  --ring: 0 0% 68%;
+  --radius: 1.25rem;
+  
+  --sidebar: 0 0% 6%; /* #0f0f0f */
+
+  /* Category colors for memory graph */
+  --category-preference: #8b5cf6;
+  --category-fact: #3b82f6;
+  --category-habit: #10b981;
+  --category-project: #f59e0b;
+  --category-event: #ef4444;
+  --category-general: #94a3b8;
+
+  /* Entity type colors for memory graph */
+  --entity-person: #ec4899;
+  --entity-technology: #06b6d4;
+  --entity-project: #f59e0b;
+  --entity-place: #84cc16;
+  --entity-organization: #a855f7;
+  --entity-concept: #64748b;
+
+  /* Edge colors for memory graph */
+  --edge-related-to: #475569;
+  --edge-supports: #10b981;
+  --edge-contradicts: #ef4444;
+  --edge-caused-by: #f59e0b;
+  --edge-part-of: #8b5cf6;
+  --edge-has-entity: #334155;
+}
+
+.dark {
+  /* Identical to root to ensure dark mode is always active */
+  --background: 0 0% 8%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 11%;
+  --card-foreground: 0 0% 98%;
+  --popover: 0 0% 11%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 0 0% 9%;
+  --secondary: 0 0% 16%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 16%;
+  --muted-foreground: 0 0% 65%;
+  --accent: 0 0% 16%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 16%;
+  --input: 0 0% 16%;
+  --ring: 0 0% 68%;
+  --sidebar: 0 0% 6%;
+}
 
 @layer base {
-  :root {
-    --background: 0 0% 8%; /* #141414 */
-    --foreground: 0 0% 98%;
-
-    --card: 0 0% 11%; /* #1c1c1c */
-    --card-foreground: 0 0% 98%;
-
-    --popover: 0 0% 11%;
-    --popover-foreground: 0 0% 98%;
-
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-
-    --secondary: 0 0% 16%; 
-    --secondary-foreground: 0 0% 98%;
-
-    --muted: 0 0% 16%;
-    --muted-foreground: 0 0% 65%;
-
-    --accent: 0 0% 16%;
-    --accent-foreground: 0 0% 98%;
-
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-
-    --border: 0 0% 16%; 
-    --input: 0 0% 16%;
-    --ring: 0 0% 68%;
-    --radius: 1.25rem;
-    
-    --sidebar: 0 0% 6%; /* #0f0f0f */
-
-    /* Category colors for memory graph */
-    --category-preference: #8b5cf6;
-    --category-fact: #3b82f6;
-    --category-habit: #10b981;
-    --category-project: #f59e0b;
-    --category-event: #ef4444;
-    --category-general: #94a3b8;
-  
-    /* Entity type colors for memory graph */
-    --entity-person: #ec4899;
-    --entity-technology: #06b6d4;
-    --entity-project: #f59e0b;
-    --entity-place: #84cc16;
-    --entity-organization: #a855f7;
-    --entity-concept: #64748b;
-  
-    /* Edge colors for memory graph */
-    --edge-related-to: #475569;
-    --edge-supports: #10b981;
-    --edge-contradicts: #ef4444;
-    --edge-caused-by: #f59e0b;
-    --edge-part-of: #8b5cf6;
-    --edge-has-entity: #334155;
-  }
-
-  .dark {
-    /* Identical to root to ensure dark mode is always active */
-    --background: 0 0% 8%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 11%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 11%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 16%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 16%;
-    --muted-foreground: 0 0% 65%;
-    --accent: 0 0% 16%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 16%;
-    --input: 0 0% 16%;
-    --ring: 0 0% 68%;
-    --sidebar: 0 0% 6%;
-  }
-
   * {
     border-color: hsl(var(--border) / 1);
   }
@@ -111,35 +212,48 @@
     background: hsl(var(--foreground) / 0.18);
     color: hsl(var(--foreground) / 1);
   }
-  }
+}
 
 @layer components {
   /* ===== Typography System ===== */
   
   /* Meta text - küçük boyut, düşük opacity, meta bilgiler için */
   .text-meta {
-    @apply text-[10px] uppercase tracking-[0.24em] text-muted-foreground;
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
   }
   
   /* Label text - etiketler için, uppercase */
   .text-label {
-    @apply text-[11px] uppercase tracking-[0.22em];
+    font-size: 11px;
+    line-height: 1.2;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
   }
   
   /* Caption text - alt başlıklar için */
   .text-caption {
-    @apply text-[11px] tracking-[0.08em];
+    font-size: 11px;
+    letter-spacing: 0.08em;
     color: rgba(255, 255, 255, 0.72);
   }
   
   /* Stats label - istatistik etiketleri için */
   .text-stats {
-    @apply text-[10px] uppercase tracking-wider text-muted-foreground;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
   }
   
   /* Tool label - araç etiketleri için */
   .text-tool-label {
-    @apply text-xs uppercase tracking-[0.2em];
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
   }
 
   .glass-panel {
@@ -161,159 +275,159 @@
   }
 
   .subtle-scrollbar {
-  scrollbar-width: thin;
-  scrollbar-color: hsl(0 0% 100% / 0.16) transparent;
-  scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(0 0% 100% / 0.16) transparent;
+    scrollbar-gutter: stable;
   }
   
   .subtle-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+    width: 8px;
+    height: 8px;
   }
   
   .subtle-scrollbar::-webkit-scrollbar-thumb {
-  background: hsl(0 0% 100% / 0.12);
-  border-radius: 999px;
-  border: none;
+    background: hsl(0 0% 100% / 0.12);
+    border-radius: 999px;
+    border: none;
   }
   
   .subtle-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-  margin: 0;
+    background: transparent;
+    margin: 0;
   }
   
   .subtle-scrollbar::-webkit-scrollbar-corner {
-  background: transparent;
+    background: transparent;
   }
   
-    /* Temperature Slider Styles */
-    .slider-surface {
-      -webkit-appearance: none;
-      appearance: none;
-      background: linear-gradient(90deg, hsl(0 0% 100% / 0.08), hsl(0 0% 100% / 0.12));
-    }
-  
-    .slider-surface::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, hsl(0 0% 100% / 0.95), hsl(0 0% 100% / 0.8));
-      border: 2px solid hsl(0 0% 100% / 0.15);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-      cursor: pointer;
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-  
-    .slider-surface::-webkit-slider-thumb:hover {
-      transform: scale(1.1);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    }
-  
-    .slider-surface::-moz-range-thumb {
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, hsl(0 0% 100% / 0.95), hsl(0 0% 100% / 0.8));
-      border: 2px solid hsl(0 0% 100% / 0.15);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-      cursor: pointer;
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-  
-    .slider-surface::-moz-range-thumb:hover {
-      transform: scale(1.1);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    }
+  /* Temperature Slider Styles */
+  .slider-surface {
+    -webkit-appearance: none;
+    appearance: none;
+    background: linear-gradient(90deg, hsl(0 0% 100% / 0.08), hsl(0 0% 100% / 0.12));
   }
-  
-  /* Mobile sidebar slide-in animation */
-  @keyframes slide-in-left {
-    from {
-      transform: translateX(-100%);
-      opacity: 0;
-    }
-    to {
-      transform: translateX(0);
-      opacity: 1;
-    }
+
+  .slider-surface::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, hsl(0 0% 100% / 0.95), hsl(0 0% 100% / 0.8));
+    border: 2px solid hsl(0 0% 100% / 0.15);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
-  
-  .animate-slide-in-left {
-    animation: slide-in-left 0.3s ease-out forwards;
+
+  .slider-surface::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   }
-  
-  /* Prose List Styles - Markdown listeleri için */
-  .prose ul,
-  .prose ol {
-    list-style-position: outside;
-    margin-top: 1rem !important;
-    margin-bottom: 1rem !important;
-    padding-left: 1.75rem !important;
+
+  .slider-surface::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, hsl(0 0% 100% / 0.95), hsl(0 0% 100% / 0.8));
+    border: 2px solid hsl(0 0% 100% / 0.15);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
-  
-  .prose ul {
-    list-style-type: disc !important;
+
+  .slider-surface::-moz-range-thumb:hover {
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   }
-  
-  .prose ol {
-    list-style-type: decimal !important;
+}
+
+/* Mobile sidebar slide-in animation */
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
   }
-  
-  .prose ul li,
-  .prose ol li {
-    margin-top: 0.5rem !important;
-    margin-bottom: 0.5rem !important;
-    padding-left: 0.5rem !important;
-    display: list-item !important;
+  to {
+    transform: translateX(0);
+    opacity: 1;
   }
-  
-  .prose ul li::marker,
-  .prose ol li::marker {
-    color: hsl(0 0% 100% / 0.5);
-  }
-  
-  .prose li p {
-    margin-top: 0.25rem;
-    margin-bottom: 0.25rem;
-  }
-  
-  /* Nested lists */
-  .prose ul ul,
-  .prose ol ul {
-    list-style-type: circle !important;
-    margin-top: 0.5rem !important;
-    margin-bottom: 0.5rem !important;
-    padding-left: 1.5rem !important;
-  }
-  
-  .prose ul ul ul,
-  .prose ol ul ul {
-    list-style-type: square !important;
-  }
-  
-  .prose ol ol {
-    list-style-type: lower-alpha !important;
-    margin-top: 0.5rem !important;
-    margin-bottom: 0.5rem !important;
-    padding-left: 1.5rem !important;
-  }
-  
-  .prose ol ol ol {
-    list-style-type: lower-roman !important;
-  }
-  
-  /* Mixed nested lists */
-  .prose ul ol,
-  .prose ol ul {
-    margin-top: 0.5rem !important;
-    margin-bottom: 0.5rem !important;
-    padding-left: 1.5rem !important;
-  }
-  
-  /* Ensure proper display in dark mode */
-  .dark .prose ul li::marker,
-  .dark .prose ol li::marker {
-    color: hsl(0 0% 100% / 0.5);
-  }
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left 0.3s ease-out forwards;
+}
+
+/* Prose List Styles - Markdown listeleri için */
+.prose ul,
+.prose ol {
+  list-style-position: outside;
+  margin-top: 1rem !important;
+  margin-bottom: 1rem !important;
+  padding-left: 1.75rem !important;
+}
+
+.prose ul {
+  list-style-type: disc !important;
+}
+
+.prose ol {
+  list-style-type: decimal !important;
+}
+
+.prose ul li,
+.prose ol li {
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  padding-left: 0.5rem !important;
+  display: list-item !important;
+}
+
+.prose ul li::marker,
+.prose ol li::marker {
+  color: hsl(0 0% 100% / 0.5);
+}
+
+.prose li p {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+/* Nested lists */
+.prose ul ul,
+.prose ol ul {
+  list-style-type: circle !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  padding-left: 1.5rem !important;
+}
+
+.prose ul ul ul,
+.prose ol ul ul {
+  list-style-type: square !important;
+}
+
+.prose ol ol {
+  list-style-type: lower-alpha !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  padding-left: 1.5rem !important;
+}
+
+.prose ol ol ol {
+  list-style-type: lower-roman !important;
+}
+
+/* Mixed nested lists */
+.prose ul ol,
+.prose ol ul {
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+  padding-left: 1.5rem !important;
+}
+
+/* Ensure proper display in dark mode */
+.dark .prose ul li::marker,
+.dark .prose ol li::marker {
+  color: hsl(0 0% 100% / 0.5);
+}
