@@ -377,4 +377,202 @@ describe('ShadowMode', () => {
       expect(shadowMode.getComparisonCount()).toBe(0);
     });
   });
+
+  describe('logComparison', () => {
+    it('Farklı sonuçlar loglanmalı', async () => {
+      const mockResult: GraphRAGResult = {
+        success: true,
+        memories: [createMemory(1), createMemory(2)],
+        communitySummaries: [],
+        graphContext: { expandedNodeIds: [1, 2], edgeCount: 1, maxHopReached: false, communityCount: 0, pageRankApplied: true },
+        searchMetadata: { duration: 50, cacheHit: false, tokenUsage: 100, fallbackUsed: false, phase: 'fusion' },
+      };
+
+      mockGraphRAGEngine.retrieve.mockResolvedValue(mockResult);
+
+      const shadowMode = createShadowMode({ sampleRate: 1.0, maxComparisons: 10, logToFile: true });
+      const baselineResults = [createMemory(1), createMemory(3)];
+
+      await shadowMode.runShadowQuery('test query', baselineResults);
+
+      expect(shadowMode.getComparisonCount()).toBeGreaterThanOrEqual(0);
+    });
+
+    it('Aynı sonuçlar loglanmalı', async () => {
+      const mockResult: GraphRAGResult = {
+        success: true,
+        memories: [createMemory(1)],
+        communitySummaries: [],
+        graphContext: { expandedNodeIds: [1], edgeCount: 0, maxHopReached: false, communityCount: 0, pageRankApplied: true },
+        searchMetadata: { duration: 50, cacheHit: false, tokenUsage: 100, fallbackUsed: false, phase: 'fusion' },
+      };
+
+      mockGraphRAGEngine.retrieve.mockResolvedValue(mockResult);
+
+      const shadowMode = createShadowMode({ sampleRate: 1.0, maxComparisons: 10, logToFile: true });
+      const baselineResults = [createMemory(1)];
+
+      await shadowMode.runShadowQuery('test query', baselineResults);
+
+      expect(shadowMode.getComparisonCount()).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('buildComparison', () => {
+    it('Metrik hesaplama doğru çalışır', () => {
+      const shadowMode = createShadowMode();
+
+      const comparison = {
+        query: 'test',
+        baselineResults: [createMemory(1), createMemory(2)],
+        graphRAGResults: [createMemory(1), createMemory(3)],
+        baselineTokenCount: 100,
+        graphRAGTokenCount: 150,
+        overlap: 0.33,
+        graphRAGUniqueCount: 1,
+        baselineUniqueCount: 1,
+        duration: 100,
+        timestamp: new Date(),
+      };
+
+      const metrics = shadowMode.computeMetrics(comparison);
+
+      expect(metrics.precision).toBeGreaterThanOrEqual(0);
+      expect(metrics.precision).toBeLessThanOrEqual(1);
+      expect(metrics.recall).toBeGreaterThanOrEqual(0);
+      expect(metrics.recall).toBeLessThanOrEqual(1);
+      expect(metrics.f1).toBeGreaterThanOrEqual(0);
+      expect(metrics.f1).toBeLessThanOrEqual(1);
+    });
+  });
+
+  describe('addComparison - Circular Buffer', () => {
+    it('Max limit aşıldığında en eski comparison silinir', () => {
+      const shadowMode = createShadowMode({ sampleRate: 1.0, maxComparisons: 3 });
+
+      // Manuel olarak comparison ekle (shouldRun bypass)
+      for (let i = 0; i < 5; i++) {
+        const comparison = {
+          query: `query ${i}`,
+          baselineResults: [createMemory(1)],
+          graphRAGResults: [createMemory(1)],
+          baselineTokenCount: 50,
+          graphRAGTokenCount: 50,
+          overlap: 1,
+          graphRAGUniqueCount: 0,
+          baselineUniqueCount: 0,
+          duration: 50,
+          timestamp: new Date(),
+        };
+
+        // Private method'a erişim için any cast
+        (shadowMode as any).addComparison(comparison);
+      }
+
+      // Max 3 comparison olmalı
+      expect(shadowMode.getComparisonCount()).toBeLessThanOrEqual(3);
+    });
+
+    it('Circular buffer FIFO davranışı sergiler', () => {
+      const shadowMode = createShadowMode({ sampleRate: 1.0, maxComparisons: 2 });
+
+      const comparison1 = {
+        query: 'first',
+        baselineResults: [createMemory(1)],
+        graphRAGResults: [createMemory(1)],
+        baselineTokenCount: 50,
+        graphRAGTokenCount: 50,
+        overlap: 1,
+        graphRAGUniqueCount: 0,
+        baselineUniqueCount: 0,
+        duration: 50,
+        timestamp: new Date(),
+      };
+
+      const comparison2 = {
+        query: 'second',
+        baselineResults: [createMemory(1)],
+        graphRAGResults: [createMemory(1)],
+        baselineTokenCount: 50,
+        graphRAGTokenCount: 50,
+        overlap: 1,
+        graphRAGUniqueCount: 0,
+        baselineUniqueCount: 0,
+        duration: 50,
+        timestamp: new Date(),
+      };
+
+      const comparison3 = {
+        query: 'third',
+        baselineResults: [createMemory(1)],
+        graphRAGResults: [createMemory(1)],
+        baselineTokenCount: 50,
+        graphRAGTokenCount: 50,
+        overlap: 1,
+        graphRAGUniqueCount: 0,
+        baselineUniqueCount: 0,
+        duration: 50,
+        timestamp: new Date(),
+      };
+
+      (shadowMode as any).addComparison(comparison1);
+      (shadowMode as any).addComparison(comparison2);
+      (shadowMode as any).addComparison(comparison3);
+
+      // En eski (first) silinmiş olmalı
+      const report = shadowMode.generateReport();
+      const queries = report.comparisons.map(c => c.query);
+      expect(queries).not.toContain('first');
+      expect(queries).toContain('second');
+      expect(queries).toContain('third');
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('Boş baseline ve graphRAG sonuçları ile metrik hesaplanır', () => {
+      const shadowMode = createShadowMode();
+
+      const comparison = {
+        query: 'test',
+        baselineResults: [],
+        graphRAGResults: [],
+        baselineTokenCount: 0,
+        graphRAGTokenCount: 0,
+        overlap: 0,
+        graphRAGUniqueCount: 0,
+        baselineUniqueCount: 0,
+        duration: 0,
+        timestamp: new Date(),
+      };
+
+      const metrics = shadowMode.computeMetrics(comparison);
+
+      expect(metrics.precision).toBe(0);
+      expect(metrics.recall).toBe(0);
+      expect(metrics.f1).toBe(0);
+    });
+
+    it('Jaccard similarity boş setler için 1 döner', () => {
+      const shadowMode = createShadowMode();
+
+      const comparison = {
+        query: 'test',
+        baselineResults: [],
+        graphRAGResults: [],
+        baselineTokenCount: 0,
+        graphRAGTokenCount: 0,
+        overlap: 1, // Boş setler için jaccard = 1
+        graphRAGUniqueCount: 0,
+        baselineUniqueCount: 0,
+        duration: 0,
+        timestamp: new Date(),
+      };
+
+      const metrics = shadowMode.computeMetrics(comparison);
+
+      // Empty results should result in 0 precision/recall due to TP=0
+      expect(metrics.precision).toBe(0);
+      expect(metrics.recall).toBe(0);
+    });
+  });
 });

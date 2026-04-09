@@ -3,6 +3,31 @@ import path from 'path';
 import fs from 'fs';
 import * as sqliteVec from "sqlite-vec";
 import { logger } from '../utils/logger.js';
+import { calculateCost } from '../utils/costCalculator.js';
+
+/** Token usage kayıt tipi */
+export interface TokenUsageRecord {
+  provider: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+}
+
+/** Token usage istatistik tipi */
+export interface TokenUsageStats {
+  totalTokens: number;
+  totalCost: number;
+  providerBreakdown: Record<string, { tokens: number; cost: number }>;
+}
+
+/** Günlük kullanım entry tipi */
+export interface DailyUsageEntry {
+  date: string;
+  tokens: number;
+  cost: number;
+}
 
 /**
  * SQLite veritabanı bağlantısı ve şema yönetimi.
@@ -210,6 +235,43 @@ export class PenceDatabase {
         value TEXT NOT NULL,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+
+      -- MCP Marketplace server'ları (kalıcı depolama)
+      CREATE TABLE IF NOT EXISTS mcp_servers (
+        name TEXT PRIMARY KEY,
+        description TEXT DEFAULT '',
+        command TEXT NOT NULL,
+        args TEXT NOT NULL DEFAULT '[]',
+        env TEXT NOT NULL DEFAULT '{}',
+        cwd TEXT,
+        timeout INTEGER DEFAULT 30000,
+        status TEXT DEFAULT 'installed' CHECK(status IN ('available', 'installed', 'active', 'disabled', 'error')),
+        version TEXT DEFAULT '1.0.0',
+        source TEXT DEFAULT 'marketplace',
+        source_url TEXT,
+        installed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_activated DATETIME,
+        last_error TEXT,
+        tool_count INTEGER DEFAULT 0,
+        metadata TEXT DEFAULT '{}'
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mcp_servers_status ON mcp_servers(status);
+
+      -- Token usage tracking (toplam istatistik için, conversation_id yok)
+      CREATE TABLE IF NOT EXISTS token_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        estimated_cost_usd REAL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_token_usage_created_at ON token_usage(created_at);
+      CREATE INDEX IF NOT EXISTS idx_token_usage_provider ON token_usage(provider);
     `);
 
     this.migrate();
@@ -265,6 +327,16 @@ export class PenceDatabase {
         this.db.exec("ALTER TABLE conversations ADD COLUMN is_summarized INTEGER DEFAULT 0");
       } catch (err) {
         logger.error({ err: err }, '[Database] ❌ Migration failed (is_summarized):');
+      }
+    }
+
+    // conversations tablosuna is_title_custom kolonu ekle (yoksa)
+    if (!convTableInfo.some((col: any) => col.name === 'is_title_custom')) {
+      logger.info('[Database] 🚀 Migrating: Adding is_title_custom column to conversations table');
+      try {
+        this.db.exec("ALTER TABLE conversations ADD COLUMN is_title_custom INTEGER DEFAULT 0");
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (is_title_custom):');
       }
     }
 
@@ -727,6 +799,97 @@ export class PenceDatabase {
    */
   getDb(): Database.Database {
     return this.db;
+  }
+
+  // ============================================
+  // Token Usage Tracking
+  // ============================================
+
+  /**
+   * Yeni token usage kaydı ekler.
+   */
+  saveTokenUsage(record: TokenUsageRecord): void {
+    const cost = calculateCost(record.provider, record.model, record.promptTokens, record.completionTokens);
+    this.db.prepare(`
+      INSERT INTO token_usage (provider, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).run(record.provider, record.model, record.promptTokens, record.completionTokens, record.totalTokens, cost);
+  }
+
+  /**
+   * Toplam kullanım istatistiğini döndürür.
+   * @param period - 'day', 'week', 'month', 'all'
+   */
+  getTokenUsageStats(period: string = 'week'): TokenUsageStats {
+    const now = Math.floor(Date.now() / 1000);
+    let periodSeconds: number;
+    switch (period) {
+      case 'day': periodSeconds = 86400; break;
+      case 'week': periodSeconds = 604800; break;
+      case 'month': periodSeconds = 2592000; break;
+      default: periodSeconds = 0; // all
+    }
+
+    // Toplam istatistik
+    const whereClause = periodSeconds > 0 ? `WHERE created_at >= datetime(${now} - ${periodSeconds}, 'unixepoch')` : '';
+    
+    const totalRow = this.db.prepare(`
+      SELECT
+        COALESCE(SUM(total_tokens), 0) as totalTokens,
+        COALESCE(SUM(estimated_cost_usd), 0) as totalCost
+      FROM token_usage ${whereClause}
+    `).get() as { totalTokens: number; totalCost: number };
+
+    // Provider bazlı breakdown
+    const providerRows = this.db.prepare(`
+      SELECT
+        provider,
+        SUM(total_tokens) as tokens,
+        SUM(estimated_cost_usd) as cost
+      FROM token_usage ${whereClause}
+      GROUP BY provider
+      ORDER BY tokens DESC
+    `).all() as Array<{ provider: string; tokens: number; cost: number }>;
+
+    const providerBreakdown: Record<string, { tokens: number; cost: number }> = {};
+    for (const row of providerRows) {
+      providerBreakdown[row.provider] = { tokens: row.tokens, cost: row.cost };
+    }
+
+    return {
+      totalTokens: totalRow.totalTokens,
+      totalCost: totalRow.totalCost,
+      providerBreakdown,
+    };
+  }
+
+  /**
+   * Günlük kullanım serisini döndürür.
+   * @param period - 'day', 'week', 'month', 'all'
+   */
+  getDailyUsage(period: string = 'week'): DailyUsageEntry[] {
+    const now = Math.floor(Date.now() / 1000);
+    let periodSeconds: number;
+    switch (period) {
+      case 'day': periodSeconds = 86400; break;
+      case 'week': periodSeconds = 604800; break;
+      case 'month': periodSeconds = 2592000; break;
+      default: periodSeconds = 0; // all
+    }
+
+    const whereClause = periodSeconds > 0 ? `WHERE created_at >= datetime(${now} - ${periodSeconds}, 'unixepoch')` : '';
+
+    const rows = this.db.prepare(`
+      SELECT
+        DATE(created_at) as date,
+        SUM(total_tokens) as tokens,
+        SUM(estimated_cost_usd) as cost
+      FROM token_usage ${whereClause}
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `).all() as Array<{ date: string; tokens: number; cost: number }>;
+
+    return rows.map(r => ({ date: r.date, tokens: r.tokens, cost: r.cost }));
   }
 
   /**

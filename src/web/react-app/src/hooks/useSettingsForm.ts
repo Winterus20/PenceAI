@@ -83,7 +83,25 @@ export interface UseSettingsFormReturn {
  * Form state, API yükleme, kaydetme ve hassas dizin yönetimi
  */
 export function useSettingsForm(open: boolean): UseSettingsFormReturn {
-  const [form, setForm] = useState<SettingsForm>(emptyForm);
+  // localStorage'dan kaydedilmiş LLM ayarlarını yükle
+  const loadSavedLLMSettings = (): Partial<SettingsForm> => {
+    try {
+      const saved = localStorage.getItem('pence-llm-settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          defaultLLMProvider: parsed.defaultLLMProvider || emptyForm.defaultLLMProvider,
+          defaultLLMModel: parsed.defaultLLMModel || emptyForm.defaultLLMModel,
+        };
+      }
+    } catch {
+      // localStorage hatası, varsayılanı kullan
+    }
+    return {};
+  };
+
+  const savedLLMSettings = useMemo(() => loadSavedLLMSettings(), []);
+  const [form, setForm] = useState<SettingsForm>({ ...emptyForm, ...savedLLMSettings });
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -113,9 +131,17 @@ export function useSettingsForm(open: boolean): UseSettingsFormReturn {
 
         setProviders(providersData);
         setSensitivePaths(Array.isArray(sensitivePathsData) ? sensitivePathsData : []);
+        // localStorage'dan gelen LLM ayarlarını API'den gelenlere tercih et
+        // savedLLMSettings useMemo ile başlangıçta hesaplanır, stale closure sorunu yoktur
+        const savedProvider = savedLLMSettings.defaultLLMProvider;
+        const savedModel = savedLLMSettings.defaultLLMModel;
+        
         setForm({
           ...emptyForm,
           ...settingsData,
+          // Kullanıcının seçtiği LLM ayarlarını koru (localStorage öncelikli)
+          defaultLLMProvider: savedProvider || settingsData.defaultLLMProvider || emptyForm.defaultLLMProvider,
+          defaultLLMModel: savedModel || settingsData.defaultLLMModel || emptyForm.defaultLLMModel,
           allowShellExecution: !!settingsData.allowShellExecution,
           autonomousStepLimit: String(settingsData.autonomousStepLimit ?? emptyForm.autonomousStepLimit),
           memoryDecayThreshold: String(settingsData.memoryDecayThreshold ?? emptyForm.memoryDecayThreshold),
@@ -140,17 +166,28 @@ export function useSettingsForm(open: boolean): UseSettingsFormReturn {
     return models.filter((model, index) => models.indexOf(model) === index);
   }, [providers, form.defaultLLMProvider]);
 
-  // Model seçimi otomatik güncelle
-  useEffect(() => {
-    if (!modelOptions.length) return;
-    if (!modelOptions.includes(form.defaultLLMModel)) {
-      setForm((current) => ({ ...current, defaultLLMModel: modelOptions[0] }));
-    }
-  }, [modelOptions, form.defaultLLMModel]);
+  // NOT: Kullanıcının model seçimi otomatik olarak değiştirilmez.
+  // localStorage'dan gelen seçim her zaman korunur.
 
-  // Alan güncelle
+  // Alan güncelle - LLM ayarlarını localStorage'a da kaydet
   const updateField = useCallback((key: string, value: string | boolean) => {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => {
+      const updated = { ...current, [key]: value };
+      
+      // LLM provider veya model değiştiğinde localStorage'a kaydet
+      if (key === 'defaultLLMProvider' || key === 'defaultLLMModel') {
+        try {
+          localStorage.setItem('pence-llm-settings', JSON.stringify({
+            defaultLLMProvider: key === 'defaultLLMProvider' ? value : updated.defaultLLMProvider,
+            defaultLLMModel: key === 'defaultLLMModel' ? value : updated.defaultLLMModel,
+          }));
+        } catch {
+          // localStorage hatası, sessizce geç
+        }
+      }
+      
+      return updated;
+    });
   }, []);
 
   // Kaydet

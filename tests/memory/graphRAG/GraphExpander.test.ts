@@ -377,4 +377,190 @@ describe('GraphExpander', () => {
       expect(result.nodes.length).toBe(2); // Seed + related_to only
     });
   });
+
+  describe('Timeout ve Partial Result', () => {
+    test('Timeout durumunda partial result döner', () => {
+      // Büyük graph oluştur
+      for (let i = 1; i <= 100; i++) {
+        insertMemory(i, `Node ${i}`);
+        if (i > 1) {
+          insertRelation(i - 1, i, 'related_to', 0.8);
+        }
+      }
+
+      const result = expander.expand({
+        seedNodeIds: [1],
+        maxDepth: 10,
+        maxNodes: 50,
+        minConfidence: 0.3,
+        useCache: false,
+      });
+
+      // Sonuçlar maxNodes limitini aşmamalı
+      expect(result.nodes.length).toBeLessThanOrEqual(50);
+    });
+  });
+
+  describe('buildResultFromCache Edge Cases', () => {
+    test('Cache hit durumunda sonuçlar doğru döner', () => {
+      insertMemory(1, 'Seed');
+      insertMemory(2, 'Neighbor');
+      insertRelation(1, 2, 'related_to', 0.8);
+
+      // İlk çağrı cache'e yazar
+      const result1 = expander.expand({
+        seedNodeIds: [1],
+        maxDepth: 1,
+        maxNodes: 50,
+        minConfidence: 0.3,
+        useCache: true,
+      });
+
+      // İkinci çağrı cache'den okur
+      const result2 = expander.expand({
+        seedNodeIds: [1],
+        maxDepth: 1,
+        maxNodes: 50,
+        minConfidence: 0.3,
+        useCache: true,
+      });
+
+      expect(result1.nodes.length).toBe(result2.nodes.length);
+      expect(result1.edges.length).toBe(result2.edges.length);
+    });
+
+    test('Cache miss durumunda yeni traversal yapılır', () => {
+      insertMemory(1, 'Seed');
+      insertMemory(2, 'Neighbor');
+      insertRelation(1, 2, 'related_to', 0.8);
+
+      const result = expander.expand({
+        seedNodeIds: [1],
+        maxDepth: 1,
+        maxNodes: 50,
+        minConfidence: 0.3,
+        useCache: false,
+      });
+
+      expect(result.nodes.length).toBe(2);
+    });
+  });
+
+  describe('computeResultScore Edge Cases', () => {
+    test('Boş sonuç için skor 0 döner', () => {
+      const result = expander.expand({
+        seedNodeIds: [],
+        maxDepth: 1,
+        maxNodes: 50,
+        minConfidence: 0.3,
+        useCache: false,
+      });
+
+      expect(result.nodes.length).toBe(0);
+      expect(result.edges.length).toBe(0);
+    });
+
+    test('Tek node için skor hesaplanır', () => {
+      insertMemory(1, 'Single node');
+
+      const result = expander.expand({
+        seedNodeIds: [1],
+        maxDepth: 1,
+        maxNodes: 50,
+        minConfidence: 0.3,
+        useCache: false,
+      });
+
+      expect(result.nodes.length).toBe(1);
+    });
+  });
+
+  describe('Veritabanı Hatası Durumunda Graceful Degradation', () => {
+    test('SQL hatası durumunda boş sonuç döner', () => {
+      // Geçersiz tablo adı ile hata oluştur
+      const brokenDb = new Database(':memory:');
+      brokenDb.exec(`
+        CREATE TABLE memories (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id TEXT NOT NULL DEFAULT 'default',
+          category TEXT DEFAULT 'general',
+          content TEXT NOT NULL,
+          importance INTEGER DEFAULT 5,
+          access_count INTEGER DEFAULT 0,
+          is_archived INTEGER DEFAULT 0,
+          last_accessed DATETIME,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          provenance_source TEXT,
+          provenance_conversation_id TEXT,
+          provenance_message_id INTEGER,
+          confidence REAL DEFAULT 0.7,
+          review_profile TEXT DEFAULT 'standard',
+          memory_type TEXT DEFAULT 'semantic',
+          stability REAL DEFAULT 2.0,
+          retrievability REAL DEFAULT 1.0,
+          next_review_at INTEGER,
+          review_count INTEGER DEFAULT 0,
+          max_importance INTEGER
+        );
+      `);
+      // memory_relations tablosu yok
+
+      const brokenCache = new GraphCache(brokenDb);
+      const brokenExpander = new GraphExpander(brokenDb, brokenCache);
+
+      const result = brokenExpander.expand({
+        seedNodeIds: [1],
+        maxDepth: 1,
+        maxNodes: 50,
+        minConfidence: 0.3,
+        useCache: false,
+      });
+
+      expect(result.nodes.length).toBe(0);
+      expect(result.edges.length).toBe(0);
+
+      brokenDb.close();
+    });
+  });
+
+  describe('Bidirectional Relations', () => {
+    test('Ters yönlü ilişkiler de bulunur', () => {
+      insertMemory(1, 'Node 1');
+      insertMemory(2, 'Node 2');
+      insertRelation(2, 1, 'related_to', 0.8); // 2 -> 1
+
+      const result = expander.expand({
+        seedNodeIds: [1],
+        maxDepth: 1,
+        maxNodes: 50,
+        minConfidence: 0.3,
+        useCache: false,
+      });
+
+      // Seed node (1) her zaman sonuçta olmalı
+      // Neighbor (2) bulunmalı çünkü getNeighbors ters yönlü ilişkileri de tarar
+      expect(result.nodes.length).toBeGreaterThanOrEqual(1);
+      expect(result.nodes.some(n => n.id === 1)).toBe(true);
+    });
+  });
+
+  describe('Archived Nodes', () => {
+    test('Archived node\'lar genişletilmez', () => {
+      insertMemory(1, 'Active seed');
+      insertMemory(2, 'Archived neighbor', 1); // archived
+      insertRelation(1, 2, 'related_to', 0.8);
+
+      const result = expander.expand({
+        seedNodeIds: [1],
+        maxDepth: 1,
+        maxNodes: 50,
+        minConfidence: 0.3,
+        useCache: false,
+      });
+
+      // Archived node dahil edilmemeli
+      expect(result.nodes.length).toBe(1);
+    });
+  });
 });

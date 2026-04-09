@@ -1,10 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { ChatWindow } from './components/chat/ChatWindow';
 import { ChannelsView } from './components/chat/ChannelsView';
 import { useAgentStore } from './store/agentStore';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { QueryProvider } from './providers/QueryProvider';
+
+// Lazy load MCP Marketplace
+const MCPMarketplace = lazy(() => import('./components/mcp/MCPMarketplace'));
 
 function App() {
   const activeView = useAgentStore((state) => state.activeView);
@@ -19,6 +22,12 @@ function App() {
     switch (activeView) {
       case 'channels':
         return <ChannelsView />;
+      case 'mcp-marketplace':
+        return (
+          <Suspense fallback={<div className="flex items-center justify-center h-full text-muted-foreground">Yükleniyor...</div>}>
+            <MCPMarketplace />
+          </Suspense>
+        );
       case 'chat':
       default:
         return <ChatWindow />;

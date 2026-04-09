@@ -6,6 +6,8 @@ import type {
     MemoryRow,
     MemoryType,
 } from './types.js';
+import type { PromptContextBundle } from './manager/types.js';
+export type { PromptContextBundle } from './manager/types.js';
 import { GraphRAGEngine, type GraphRAGResult, BehaviorDiscoveryShadow } from './graphRAG/index.js';
 import { logger } from '../utils/logger.js';
 
@@ -109,22 +111,6 @@ interface RetrievalRankedEntry {
     importanceBonus: number;
     accessBonus: number;
     finalScore: number;
-}
-
-export interface PromptContextBundle {
-    relevantMemories: MemoryRow[];
-    archivalMemories: MemoryRow[];
-    supplementalMemories: MemoryRow[];
-    conversationSummaries: Array<{ id: string; title: string; summary: string; updated_at: string }>;
-    reviewMemories: MemoryRow[];
-    followUpCandidates: MemoryRow[];
-    recentMessages: Array<{ role: string; content: string; created_at: string; conversation_title: string }>;
-    // GraphRAG results (null when GraphRAG is disabled or not triggered)
-    graphRAG: {
-        memories: MemoryRow[];
-        communitySummaries: Array<{ communityId: string; summary: string }>;
-        graphContext: Record<string, unknown>;
-    } | null;
 }
 
 export interface PromptContextRequest {

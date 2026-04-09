@@ -1,9 +1,11 @@
 import type { LLMProvider } from '../llm/provider.js';
 import { TOOL_CALL_CLEAR_SIGNAL } from '../llm/provider.js';
-import type { UnifiedMessage, ConversationMessage, LLMMessage, LLMResponse, ToolCall } from '../router/types.js';
+import type { UnifiedMessage, ConversationMessage, LLMMessage, LLMResponse, ToolCall, LLMToolDefinition } from '../router/types.js';
 import { MemoryManager } from '../memory/manager.js';
 import { buildSystemPrompt, getBuiltinToolDefinitions, buildLightExtractionPrompt, buildDeepExtractionPrompt, buildSummarizationPrompt, buildEntityExtractionPrompt } from './prompt.js';
 import { createBuiltinTools, type ToolExecutor, type ConfirmCallback } from './tools.js';
+import { getUnifiedToolRegistry } from './mcp/registry.js';
+import { isMCPEnabled } from './mcp/config.js';
 import { logger } from '../utils/logger.js';
 import type { FeedbackManager } from '../autonomous/urgeFilter.js';
 import type { TaskQueue } from '../autonomous/queue.js';
@@ -33,8 +35,12 @@ export class AgentRuntime {
     private llm: LLMProvider;
     private memory: MemoryManager;
     private tools: Map<string, ToolExecutor> = new Map();
-    private toolDefinitions = getBuiltinToolDefinitions();
+    private toolDefinitions: LLMToolDefinition[] = getBuiltinToolDefinitions();
     private maxToolIterations: number;
+
+    // MCP Integration — Unified Tool Registry
+    private _mcpEnabled = false;
+    private _mcpToolsRegistered = false;
 
     // GraphRAG integration
     private graphRAGEngine?: GraphRAGEngine;
@@ -54,6 +60,12 @@ export class AgentRuntime {
         this.memory = memory;
         this.maxToolIterations = getConfig().autonomousStepLimit || MAX_TOOL_ITERATIONS_DEFAULT;
         logger.info(`[Agent] Max tool iterations set to ${this.maxToolIterations}`);
+
+        // MCP Integration — Feature flag kontrolü
+        this._mcpEnabled = isMCPEnabled();
+        if (this._mcpEnabled) {
+            logger.info('[Agent] 🔌 MCP integration enabled');
+        }
 
         // GraphRAG initialization
         this.initializeGraphRAG();
@@ -104,6 +116,45 @@ export class AgentRuntime {
      */
     getShadowMode(): ShadowMode | undefined {
         return this.shadowMode;
+    }
+
+    /**
+     * MCP araçlarını registry'den alıp runtime'a kaydeder.
+     * Tool definitions'ı günceller ve built-in araçları registry'ye ekler.
+     */
+    private _registerMCPTools(registry: ReturnType<typeof getUnifiedToolRegistry>): void {
+        try {
+            // MCP tool definitions'larını al
+            const allTools = registry.getAllToolDefinitions();
+            this.toolDefinitions = allTools;
+            this._mcpToolsRegistered = true;
+            
+            const mcpToolCount = allTools.length - getBuiltinToolDefinitions().length;
+            logger.info(`[Agent] 🔌 MCP tools registered — ${allTools.length} total tools (${mcpToolCount} MCP tools)`);
+        } catch (error) {
+            logger.error({ error }, '[Agent] Failed to register MCP tools');
+        }
+    }
+
+    /**
+     * Etkin tool definitions'ı döndürür (built-in + MCP).
+     * Her çağrıda registry'den güncel listeyi alır — böylece dinamik olarak
+     * yüklenen MCP server'ların araçları da anında görünür olur.
+     */
+    private _getEffectiveToolDefinitions(): LLMToolDefinition[] {
+        if (this._mcpEnabled) {
+            try {
+                const registry = getUnifiedToolRegistry();
+                const allTools = registry.getAllToolDefinitions();
+                // Yerel cache'i güncelle
+                this.toolDefinitions = allTools;
+                this._mcpToolsRegistered = true;
+                return allTools;
+            } catch (error) {
+                logger.warn({ error }, '[Agent] Failed to get MCP tools, falling back to built-in tools');
+            }
+        }
+        return this.toolDefinitions;
     }
 
     private beginConversationTurn(message: UnifiedMessage, userMessage: ConversationMessage) {
@@ -227,6 +278,7 @@ export class AgentRuntime {
         options?: { thinking?: boolean },
     ): Promise<{ response: string; conversationId: string }> {
         const startTimeMs = Date.now();
+        const perfTimings: Record<string, number> = {};
 
         // 1. Geri Bildirim Döngüsü — Etkileşim geldiğinde cezaları sıfırla
         if (this.feedbackManager) {
@@ -254,6 +306,22 @@ export class AgentRuntime {
                 this.tools.set(tool.name, tool);
             }
             this._lastConfirmCallback = confirmCallback;
+
+            // MCP Integration — Unified Tool Registry'den MCP araçlarını da ekle
+            if (this._mcpEnabled) {
+                const registry = getUnifiedToolRegistry();
+                // Registry'ye built-in tools'ı kaydet (bir kez)
+                registry.registerBuiltins(this.memory, confirmCallback, this.createMergeFn(message.senderName || 'Kullanıcı'));
+                
+                // MCP tool definitions'larını al ve runtime'a ekle
+                this._registerMCPTools(registry);
+            }
+        }
+
+        // MCP Integration — Her mesajda toolDefinitions'ı güncelle (runtime'da yeni MCP server'lar bağlanmış olabilir)
+        if (this._mcpEnabled && !this._mcpToolsRegistered) {
+            const registry = getUnifiedToolRegistry();
+            this._registerMCPTools(registry);
         }
 
         // --- Sliding Window Context Budaması (Atomik Çift-Korumalı) ---
@@ -278,6 +346,7 @@ export class AgentRuntime {
 
         // Kullanıcı belleklerini akıllı şekilde al — hibrit arama (FTS + Semantik)
         // + geçmiş konuşma özetleri + review due bellekler paralel çekilir
+        const retrievalStart = Date.now();
         const {
             relevantMemories,
             archivalMemories,
@@ -287,6 +356,8 @@ export class AgentRuntime {
             followUpCandidates,
             recentMessages,
         } = await this.memory.getPromptContextBundle(message.content, conversationId);
+        perfTimings.retrieval = Date.now() - retrievalStart;
+        logger.info(`[Agent] ⏱️ getPromptContextBundle: ${perfTimings.retrieval}ms`);
 
         // GraphRAG retrieval — rollout phase'e göre davranır
         const graphRAGConfig = GraphRAGConfigManager.getConfig();
@@ -294,11 +365,15 @@ export class AgentRuntime {
 
         if (graphRAGConfig.shadowMode && this.shadowMode) {
             // Shadow mode: GraphRAG'ı çalıştır ama sonucu kullanma
+            const shadowStart = Date.now();
             this.shadowMode.runShadowQuery(message.content, relevantMemories)
                 .catch(err => logger.error({ err }, '[Agent] Shadow mode query error'));
+            perfTimings.graphRAGShadow = Date.now() - shadowStart;
+            logger.info(`[Agent] ⏱️ GraphRAG shadow query: ${perfTimings.graphRAGShadow}ms`);
         } else if (graphRAGConfig.enabled && this.graphRAGEngine) {
             // Sample rate kontrolü (partial rollout)
             if (Math.random() < graphRAGConfig.sampleRate) {
+                const graphRAGStart = Date.now();
                 try {
                     const result = await this.graphRAGEngine.retrieve(message.content, {
                         maxHops: graphRAGConfig.maxHops,
@@ -307,6 +382,7 @@ export class AgentRuntime {
                         tokenBudget: graphRAGConfig.tokenBudget,
                         timeoutMs: graphRAGConfig.timeoutMs,
                     });
+                    perfTimings.graphRAG = Date.now() - graphRAGStart;
 
                     if (result.success) {
                         graphRAGResult = {
@@ -320,12 +396,17 @@ export class AgentRuntime {
                                 communityCount: result.graphContext?.communityCount ?? 0,
                             },
                         };
-                        logger.info('[Agent] GraphRAG retrieval successful');
+                        logger.info(`[Agent] ⏱️ GraphRAG retrieval successful: ${perfTimings.graphRAG}ms`);
+                    } else {
+                        logger.warn(`[Agent] ⏱️ GraphRAG retrieval failed after ${perfTimings.graphRAG}ms`);
                     }
                 } catch (err) {
-                    logger.error({ err }, '[Agent] GraphRAG retrieval error, falling back to standard');
+                    perfTimings.graphRAG = Date.now() - graphRAGStart;
+                    logger.error({ err }, `[Agent] ⏱️ GraphRAG retrieval error after ${perfTimings.graphRAG}ms, falling back to standard`);
                     // Fallback to standard — graphRAGResult null kalır
                 }
+            } else {
+                logger.info('[Agent] ⏱️ GraphRAG skipped (sample rate)');
             }
         }
 
@@ -405,6 +486,24 @@ export class AgentRuntime {
         const currentModel = getConfig().defaultLLMModel.toLowerCase();
         const isStrictModel = currentModel.includes('gemma') || currentModel.includes('llama') || currentModel.includes('mistral');
 
+        // MCP araç listesini sistem prompt'una ekle — LLM araçları görebilsin
+        const allTools = this._getEffectiveToolDefinitions();
+        const mcpTools = allTools.filter((t: LLMToolDefinition) => t.name.startsWith('mcp:'));
+        if (mcpTools.length > 0) {
+            // Server bazında grupla
+            const serverMap = new Map<string, string[]>();
+            for (const tool of mcpTools) {
+                const parts = tool.name.split(':');
+                const serverName = parts[1];
+                if (!serverMap.has(serverName)) serverMap.set(serverName, []);
+                serverMap.get(serverName)!.push(tool.name);
+            }
+            const mcpList = Array.from(serverMap.entries())
+                .map(([server, tools]) => `  - **${server}**: ${tools.length} araç (${tools.map(t => `\`${t}\``).join(', ')})`)
+                .join('\n');
+            systemPrompt += `\n\n## Aktif MCP Sunucuları\nŞu anda bağlı MCP sunucuları ve araçları:\n${mcpList}\n\nKullanıcı "hangi MCP sunucuları var?" diye sorarsa, yukarıdaki listeyi aynen kullanıcıya ilet.`;
+        }
+
         let finalSystemPrompt = systemPrompt;
         if (isStrictModel) {
             finalSystemPrompt += `
@@ -466,15 +565,27 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             logger.info(`[Agent] 🧠 LLM çağrılıyor (iterasyon ${iterations})...`);
             onEvent?.({ type: 'iteration', data: { iteration: iterations } });
 
+            // Tool definitions'ı her iterasyonda güncelle (MCP araçları dinamik olarak değişebilir)
+            const currentToolDefinitions = this._getEffectiveToolDefinitions();
+            
+            // DEBUG: MCP araçlarını logla
+            const mcpTools = currentToolDefinitions.filter(t => t.name.startsWith('mcp:'));
+            if (mcpTools.length > 0) {
+                logger.info(`[Agent] 🔌 MCP tools being sent to LLM: ${mcpTools.map(t => t.name).join(', ')}`);
+            } else {
+                logger.warn('[Agent] ⚠️ No MCP tools found in tool definitions — check MCP server status');
+            }
+
             const chatOptions = {
                 systemPrompt: finalSystemPrompt,
-                tools: this.toolDefinitions,
+                tools: currentToolDefinitions,
                 temperature: 0.7,
                 maxTokens: 4096,
                 thinking: options?.thinking,
             };
 
             let llmResponse: LLMResponse;
+            const llmCallStart = Date.now();
             if (this.llm.chatStream) {
                 llmResponse = await this.llm.chatStream(llmMessages, chatOptions, (token) => {
                     if (token === TOOL_CALL_CLEAR_SIGNAL) {
@@ -485,6 +596,29 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                 });
             } else {
                 llmResponse = await this.llm.chat(llmMessages, chatOptions);
+            }
+            const llmCallDuration = Date.now() - llmCallStart;
+            perfTimings[`llm_call_${iterations}`] = llmCallDuration;
+            logger.info(`[Agent] ⏱️ LLM call (iterasyon ${iterations}): ${llmCallDuration}ms (provider: ${this.llm.name}, model: ${getConfig().defaultLLMModel})`);
+
+            // Token usage bilgisini kaydet
+            if (llmResponse.usage) {
+                const config = getConfig();
+                const currentProvider = config.defaultLLMProvider;
+                const currentModel = config.defaultLLMModel || 'unknown';
+                
+                try {
+                    this.memory.saveTokenUsage({
+                        provider: currentProvider,
+                        model: currentModel,
+                        promptTokens: llmResponse.usage.promptTokens,
+                        completionTokens: llmResponse.usage.completionTokens,
+                        totalTokens: llmResponse.usage.totalTokens,
+                    });
+                } catch (err) {
+                    // Usage kaydetme hatası kullanıcı akışını bozmaz
+                    logger.warn({ err }, '[Agent] Token usage kaydedilemedi:');
+                }
             }
 
             // <think> etiketlerini içerikten temizle (güvenlik için her durumda)
@@ -614,7 +748,11 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
         });
 
         let response = uiContent;
-        logger.info(`[Agent] ✅ Yanıt oluşturuldu (${response.length} karakter, ${iterations} iterasyon)`);
+        const totalDuration = Date.now() - startTimeMs;
+        logger.info(`[Agent] ✅ Yanıt oluşturuldu (${response.length} karakter, ${iterations} iterasyon, toplam: ${totalDuration}ms)`);
+
+        // Performans breakdown logu
+        logger.info(`[Agent] ⏱️ PERFORMANCE BREAKDOWN — Toplam: ${totalDuration}ms | Retrieval: ${perfTimings.retrieval ?? 0}ms | GraphRAG: ${perfTimings.graphRAG ?? 0}ms | LLM calls: ${Object.entries(perfTimings).filter(([k]) => k.startsWith('llm_call_')).map(([k, v]) => `${k}=${v}ms`).join(', ') || 'none'}`);
 
         // Geri Bildirim Döngüsü — Yanıt süresini kaydet
         if (this.feedbackManager) {
@@ -782,6 +920,7 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
     /**
      * Konuşmayı JSON formatında özetler ve veritabanına kaydeder.
      * Konuşma timeout'la kapandığında arka planda tetiklenir.
+     * Başlık üretimi de bu fonksiyon içinde yapılır (ekstra API çağrısı yok).
      */
     async summarizeConversation(conversationId: string): Promise<void> {
         try {
@@ -794,8 +933,9 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             );
 
             let summary = result.content.trim();
+            let title: string | null = null;
 
-            // JSON parse — sadece summary alanını al; başarısızsa plain-text fallback
+            // JSON parse — summary ve title alanlarını al; başarısızsa plain-text fallback
             try {
                 const jsonMatch = summary.match(/\{[\s\S]*\}/);
                 if (jsonMatch) {
@@ -803,13 +943,23 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                     if (parsed.summary) {
                         summary = parsed.summary;
                     }
+                    if (parsed.title && typeof parsed.title === 'string') {
+                        title = parsed.title.trim().substring(0, 200);
+                    }
                 }
             } catch {
                 // Fallback: ham metin olduğu gibi kaydedilir
             }
 
+            // Özet güncelle
             this.memory.updateConversationSummary(conversationId, summary);
             logger.info(`[Agent] 📝 Konuşma özetlendi (${conversationId.substring(0, 8)}...): "${summary.substring(0, 80)}..."`);
+
+            // Başlık güncelle (sadece LLM ürettiyse ve kullanıcı manuel değiştirmediyse)
+            if (title) {
+                this.memory.updateConversationTitle(conversationId, title, false);
+                logger.info(`[Agent] 🏷️ Konuşma başlığı güncellendi (${conversationId.substring(0, 8)}...): "${title}"`);
+            }
         } catch (err) {
             logger.error({ err: err }, '[Agent] Konuşma özetleme başarısız:');
         }
@@ -1183,7 +1333,6 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
     private async executeToolsWithEvents(toolCalls: ToolCall[], onEvent?: AgentEventCallback) {
         // Tüm araçları paralel başlat
         const promises = toolCalls.map(async (tc) => {
-            const tool = this.tools.get(tc.name);
             let result: string;
             let isError = false;
 
@@ -1193,17 +1342,27 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                 data: { name: tc.name, arguments: tc.arguments },
             });
 
-            if (!tool) {
-                result = `Hata: Bilinmeyen araç: ${tc.name}`;
-                isError = true;
-            } else {
-                try {
-                    logger.info(`[Agent]   → ${tc.name}(${JSON.stringify(tc.arguments).substring(0, 100)})`);
-                    result = await tool.execute(tc.arguments);
-                } catch (err: any) {
-                    result = `Hata: ${err.message}`;
-                    isError = true;
+            try {
+                // MCP Integration — Önce built-in, sonra MCP registry üzerinden çalıştır
+                if (this._mcpEnabled && tc.name.startsWith('mcp:')) {
+                    // MCP aracı — Unified Tool Registry üzerinden çalıştır
+                    const registry = getUnifiedToolRegistry();
+                    logger.info(`[Agent]   → [MCP] ${tc.name}(${JSON.stringify(tc.arguments).substring(0, 100)})`);
+                    result = await registry.executeTool(tc.name, tc.arguments);
+                } else {
+                    // Built-in araç
+                    const tool = this.tools.get(tc.name);
+                    if (!tool) {
+                        result = `Hata: Bilinmeyen araç: ${tc.name}`;
+                        isError = true;
+                    } else {
+                        logger.info(`[Agent]   → ${tc.name}(${JSON.stringify(tc.arguments).substring(0, 100)})`);
+                        result = await tool.execute(tc.arguments);
+                    }
                 }
+            } catch (err: any) {
+                result = `Hata: ${err.message}`;
+                isError = true;
             }
 
             // Araç bitiş event'i

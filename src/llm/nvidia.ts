@@ -44,6 +44,7 @@ export class NvidiaProvider extends OpenAIProvider {
         'nvidia/nvidia-nemotron-nano-9b-v2',         // Nemotron Nano 9B v2 — hybrid Mamba
         'nvidia/nemotron-nano-12b-v2-vl',            // Nemotron Nano 12B v2 VL
         'nvidia/nemotron-3-nano-30b-a3b',            // Nemotron 3 Nano 30B MoE
+        'nvidia/nemotron-3-super-120b-a12b',         // Nemotron 3 Super 120B MoE — YENİ
         'nvidia/nemotron-4-mini-hindi-4b-instruct',  // Nemotron Mini 4B Hindi
         'nvidia/nemotron-mini-4b-instruct',          // Nemotron Mini 4B
         'nvidia/nemotron-content-safety-reasoning-4b', // Nemotron content safety reasoning
@@ -63,6 +64,7 @@ export class NvidiaProvider extends OpenAIProvider {
         'deepseek-ai/deepseek-r1-distill-llama-8b',  // DeepSeek R1 distill Llama 8B
         // === Qwen ===
         'qwen/qwen3.5-397b-a17b',                    // Qwen3.5 397B MoE VLM
+        'qwen/qwen3.5-122b-a10b',                    // Qwen3.5 122B MoE — YENİ
         'qwen/qwen3-235b-a22b',                      // Qwen3 235B MoE
         'qwen/qwen3-coder-480b-a35b-instruct',       // Qwen3 Coder 480B
         'qwen/qwen3-next-80b-a3b-instruct',          // Qwen3 Next 80B instruct
@@ -74,6 +76,7 @@ export class NvidiaProvider extends OpenAIProvider {
         'qwen/qwen2-7b-instruct',                    // Qwen2 7B
         // === Mistral / MistralAI ===
         'mistralai/mistral-large-3-675b-instruct-2512',   // Mistral Large 3 675B MoE VLM
+        'mistralai/mistral-small-4-119b-2603',            // Mistral Small 4 119B — YENİ
         'mistralai/devstral-2-123b-instruct-2512',        // Devstral 2 123B code agent
         'mistralai/mistral-medium-3-instruct',            // Mistral Medium 3 — multimodal
         'mistralai/mistral-small-3_1-24b-instruct-2503',  // Mistral Small 3.1 24B
@@ -91,6 +94,7 @@ export class NvidiaProvider extends OpenAIProvider {
         'mistralai/mathstral-7b-v0.1',                    // Mathstral 7B
         'mistralai/ministral-14b-instruct-2512',          // Ministral 14B
         // === Google Gemma ===
+        'google/gemma-4-31b-it',                     // Gemma 4 31B — YENİ, dense reasoning
         'google/gemma-3-27b-it',                     // Gemma 3 27B — multimodal
         'google/gemma-3-1b-it',                      // Gemma 3 1B — edge
         'google/gemma-3n-e4b-it',                    // Gemma 3n E4B — audio/image/text

@@ -13,6 +13,8 @@ export const createSettingsSlice: StateCreator<
   channels: [],
   selectedChannel: null,
   feedbacks: {},
+  defaultLLMProvider: '',
+  defaultLLMModel: '',
 
   setUserName: (name) => set({ userName: name }),
   
@@ -89,4 +91,7 @@ export const createSettingsSlice: StateCreator<
       },
     };
   }),
+
+  setDefaultLLMProvider: (provider) => set({ defaultLLMProvider: provider }),
+  setDefaultLLMModel: (model) => set({ defaultLLMModel: model }),
 });

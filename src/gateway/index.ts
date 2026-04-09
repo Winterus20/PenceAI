@@ -14,6 +14,8 @@ import { MessageRouter } from '../router/index.js';
 import { registerAllProviders, LLMProviderFactory } from '../llm/index.js';
 import { AgentRuntime } from '../agent/runtime.js';
 import { createEmbeddingProvider } from '../memory/embeddings.js';
+import { initializeMCP, shutdownMCP } from '../agent/mcp/runtime.js';
+import { initMCPPersistence } from './services/mcpService.js';
 
 import { TaskQueue, BackgroundWorker, TaskPriority } from '../autonomous/index.js';
 import { FeedbackManager, filterThought } from '../autonomous/urgeFilter.js';
@@ -51,6 +53,9 @@ async function main() {
     const memory = new MemoryManager(database);
     logger.info(`[Gateway] 💾 Veritabanı hazır: ${config.dbPath} (embedding dim=${embeddingDimensions})`);
 
+    // MCP Persistence — Marketplace server'larını veritabanından yükle
+    await initMCPPersistence(config.dbPath);
+
     // 3. LLM Provider
     registerAllProviders();
     let llm;
@@ -71,6 +76,12 @@ async function main() {
         logger.error(`[Gateway] ❌ LLM Provider başlatılamadı: ${err.message}`);
         logger.error(`[Gateway] 💡 .env dosyanızda API anahtarını ayarlayın. Kopya: cp .env.example .env`);
         process.exit(1);
+    }
+
+    // 3.5 MCP Initialization (feature flag ile kontrollü)
+    const mcpManager = await initializeMCP();
+    if (mcpManager) {
+        logger.info(`[Gateway] 🔌 MCP Runtime initialized — ${mcpManager.connectedServerCount} server(s), ${mcpManager.totalToolCount} tool(s)`);
     }
 
     // 4. Agent Runtime
@@ -173,6 +184,10 @@ async function main() {
     // OTONOM İŞLEYİCİLER (AUTONOMOUS HANDLERS)
     // ═══════════════════════════════════════════════════════════
 
+    // Autonomous tick state — son seçilen seed'i takip et
+    let lastSelectedSeedId: number | undefined = undefined;
+    let lastSeedSelectedAt: number = 0; // Unix timestamp ms
+
     // 1. Otonom Düşünme Döngüsü
     taskQueue.registerHandler('autonomous_tick', async (payload, signal) => {
         if (signal.aborted) return;
@@ -193,12 +208,26 @@ async function main() {
 
         // --- 2. THINK ENGINE: Saf Düşünme ---
         const neutralEmotion = { primary: 'Nötr', intensity: 'low' as const, description: 'Sakin ve odaklı' };
-        const thoughtResult = think(database.getDb(), neutralEmotion);
+
+        // Seed cooldown kontrolü
+        const SEED_COOLDOWN_MS = 30 * 60 * 1000; // 30 dakika
+        const now = Date.now();
+        if (lastSelectedSeedId && (now - lastSeedSelectedAt) < SEED_COOLDOWN_MS) {
+            logger.debug(`[Worker] Seed #${lastSelectedSeedId} cooldown'da, alternatif seed aranıyor...`);
+        }
+
+        // Rastgele soru şablonu seç (0-4 arası)
+        const questionIdx = Math.floor(Math.random() * 5);
+        const thoughtResult = think(database.getDb(), neutralEmotion, lastSelectedSeedId, 30, questionIdx);
         if (!thoughtResult) {
             // Düşünecek bir tohum bulunamadı. Kısa bekle ve tekrar dene.
             taskQueue.enqueue({ id: `auto_tick_${Date.now()}`, type: 'autonomous_tick', priority: TaskPriority.P4_LOW, payload: {}, addedAt: Date.now() + (30 * 60 * 1000) });
             return;
         }
+
+        // Seçilen seed'i kaydet
+        lastSelectedSeedId = thoughtResult.thought.seed.memoryId;
+        lastSeedSelectedAt = Date.now();
 
         if (signal.aborted) return;
 
@@ -221,15 +250,28 @@ async function main() {
         // LLM çıktısından JSON metadata parse et; başarısızlıkta güvenli varsayılanlar kullan.
         let relevanceScore = 0.5;
         let timeSensitivity = 0.3;
+        let llmReasoning = '';
         try {
-            const jsonMatch = llmThoughtOutput.match(/\{[\s\S]*?"relevance"[\s\S]*?\}/);
+            // 1) Markdown code fence içindeki JSON'u bul
+            const codeFenceMatch = llmThoughtOutput.match(/```json\s*([\s\S]*?)```/i);
+            const jsonStr = codeFenceMatch ? codeFenceMatch[1] : llmThoughtOutput;
+            
+            // 2) İlk { ... } bloğunu bul
+            const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
-                if (typeof parsed.relevance === 'number') relevanceScore = Math.max(0, Math.min(1, parsed.relevance));
-                if (typeof parsed.timeSensitivity === 'number') timeSensitivity = Math.max(0, Math.min(1, parsed.timeSensitivity));
+                if (typeof parsed.relevance === 'number') {
+                    relevanceScore = Math.max(0, Math.min(1, parsed.relevance));
+                }
+                if (typeof parsed.timeSensitivity === 'number') {
+                    timeSensitivity = Math.max(0, Math.min(1, parsed.timeSensitivity));
+                }
+                if (typeof parsed.reasoning === 'string') {
+                    llmReasoning = parsed.reasoning;
+                }
             }
-        } catch {
-            // JSON parse başarısız — varsayılanlar kullanılır
+        } catch (err) {
+            logger.warn({ err }, '[Worker] LLM JSON parse başarısız, fallback değerler kullanılıyor.');
         }
 
         const evaluation = {
@@ -241,7 +283,10 @@ async function main() {
         const currentHour = new Date().getHours();
         const decisionResult = filterThought(evaluation, feedbackManager.getState(), currentHour);
 
-        logger.info(`[Worker] ⚖️ Otonom Karar: ${decisionResult.decision.toUpperCase()}. Skor: ${decisionResult.score.toFixed(2)} (Eşik: ${decisionResult.threshold.toFixed(2)})`);
+        logger.info(`[Worker] ⚖️ Otonom Karar: ${decisionResult.decision.toUpperCase()}. Skor: ${decisionResult.score.toFixed(2)} (Eşik: ${decisionResult.threshold.toFixed(2)}) [Relevance: ${relevanceScore.toFixed(2)}, TimeSensitivity: ${timeSensitivity.toFixed(2)}]`);
+        if (llmReasoning) {
+            logger.debug(`[Worker] 🧠 LLM Reasoning: ${llmReasoning}`);
+        }
 
         // --- 5. AKSİYON AL ---
         if (decisionResult.decision === 'send') {
@@ -257,11 +302,26 @@ async function main() {
         // Bir sonraki döngüyü exponential backoff ile planla
         const feedback = feedbackManager.getState();
         let delayMinutes = 15;
+
+        if (decisionResult.decision === 'send') {
+            // Mesaj gönderildiyse daha uzun bekle (kullanıcıyı rahatsız etme)
+            delayMinutes = 60;
+        } else if (decisionResult.decision === 'digest') {
+            delayMinutes = 30;
+        } else {
+            // Discard - kısa bekle
+            delayMinutes = 15;
+        }
+
+        // Kullanıcı aktivitesine göre ayarla
         if (feedback.lastSignalAt > 0) {
             const hoursSinceActive = (Date.now() - feedback.lastSignalAt) / (1000 * 60 * 60);
             if (hoursSinceActive > 24) delayMinutes = 1440; // 24 saatte bir
             else if (hoursSinceActive > 4) delayMinutes = 120; // 2 saatte bir
+            else if (hoursSinceActive < 0.5) delayMinutes = Math.min(delayMinutes, 30); // Aktif kullanıcı - daha sık
         }
+
+        logger.info(`[Worker] ⏭️ Sonraki otonom tick: ${delayMinutes} dakika sonra`);
         taskQueue.enqueue({ id: `auto_tick_${Date.now()}`, type: 'autonomous_tick', priority: TaskPriority.P4_LOW, payload: {}, addedAt: Date.now() + (delayMinutes * 60 * 1000) });
     });
 
@@ -470,6 +530,8 @@ async function main() {
         } catch (err) {
             logger.error({ err }, '[Gateway] Kanal kapatma hatası');
         }
+        // MCP shutdown
+        await shutdownMCP();
         database.close();
         server.close(() => {
             logger.info('[Gateway] ✅ Sunucu kapatıldı.');

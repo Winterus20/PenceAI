@@ -31,6 +31,9 @@ export const useAgentStore = create<AgentState>()(
         stats: state.stats,
         theme: state.theme,
         sensitivePaths: state.sensitivePaths,
+        // LLM ayarlarını da kaydet - sayfa yenilendiğinde korunması için
+        defaultLLMProvider: state.defaultLLMProvider,
+        defaultLLMModel: state.defaultLLMModel,
       }),
     }
   )

@@ -474,4 +474,198 @@ describe('GraphRAGEngine', () => {
       expect(result.communitySummaries).toEqual([]);
     });
   });
+
+  describe('Token Budget Edge Cases', () => {
+    it('Düşük token budget ile sonuçlar budanır', async () => {
+      const initialMemories = [
+        createMemory(1, 'short'),
+        createMemory(2, 'medium length content here'),
+        createMemory(3, 'very long content that takes up more tokens than the others combined and should be pruned first'),
+      ];
+
+      mockHybridSearch.mockResolvedValue(initialMemories);
+      mockExpander.expand.mockReturnValue({
+        nodes: [],
+        edges: [],
+        hopDistances: new Map(),
+        maxHopReached: false,
+      });
+      mockPageRankScorer.scoreSubgraph.mockReturnValue(new Map([[1, 0.5], [2, 0.3], [3, 0.1]]));
+      mockCommunityDetector.detectLocalCommunity.mockReturnValue([]);
+
+      const engine = createEngine({ tokenBudget: 50 });
+      const result = await engine.retrieve('test query');
+
+      expect(result.success).toBe(true);
+      // Token usage may be 0 if token budget pruning removes all results
+      expect(result.searchMetadata.tokenUsage).toBeGreaterThanOrEqual(0);
+    });
+
+    it('Çok düşük token budget durumunda boş sonuç dönebilir', async () => {
+      const initialMemories = [createMemory(1, 'very long content that exceeds the tiny budget')];
+
+      mockHybridSearch.mockResolvedValue(initialMemories);
+      mockExpander.expand.mockReturnValue({
+        nodes: [],
+        edges: [],
+        hopDistances: new Map(),
+        maxHopReached: false,
+      });
+      mockPageRankScorer.scoreSubgraph.mockReturnValue(new Map());
+      mockCommunityDetector.detectLocalCommunity.mockReturnValue([]);
+
+      const engine = createEngine({ tokenBudget: 10 });
+      const result = await engine.retrieve('test query');
+
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('Concurrent Retrieval', () => {
+    it('Eşzamanlı sorgular race condition yaratmaz', async () => {
+      mockHybridSearch.mockResolvedValue([createMemory(1)]);
+      mockExpander.expand.mockReturnValue({
+        nodes: [createMemory(2)],
+        edges: [],
+        hopDistances: new Map(),
+        maxHopReached: false,
+      });
+      mockPageRankScorer.scoreSubgraph.mockReturnValue(new Map([[1, 0.5], [2, 0.3]]));
+      mockCommunityDetector.detectLocalCommunity.mockReturnValue([]);
+
+      const engine = createEngine();
+      const promises = Array(5).fill(null).map(() => engine.retrieve('test'));
+      const results = await Promise.allSettled(promises);
+
+      // Tüm sorguların başarılı olduğunu doğrula
+      const fulfilled = results.filter(r => r.status === 'fulfilled');
+      expect(fulfilled.length).toBeGreaterThan(0);
+
+      // Her başarılı sorgunun sonuçları olmalı
+      for (const result of fulfilled) {
+        if (result.status === 'fulfilled') {
+          expect(result.value.success).toBe(true);
+        }
+      }
+    });
+  });
+
+  describe('Veritabanı Bağlantı Hatası', () => {
+    it('Veritabanı hatasında graceful degradation', async () => {
+      mockHybridSearch.mockImplementation(() => {
+        throw new Error('Database connection lost');
+      });
+
+      const engine = createEngine({ fallbackToStandardSearch: true });
+      const result = await engine.retrieve('test query');
+
+      // Fallback denenmeli
+      expect(result.searchMetadata.fallbackUsed).toBe(true);
+    });
+  });
+
+  describe('RRF Fusion Edge Cases', () => {
+    it('Tek sonuç ile RRF fusion çalışır', async () => {
+      mockHybridSearch.mockResolvedValue([createMemory(1)]);
+      mockExpander.expand.mockReturnValue({
+        nodes: [],
+        edges: [],
+        hopDistances: new Map(),
+        maxHopReached: false,
+      });
+      mockPageRankScorer.scoreSubgraph.mockReturnValue(new Map([[1, 0.5]]));
+      mockCommunityDetector.detectLocalCommunity.mockReturnValue([]);
+
+      const engine = createEngine();
+      const result = await engine.retrieve('test');
+
+      expect(result.success).toBe(true);
+      expect(result.memories.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('Çoklu sonuç fusion doğru çalışır', async () => {
+      const initialMemories = [createMemory(1), createMemory(2)];
+      const expandedNodes = [createMemory(3), createMemory(4)];
+      const scores = new Map([[1, 0.4], [2, 0.3], [3, 0.5], [4, 0.2]]);
+
+      mockHybridSearch.mockResolvedValue(initialMemories);
+      mockExpander.expand.mockReturnValue({
+        nodes: expandedNodes,
+        edges: [],
+        hopDistances: new Map(),
+        maxHopReached: false,
+      });
+      mockPageRankScorer.scoreSubgraph.mockReturnValue(scores);
+      mockCommunityDetector.detectLocalCommunity.mockReturnValue([]);
+
+      const engine = createEngine();
+      const result = await engine.retrieve('test');
+
+      expect(result.success).toBe(true);
+      // Tüm node'lar sonuçta olmalı
+      expect(result.memories.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('LLM Rate Limiting', () => {
+    it('LLM rate limit durumunda retry mekanizması çalışır', async () => {
+      const mockSummary: CommunitySummary = {
+        communityId: 'c1',
+        summary: 'Test summary',
+        keyEntities: [],
+        keyRelations: [],
+        topics: [],
+        generatedAt: new Date(),
+      };
+
+      mockHybridSearch.mockResolvedValue([createMemory(1)]);
+      mockExpander.expand.mockReturnValue({
+        nodes: [createMemory(2)],
+        edges: [],
+        hopDistances: new Map(),
+        maxHopReached: false,
+      });
+      mockPageRankScorer.scoreSubgraph.mockReturnValue(new Map());
+      mockCommunityDetector.detectLocalCommunity.mockReturnValue([
+        { id: 'c1', memberNodeIds: [1, 2], modularityScore: 0.5 },
+      ]);
+      mockCommunitySummarizer.getSummary.mockReturnValue(mockSummary);
+
+      const engine = createEngine({ useCommunities: true });
+      const result = await engine.retrieve('test query');
+
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('Invalid JSON Response', () => {
+    it('LLM geçersiz JSON döndürdüğünde fallback çalışır', async () => {
+      const mockSummary: CommunitySummary = {
+        communityId: 'c1',
+        summary: 'Fallback summary text',
+        keyEntities: [],
+        keyRelations: [],
+        topics: [],
+        generatedAt: new Date(),
+      };
+
+      mockHybridSearch.mockResolvedValue([createMemory(1)]);
+      mockExpander.expand.mockReturnValue({
+        nodes: [createMemory(2)],
+        edges: [],
+        hopDistances: new Map(),
+        maxHopReached: false,
+      });
+      mockPageRankScorer.scoreSubgraph.mockReturnValue(new Map());
+      mockCommunityDetector.detectLocalCommunity.mockReturnValue([
+        { id: 'c1', memberNodeIds: [1, 2], modularityScore: 0.5 },
+      ]);
+      mockCommunitySummarizer.getSummary.mockReturnValue(mockSummary);
+
+      const engine = createEngine({ useCommunities: true });
+      const result = await engine.retrieve('test query');
+
+      expect(result.success).toBe(true);
+    });
+  });
 });

@@ -27,3 +27,54 @@ export function formatFileSize(bytes?: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+/**
+ * <think> etiketlerini ve içeriklerini temizler
+ */
+export function stripThinkTags(text?: string): string {
+  if (!text) return '';
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\/?think>/gi, '')
+    .trim();
+}
+
+/**
+ * Timestamp'i saat:dakika formatında döndürür
+ */
+export function formatTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * Timestamp'i göreli zaman olarak döndürür ("az önce", "2 dk", "dün 14:30")
+ */
+export function formatRelativeTime(timestamp?: string): string {
+  if (!timestamp) return '';
+  const date = new Date(normalizeTimestamp(timestamp));
+  if (Number.isNaN(date.getTime())) return '';
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  const diffHour = Math.floor(diffMs / 3_600_000);
+  const diffDay = Math.floor(diffMs / 86_400_000);
+
+  if (diffMin < 1) return 'az önce';
+  if (diffMin < 60) return `${diffMin} dk`;
+  if (diffHour < 24 && date.toDateString() === now.toDateString()) {
+    return `${diffHour} sa`;
+  }
+  
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) {
+    return `dün ${date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`;
+  }
+
+  if (diffDay < 7) return `${diffDay} gün`;
+  return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+}

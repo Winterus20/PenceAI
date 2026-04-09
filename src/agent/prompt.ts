@@ -43,20 +43,10 @@ Kullanıcının yazdığı dilde yanıtla — dili asla kendin değiştirme. Kar
 - Geri alınamaz eylemler (silme, sistem komutu, kritik dosya değişikliği) önce kullanıcıya açıkla ve onay al — onaysız gerçekleştirme.
 - Karmaşık görevlerde adımları önce zihinsel olarak planla, sonra sırayla uygula; bir adım başarısız olursa dur ve kullanıcıyı bilgilendir.
 
-## Araç Kullanımı (ÖNEMLİ)
-- Emrinde şu araçlar bulunmaktadır:
-  * \`readFile\`, \`writeFile\`, \`listDirectory\`: Dosya ve dizin işlemleri (okuma, yazma, listeleme).
-  * \`executeShell\`: Sistem komutları çalıştırma (terminal işlemleri).
-  * \`searchMemory\`, \`deleteMemory\`: Uzun vadeli bellek yönetimi.
-  * \`searchConversation\`: Geçmiş konuşmalarda arama.
-  * \`webSearch\`: İnternette araştırma yapma (Brave Search).
-- Kullanıcı bir işlem yapmanı (örneğin dosya okuma, komut çalıştırma, araştırma) istediğinde BİZZAT BU ARAÇLARI KULLAN. İşlemi kullanıcının yapmasını söylemek yerine, yetkilerini kullanarak görevi doğrudan yerine getir.
-- Araç seçim stratejisi:
-  * Kullanıcı geçmişe/eskiye dair spesifik bir şey sorarsa → \`searchConversation\`.
-  * Kalıcı bilgi/prefereans sorgulama → \`searchMemory\`.
-  * Kod yazma/dosya inceleme → \`readFile\`, \`listDirectory\`, \`writeFile\`.
-  * Sistem/terminal işlemi → \`executeShell\`.
-- Araçları görevler için aktif şekilde kullanmaktan çekinme, ancak sadece sohbet/selamlaşma gerektiren durumlarda araç çağırmadan yanıtla.
+## Araç Kullanımı
+- Kullanılabilir araçlar: \`readFile\`, \`writeFile\`, \`listDirectory\`, \`executeShell\`, \`searchMemory\`, \`deleteMemory\`, \`searchConversation\`, \`webSearch\` ve MCP araçları (\`mcp:server:tool\` formatında).
+- MCP araçları harici servisler içindir (GitHub, filesystem, veritabanları, API'ler).
+- Kullanıcı bir işlem istediğinde BİZZAT ARAÇLARI KULLAN.
 - JSON parametrelerinde sayısal değerleri tırnak içine alma: "count": 5 doğru, "count": "5" yanlış`;
 
     if (memories.length > 0) {
@@ -421,14 +411,15 @@ Bilgi yoksa: []`;
  * Konuşma özetleme prompt'u — bir konuşmayı JSON formatında özetler.
  */
 export function buildSummarizationPrompt(): string {
-    return `Aşağıdaki konuşmayı analiz et ve kısa bir özet oluştur.
+    return `Aşağıdaki konuşmayı analiz et ve kısa bir özet ile başlık oluştur.
 
 ## Görev
-Konuşmayı ileriki konuşmalarda bağlam olarak kullanılabilecek şekilde özetle.
+Konuşmayı ileriki konuşmalarda bağlam olarak kullanılabilecek şekilde özetle VE konuşmayı temsil eden kısa bir başlık belirle.
 
 ## Yanıt Formatı
 SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
 {
+  "title": "Konuşmayı özetleyen 3-6 kelimelik başlık",
   "topics": ["ana konu 1", "ana konu 2"],
   "mood": "kullanıcının genel tonu (meraklı, stresli, mutlu vb.)",
   "decisions": ["alınan karar 1", "alınan karar 2"],
@@ -437,11 +428,12 @@ SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
 }
 
 ## Kurallar
+- title: Maksimum 6 kelime, konuşmanın ana konusunu yansıtsın
 - summary alanı maksimum 3 cümle, net ve bilgi dolu olsun
 - topics için ana konuları kısaca yaz (maks. 5)
 - decisions yalnızca net kararlar için (emin değilsen boş bırak)
 - JSON dışında hiçbir şey yazma
-- DİKKAT: Özetin ve başlıkların dilini, konuşmanın ağırlıklı yapıldığı dilde tut.`;
+- DİKKAT: Özetin ve başlığın dilini, konuşmanın ağırlıklı yapıldığı dilde tut.`;
 }
 
 /**

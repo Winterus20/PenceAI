@@ -20,6 +20,7 @@ import type { ConversationMessage, ChannelType } from '../../router/types.js';
 import { createEmbeddingProvider, type EmbeddingProvider } from '../embeddings.js';
 import { getConfig } from '../../gateway/config.js';
 import { logger } from '../../utils/logger.js';
+import { calculateCost } from '../../utils/costCalculator.js';
 import type { TaskQueue } from '../../autonomous/queue.js';
 import { MemoryGraphManager } from '../graph.js';
 import { MemoryRetrievalOrchestrator } from '../retrievalOrchestrator.js';
@@ -174,6 +175,14 @@ export class MemoryManager {
     logger.info('[Memory] ⚙️ TaskQueue bağlandı — Ebbinghaus güncellemeleri arka plana yönlendirilecek.');
   }
 
+  /**
+   * Ham veritabanı instance'ını döndürür.
+   * Gateway routes gibi harici katmanların doğrudan DB erişimi gerektirdiği durumlar için.
+   */
+  getDatabase(): Database.Database {
+    return this.db;
+  }
+
   // ========== Konuşma Yönetimi (ConversationManager'a delege) ==========
 
   getOrCreateConversation(
@@ -221,8 +230,8 @@ export class MemoryManager {
     return this.conversationManager.getRecentConversations(limit);
   }
 
-  updateConversationTitle(conversationId: string, title: string): void {
-    this.conversationManager.updateConversationTitle(conversationId, title);
+  updateConversationTitle(conversationId: string, title: string, isCustom: boolean = false): void {
+    this.conversationManager.updateConversationTitle(conversationId, title, isCustom);
   }
 
   updateConversationSummary(conversationId: string, summary: string): void {
@@ -713,6 +722,105 @@ export class MemoryManager {
       },
       ...overrides,
     };
+  }
+
+  // ============================================
+  // Token Usage Tracking
+  // ============================================
+
+  /**
+   * Yeni token usage kaydı ekler.
+   */
+  saveTokenUsage(record: {
+    provider: string;
+    model: string;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  }): void {
+    const cost = calculateCost(record.provider, record.model, record.promptTokens, record.completionTokens);
+    this.db.prepare(`
+      INSERT INTO token_usage (provider, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).run(record.provider, record.model, record.promptTokens, record.completionTokens, record.totalTokens, cost);
+  }
+
+  /**
+   * Toplam kullanım istatistiğini döndürür.
+   * @param period - 'day', 'week', 'month', 'all'
+   */
+  getTokenUsageStats(period: string = 'week'): {
+    totalTokens: number;
+    totalCost: number;
+    providerBreakdown: Record<string, { tokens: number; cost: number }>;
+  } {
+    const now = Math.floor(Date.now() / 1000);
+    let periodSeconds: number;
+    switch (period) {
+      case 'day': periodSeconds = 86400; break;
+      case 'week': periodSeconds = 604800; break;
+      case 'month': periodSeconds = 2592000; break;
+      default: periodSeconds = 0;
+    }
+
+    const whereClause = periodSeconds > 0 ? `WHERE created_at >= datetime(${now} - ${periodSeconds}, 'unixepoch')` : '';
+
+    const totalRow = this.db.prepare(`
+      SELECT
+        COALESCE(SUM(total_tokens), 0) as totalTokens,
+        COALESCE(SUM(estimated_cost_usd), 0) as totalCost
+      FROM token_usage ${whereClause}
+    `).get() as { totalTokens: number; totalCost: number };
+
+    const providerRows = this.db.prepare(`
+      SELECT
+        provider,
+        SUM(total_tokens) as tokens,
+        SUM(estimated_cost_usd) as cost
+      FROM token_usage ${whereClause}
+      GROUP BY provider
+      ORDER BY tokens DESC
+    `).all() as Array<{ provider: string; tokens: number; cost: number }>;
+
+    const providerBreakdown: Record<string, { tokens: number; cost: number }> = {};
+    for (const row of providerRows) {
+      providerBreakdown[row.provider] = { tokens: row.tokens, cost: row.cost };
+    }
+
+    return {
+      totalTokens: totalRow.totalTokens,
+      totalCost: totalRow.totalCost,
+      providerBreakdown,
+    };
+  }
+
+  /**
+   * Günlük kullanım serisini döndürür.
+   * @param period - 'day', 'week', 'month', 'all'
+   */
+  getDailyUsage(period: string = 'week'): Array<{ date: string; tokens: number; cost: number }> {
+    const now = Math.floor(Date.now() / 1000);
+    let periodSeconds: number;
+    switch (period) {
+      case 'day': periodSeconds = 86400; break;
+      case 'week': periodSeconds = 604800; break;
+      case 'month': periodSeconds = 2592000; break;
+      default: periodSeconds = 0;
+    }
+
+    const whereClause = periodSeconds > 0 ? `WHERE created_at >= datetime(${now} - ${periodSeconds}, 'unixepoch')` : '';
+
+    const rows = this.db.prepare(`
+      SELECT
+        DATE(created_at) as date,
+        SUM(total_tokens) as tokens,
+        SUM(estimated_cost_usd) as cost
+      FROM token_usage ${whereClause}
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `).all() as Array<{ date: string; tokens: number; cost: number }>;
+
+    return rows.map(r => ({ date: r.date, tokens: r.tokens, cost: r.cost }));
   }
 }
 

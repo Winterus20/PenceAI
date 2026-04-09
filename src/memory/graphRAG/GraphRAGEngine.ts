@@ -184,6 +184,7 @@ export class GraphRAGEngine {
   async retrieve(query: string, options?: Partial<GraphRAGConfig>): Promise<GraphRAGResult> {
     const startTime = Date.now();
     const config = { ...this.config, ...options };
+    const phaseTimings: Record<string, number> = {};
 
     // Feature flag kontrolü
     if (!GRAPH_RAG_ENABLED) {
@@ -192,42 +193,58 @@ export class GraphRAGEngine {
 
     try {
       // Phase 1: Standard hybrid search (baseline)
+      const phase1Start = Date.now();
       const initialResults = await this.runWithTimeout(
         () => this.hybridSearchFn(query, config.maxExpandedNodes),
         config.timeoutMs,
         'initial_search',
       );
+      phaseTimings.initial_search = Date.now() - phase1Start;
+      logger.info(`[GraphRAGEngine] ⏱️ Phase 1 (initial_search): ${phaseTimings.initial_search}ms (${initialResults.length} results)`);
 
       if (initialResults.length === 0) {
         return this.buildEmptyResult(startTime, false);
       }
 
       // Phase 2: Graph expansion
+      const phase2Start = Date.now();
       const expansion = await this.runExpansion(initialResults, config, startTime);
+      phaseTimings.expansion = Date.now() - phase2Start;
+      logger.info(`[GraphRAGEngine] ⏱️ Phase 2 (expansion): ${phaseTimings.expansion}ms (success: ${expansion.success})`);
       if (!expansion.success) {
         return expansion.fallback ?? this.fallbackToStandard(query, config, startTime, false);
       }
 
       // Phase 3: PageRank scoring
+      const phase3Start = Date.now();
       const scoring = await this.runScoring(expansion.result, config, startTime);
+      phaseTimings.scoring = Date.now() - phase3Start;
+      logger.info(`[GraphRAGEngine] ⏱️ Phase 3 (scoring): ${phaseTimings.scoring}ms (success: ${scoring.success})`);
       if (!scoring.success) {
         return scoring.fallback ?? this.fallbackToStandard(query, config, startTime, false);
       }
 
       // Phase 4: Community detection
+      const phase4Start = Date.now();
       const community = await this.runCommunityDetection(scoring.result, expansion.result, config, startTime);
+      phaseTimings.community = Date.now() - phase4Start;
+      logger.info(`[GraphRAGEngine] ⏱️ Phase 4 (community): ${phaseTimings.community}ms (success: ${community.success})`);
       if (!community.success) {
         // Community detection başarısız olsa bile devam et
         logger.warn('[GraphRAGEngine] Community detection failed, continuing without communities');
       }
 
       // Phase 5: Summary generation
+      const phase5Start = Date.now();
       const summary = await this.runSummarization(community.result, config, startTime);
+      phaseTimings.summary = Date.now() - phase5Start;
+      logger.info(`[GraphRAGEngine] ⏱️ Phase 5 (summary): ${phaseTimings.summary}ms (success: ${summary.success})`);
       if (!summary.success) {
         logger.warn('[GraphRAGEngine] Summary generation failed, continuing without summaries');
       }
 
       // Phase 6: Token pruning ve fusion
+      const phase6Start = Date.now();
       const fusionResult = await this.runFusion(
         {
           initialResults,
@@ -239,6 +256,12 @@ export class GraphRAGEngine {
         config,
         startTime,
       );
+      phaseTimings.fusion = Date.now() - phase6Start;
+      logger.info(`[GraphRAGEngine] ⏱️ Phase 6 (fusion): ${phaseTimings.fusion}ms`);
+
+      // Toplam süre logu
+      const totalDuration = Date.now() - startTime;
+      logger.info(`[GraphRAGEngine] ⏱️ TOTAL GraphRAG retrieval: ${totalDuration}ms | Breakdown: ${JSON.stringify(phaseTimings)}`);
 
       return fusionResult;
     } catch (err) {

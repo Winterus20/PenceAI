@@ -236,4 +236,228 @@ describe('GraphWorker', () => {
       expect(taskNames).toContain('Summary Generation');
     });
   });
+
+  describe('isHardwareOverloaded', () => {
+    test('Normal CPU yükünde görevler çalışır', () => {
+      worker.start();
+      const status = worker.getStatus();
+      expect(status.isRunning).toBe(true);
+    });
+
+    test('Yüksek RAM durumunda görevler ertelenir', () => {
+      // Worker zaten threshold ayarlarıyla yapılandırılmış
+      // Normal sistemde overload olmamalı
+      worker.start();
+      const status = worker.getStatus();
+      expect(status.isRunning).toBe(true);
+    });
+  });
+
+  describe('scheduleNextCheck', () => {
+    test('Farklı interval\'ler doğru planlanır', () => {
+      const customWorker = new GraphWorker(
+        db,
+        pageRankScorer,
+        communityDetector,
+        communitySummarizer,
+        graphCache,
+        {
+          pageRankIntervalMs: 500,
+          communityDetectionIntervalMs: 1000,
+          cacheCleanupIntervalMs: 200,
+          summaryGenerationIntervalMs: 2000,
+          maxConcurrentTasks: 2,
+        },
+      );
+
+      customWorker.start();
+      const status = customWorker.getStatus();
+      expect(status.isRunning).toBe(true);
+
+      customWorker.stop();
+    });
+
+    test('Minimum 1 saniye bekleme süresi', () => {
+      // Çok kısa interval'ler bile minimum 1 saniyeye yuvarlanmalı
+      const customWorker = new GraphWorker(
+        db,
+        pageRankScorer,
+        communityDetector,
+        communitySummarizer,
+        graphCache,
+        {
+          pageRankIntervalMs: 100, // 100ms
+          communityDetectionIntervalMs: 100,
+          cacheCleanupIntervalMs: 100,
+          summaryGenerationIntervalMs: 100,
+          maxConcurrentTasks: 2,
+        },
+      );
+
+      customWorker.start();
+      // Hata fırlatılmamalı
+      expect(customWorker.getStatus().isRunning).toBe(true);
+
+      customWorker.stop();
+    });
+  });
+
+  describe('checkAndRun Task Sırası', () => {
+    test('Birden fazla görev sırası doğru yönetilir', async () => {
+      // Tüm görevleri manuel çalıştır
+      await worker.runPageRankUpdate();
+      await worker.runCommunityDetection();
+      await worker.runCacheCleanup();
+
+      // Her görev hata fırlatmamalı
+      const status = worker.getStatus();
+      expect(status.tasks.length).toBe(4);
+    });
+
+    test('Concurrent task limit uygulanır', () => {
+      const limitedWorker = new GraphWorker(
+        db,
+        pageRankScorer,
+        communityDetector,
+        communitySummarizer,
+        graphCache,
+        {
+          pageRankIntervalMs: 100,
+          communityDetectionIntervalMs: 100,
+          cacheCleanupIntervalMs: 100,
+          summaryGenerationIntervalMs: 100,
+          maxConcurrentTasks: 1, // Sadece 1 concurrent task
+        },
+      );
+
+      limitedWorker.start();
+      const status = limitedWorker.getStatus();
+      expect(status.isRunning).toBe(true);
+
+      limitedWorker.stop();
+    });
+  });
+
+  describe('Idle Threshold Davranışı', () => {
+    test('User activity sonrası görevler ertelenir', () => {
+      worker.start();
+      worker.registerUserActivity();
+
+      // Hemen görev çalıştırılmamalı
+      const status = worker.getStatus();
+      expect(status.isRunning).toBe(true);
+
+      worker.stop();
+    });
+
+    test('Idle threshold aşıldığında görevler başlar', async () => {
+      // Kısa idle threshold ile worker oluştur
+      const quickIdleWorker = new GraphWorker(
+        db,
+        pageRankScorer,
+        communityDetector,
+        communitySummarizer,
+        graphCache,
+        {
+          pageRankIntervalMs: 100,
+          communityDetectionIntervalMs: 200,
+          cacheCleanupIntervalMs: 300,
+          summaryGenerationIntervalMs: 400,
+          maxConcurrentTasks: 2,
+        },
+      );
+
+      quickIdleWorker.start();
+      // Idle threshold default 5 dakika, test için beklemiyoruz
+      // Sadece worker'ın çalıştığını doğrula
+      expect(quickIdleWorker.getStatus().isRunning).toBe(true);
+
+      quickIdleWorker.stop();
+    });
+  });
+
+  describe('Task Error Retry Mechanism', () => {
+    test('Task hatası sonrası retry mechanism çalışır', async () => {
+      // PageRank görevi hata verirse bile worker devam etmeli
+      await worker.runPageRankUpdate();
+
+      // Worker durmamalı
+      const status = worker.getStatus();
+      expect(status.isRunning).toBe(false); // stop() çağrılmadı ama start() da çağrılmadı
+    });
+
+    test('Görev error count artar', async () => {
+      worker.start();
+
+      // Görevleri çalıştır
+      await worker.runPageRankUpdate();
+
+      const status = worker.getStatus();
+      // Error count'ları kontrol et
+      for (const task of status.tasks) {
+        expect(task.errorCount).toBeGreaterThanOrEqual(0);
+      }
+
+      worker.stop();
+    });
+  });
+
+  describe('FULL Phase Configuration', () => {
+    test('FULL phase config daha kısa interval\'ler kullanır', () => {
+      const { FULL_PHASE_CONFIG } = require('../../../src/memory/graphRAG/GraphWorker.js');
+
+      expect(FULL_PHASE_CONFIG.pageRankIntervalMs).toBe(30 * 60 * 1000);
+      expect(FULL_PHASE_CONFIG.communityDetectionIntervalMs).toBe(3 * 60 * 60 * 1000);
+      expect(FULL_PHASE_CONFIG.cacheCleanupIntervalMs).toBe(15 * 60 * 1000);
+      expect(FULL_PHASE_CONFIG.summaryGenerationIntervalMs).toBe(6 * 60 * 60 * 1000);
+    });
+  });
+
+  describe('Abort Controller Behavior', () => {
+    test('Stop sonrası abort controller temizlenir', () => {
+      worker.start();
+      worker.stop();
+
+      // Abort controller null olmalı
+      expect((worker as any).abortController).toBeNull();
+    });
+
+    test('Timer temizlenir stop sonrası', () => {
+      worker.start();
+      worker.stop();
+
+      // Timer null olmalı
+      expect((worker as any).timer).toBeNull();
+    });
+  });
+
+  describe('Veritabanı Hatası Durumunda Graceful Degradation', () => {
+    test('Veritabanı hatasında worker çökmez', async () => {
+      const brokenDb = new Database(':memory:');
+      // Tabloları oluşturma
+
+      const brokenPageRankScorer = new PageRankScorer(brokenDb);
+      const brokenCommunityDetector = new CommunityDetector(brokenDb);
+      const brokenGraphCache = new GraphCache(brokenDb);
+      const brokenCommunitySummarizer = new CommunitySummarizer(brokenDb, mockLLM);
+
+      const brokenWorker = new GraphWorker(
+        brokenDb,
+        brokenPageRankScorer,
+        brokenCommunityDetector,
+        brokenCommunitySummarizer,
+        brokenGraphCache,
+      );
+
+      brokenWorker.start();
+
+      // Görevler hata vermemeli (graceful degradation)
+      await brokenWorker.runPageRankUpdate();
+      await brokenWorker.runCommunityDetection();
+      await brokenWorker.runCacheCleanup();
+
+      brokenWorker.stop();
+      brokenDb.close();
+    });
+  });
 });

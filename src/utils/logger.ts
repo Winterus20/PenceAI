@@ -2,13 +2,12 @@ import pino from 'pino';
 import { AsyncLocalStorage } from 'async_hooks';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { platform } from 'os';
 import { execSync } from 'child_process';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = path.resolve(__dirname, '../..');
+// Jest CommonJS ve ESM uyumluluğu: process.cwd() kullan
+const PROJECT_ROOT = process.cwd();
 const LOG_DIR = path.join(PROJECT_ROOT, 'logs');
 
 // Windows için UTF-8 encoding desteği - en başta çalıştırılmalı

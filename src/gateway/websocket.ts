@@ -300,7 +300,7 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
             try {
                 const data = JSON.parse(raw.toString());
 
-                if (data.type === 'chat' && data.content) {
+                if (data.type === 'chat' && (data.content || (data.attachments && data.attachments.length > 0))) {
                   if (typeof data.content === 'string' && data.content.length > WS_CONFIG.maxMessageLength) {
                     ws.send(JSON.stringify({ type: 'error', message: `Mesaj çok uzun (maksimum ${WS_CONFIG.maxMessageLength.toLocaleString('tr-TR')} karakter)` }));
                         return;

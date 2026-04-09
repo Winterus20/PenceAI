@@ -177,79 +177,53 @@ describe('GraphCache', () => {
 
   describe('TTL expiration', () => {
     test('Süresi dolmuş entry null döner', () => {
-      // Doğrudan SQLite datetime formatı kullan (UTC)
-      const pastDate = '2020-01-01 00:00:00';
-      const entry: GraphCacheEntry = {
-        queryHash: 'expired-hash',
-        maxDepth: 2,
-        nodeIds: [1, 2],
-        relationIds: [10],
-        score: 1.0,
-        createdAt: new Date(pastDate + 'Z'),
-        expiresAt: new Date(pastDate + 'Z'),
-      };
+      // UTC formatında geçmiş tarihli entry ekle (SQLite CURRENT_TIMESTAMP UTC kullanır)
+      const now = new Date();
+      const pastDate = new Date(now.getTime() - 7200 * 1000).toISOString().replace('T', ' ').substring(0, 19);
+      db.prepare(`
+        INSERT INTO graph_traversal_cache (query_hash, max_depth, node_ids, relation_ids, score, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run('expired-hash', 2, JSON.stringify([1, 2]), JSON.stringify([10]), 1.0, pastDate, pastDate);
 
-      cache.set(entry);
       const retrieved = cache.get('expired-hash', 2);
-
       expect(retrieved).toBeNull();
     });
 
     test('Süresi dolmamış entry döner', () => {
-      const futureDate = '2030-01-01 00:00:00';
-      const entry: GraphCacheEntry = {
-        queryHash: 'valid-hash',
-        maxDepth: 2,
-        nodeIds: [1, 2],
-        relationIds: [10],
-        score: 1.0,
-        createdAt: new Date(),
-        expiresAt: new Date(futureDate + 'Z'),
-      };
+      const futureDate = new Date(Date.now() + 3600 * 1000).toISOString().replace('T', ' ').substring(0, 19);
+      db.prepare(`
+        INSERT INTO graph_traversal_cache (query_hash, max_depth, node_ids, relation_ids, score, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run('valid-hash', 2, JSON.stringify([1, 2]), JSON.stringify([10]), 1.0, futureDate, futureDate);
 
-      cache.set(entry);
       const retrieved = cache.get('valid-hash', 2);
-
       expect(retrieved).not.toBeNull();
     });
   });
 
   describe('cleanup', () => {
     test('Süresi dolmuş entryler temizlenir', () => {
-      const pastDate = '2020-01-01 00:00:00';
-      const futureDate = '2030-01-01 00:00:00';
+      // UTC formatında tarihler kullan (SQLite CURRENT_TIMESTAMP UTC kullanır)
+      const now = new Date();
+      const pastDate = new Date(now.getTime() - 7200 * 1000).toISOString().replace('T', ' ').substring(0, 19);
+      const futureDate = new Date(now.getTime() + 3600 * 1000).toISOString().replace('T', ' ').substring(0, 19);
 
-      // Süresi dolmuş entry
-      cache.set({
-        queryHash: 'expired-1',
-        maxDepth: 1,
-        nodeIds: [1],
-        relationIds: [1],
-        score: 1.0,
-        createdAt: new Date(pastDate + 'Z'),
-        expiresAt: new Date(pastDate + 'Z'),
-      });
+      // Süresi dolmuş entryler (doğrudan SQL ile)
+      db.prepare(`
+        INSERT INTO graph_traversal_cache (query_hash, max_depth, node_ids, relation_ids, score, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run('expired-1', 1, JSON.stringify([1]), JSON.stringify([1]), 1.0, pastDate, pastDate);
 
-      cache.set({
-        queryHash: 'expired-2',
-        maxDepth: 2,
-        nodeIds: [2],
-        relationIds: [2],
-        score: 2.0,
-        createdAt: new Date(pastDate + 'Z'),
-        expiresAt: new Date(pastDate + 'Z'),
-      });
+      db.prepare(`
+        INSERT INTO graph_traversal_cache (query_hash, max_depth, node_ids, relation_ids, score, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run('expired-2', 2, JSON.stringify([2]), JSON.stringify([2]), 2.0, pastDate, pastDate);
 
       // Süresi dolmamış entry
-      cache.set({
-        queryHash: 'valid-1',
-        maxDepth: 1,
-        nodeIds: [3],
-        relationIds: [3],
-        score: 3.0,
-        createdAt: new Date(),
-        expiresAt: new Date(futureDate + 'Z'),
-      });
+      db.prepare(`
+        INSERT INTO graph_traversal_cache (query_hash, max_depth, node_ids, relation_ids, score, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run('valid-1', 1, JSON.stringify([3]), JSON.stringify([3]), 3.0, futureDate, futureDate);
 
       const cleaned = cache.cleanup();
 
@@ -268,7 +242,7 @@ describe('GraphCache', () => {
         score: 1.0,
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 3600 * 1000),
-      });
+      }, 3600);
 
       const cleaned = cache.cleanup();
       expect(cleaned).toBe(0);
@@ -327,39 +301,27 @@ describe('GraphCache', () => {
 
   describe('getStats', () => {
     test('Cache istatistikleri doğru hesaplanır', () => {
-      const pastDate = '2020-01-01 00:00:00';
-      const futureDate = '2030-01-01 00:00:00';
+      // UTC formatında tarihler kullan (SQLite CURRENT_TIMESTAMP UTC kullanır)
+      const now = new Date();
+      const pastDate = new Date(now.getTime() - 7200 * 1000).toISOString().replace('T', ' ').substring(0, 19);
+      const futureDate = new Date(now.getTime() + 3600 * 1000).toISOString().replace('T', ' ').substring(0, 19);
 
       // 2 geçerli entry
-      cache.set({
-        queryHash: 'valid-1',
-        maxDepth: 1,
-        nodeIds: [1],
-        relationIds: [1],
-        score: 1.0,
-        createdAt: new Date(),
-        expiresAt: new Date(futureDate + 'Z'),
-      });
-      cache.set({
-        queryHash: 'valid-2',
-        maxDepth: 2,
-        nodeIds: [2],
-        relationIds: [2],
-        score: 2.0,
-        createdAt: new Date(),
-        expiresAt: new Date(futureDate + 'Z'),
-      });
+      db.prepare(`
+        INSERT INTO graph_traversal_cache (query_hash, max_depth, node_ids, relation_ids, score, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run('valid-1', 1, JSON.stringify([1]), JSON.stringify([1]), 1.0, futureDate, futureDate);
+
+      db.prepare(`
+        INSERT INTO graph_traversal_cache (query_hash, max_depth, node_ids, relation_ids, score, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run('valid-2', 2, JSON.stringify([2]), JSON.stringify([2]), 2.0, futureDate, futureDate);
 
       // 1 süresi dolmuş entry
-      cache.set({
-        queryHash: 'expired-1',
-        maxDepth: 1,
-        nodeIds: [3],
-        relationIds: [3],
-        score: 3.0,
-        createdAt: new Date(pastDate + 'Z'),
-        expiresAt: new Date(pastDate + 'Z'),
-      });
+      db.prepare(`
+        INSERT INTO graph_traversal_cache (query_hash, max_depth, node_ids, relation_ids, score, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run('expired-1', 1, JSON.stringify([3]), JSON.stringify([3]), 3.0, pastDate, pastDate);
 
       const stats = cache.getStats();
 

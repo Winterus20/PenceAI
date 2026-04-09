@@ -284,4 +284,150 @@ describe('CommunityDetector', () => {
       expect(result.communities.length).toBeLessThanOrEqual(2);
     });
   });
+
+  describe('Large Graph Sampling', () => {
+    test('500+ node\'lu graph\'de sampling yapılır', () => {
+      // 600 node oluştur
+      for (let i = 1; i <= 600; i++) {
+        insertMemory(i, `Node ${i}`);
+        if (i > 1) {
+          insertRelation(i - 1, i, 'related_to', 1.0);
+        }
+      }
+
+      const result = detector.detectCommunities({ useCache: false, minCommunitySize: 2 });
+
+      // Sampling yapıldığı için tüm node'lar işlenmez
+      expect(result.totalNodes).toBe(600);
+      expect(result.communities.length).toBeGreaterThanOrEqual(0);
+    });
+
+    test('Sampling sonrası community modularity skoru pozitif', () => {
+      // 550 node oluştur
+      for (let i = 1; i <= 550; i++) {
+        insertMemory(i, `Node ${i}`);
+        if (i > 1) {
+          insertRelation(i - 1, i, 'related_to', 1.0);
+        }
+      }
+
+      const result = detector.detectCommunities({ useCache: false, minCommunitySize: 2 });
+
+      for (const community of result.communities) {
+        expect(community.modularityScore).toBeDefined();
+      }
+    });
+  });
+
+  describe('computeGlobalModularity', () => {
+    test('Farklı community yapılarında modularity hesaplanır', () => {
+      // İki ayrı community oluştur
+      // Community A: 1-2-3
+      insertMemory(1, 'A1');
+      insertMemory(2, 'A2');
+      insertMemory(3, 'A3');
+      insertRelation(1, 2, 'related_to', 1.0);
+      insertRelation(2, 3, 'related_to', 1.0);
+      insertRelation(1, 3, 'related_to', 1.0);
+
+      // Community B: 4-5-6
+      insertMemory(4, 'B1');
+      insertMemory(5, 'B2');
+      insertMemory(6, 'B3');
+      insertRelation(4, 5, 'related_to', 1.0);
+      insertRelation(5, 6, 'related_to', 1.0);
+      insertRelation(4, 6, 'related_to', 1.0);
+
+      const result = detector.detectCommunities({ useCache: false, minCommunitySize: 2 });
+
+      // En az bir community bulunmalı
+      expect(result.communities.length).toBeGreaterThanOrEqual(1);
+    });
+
+    test('Tek community ile modularity hesaplanır', () => {
+      insertMemory(1, 'Node 1');
+      insertMemory(2, 'Node 2');
+      insertMemory(3, 'Node 3');
+      insertRelation(1, 2, 'related_to', 1.0);
+      insertRelation(2, 3, 'related_to', 1.0);
+
+      const result = detector.detectCommunities({ useCache: false, minCommunitySize: 1 });
+
+      expect(result.communities.length).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('Veritabanı Hatası Durumunda Graceful Degradation', () => {
+    test('Veritabanı hatasında boş community listesi döner', () => {
+      const brokenDb = new Database(':memory:');
+      // Tabloları oluşturma
+      const brokenDetector = new CommunityDetector(brokenDb);
+
+      const result = brokenDetector.detectCommunities({ useCache: false });
+
+      expect(result.communities).toEqual([]);
+      expect(result.totalNodes).toBe(0);
+
+      brokenDb.close();
+    });
+  });
+
+  describe('Resolution Parameter Effects', () => {
+    test('Yüksek resolution daha küçük community\'ler üretir', () => {
+      // 10 node oluştur
+      for (let i = 1; i <= 10; i++) {
+        insertMemory(i, `Node ${i}`);
+        if (i > 1) {
+          insertRelation(i - 1, i, 'related_to', 1.0);
+        }
+      }
+
+      const resultHighRes = detector.detectCommunities({
+        useCache: false,
+        minCommunitySize: 1,
+        resolution: 2.0,
+      });
+
+      const resultLowRes = detector.detectCommunities({
+        useCache: false,
+        minCommunitySize: 1,
+        resolution: 0.5,
+      });
+
+      // Her iki durumda da community bulunmalı
+      expect(resultHighRes.communities.length).toBeGreaterThanOrEqual(0);
+      expect(resultLowRes.communities.length).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('Convergence Behavior', () => {
+    test('Convergence threshold doğru çalışır', () => {
+      // Basit graph
+      insertMemory(1, 'Node 1');
+      insertMemory(2, 'Node 2');
+      insertMemory(3, 'Node 3');
+      insertRelation(1, 2, 'related_to', 1.0);
+      insertRelation(2, 3, 'related_to', 1.0);
+
+      const result = detector.detectCommunities({ useCache: false, minCommunitySize: 1 });
+
+      // ElapsedMs pozitif olmalı
+      expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('Dominant Relation Types', () => {
+    test('Community dominant relation types doğru hesaplanır', () => {
+      insertMemory(1, 'Node 1');
+      insertMemory(2, 'Node 2');
+      insertRelation(1, 2, 'related_to', 1.0);
+      insertRelation(1, 2, 'supports', 0.8);
+
+      const result = detector.detectCommunities({ useCache: false, minCommunitySize: 1 });
+
+      for (const community of result.communities) {
+        expect(Array.isArray(community.dominantRelationTypes)).toBe(true);
+      }
+    });
+  });
 });

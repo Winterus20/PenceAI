@@ -96,7 +96,36 @@ export const MAX_NEIGHBORS_PER_HOP = 5;
 export const MAX_ASSOCIATIONS = 8;
 
 /** Minimum ilişki güven eşiği — bunun altındaki ilişkiler takip edilmez */
-export const MIN_RELATION_CONFIDENCE = 0.35;
+export const MIN_RELATION_CONFIDENCE = 0.25; // 0.35'ten 0.25'e düşürüldü
+
+/** Yönlendirme soru şablonları — her düşüncede farklı bir soru seçilir */
+export const REFLECTION_QUESTION_TEMPLATES = [
+    [
+        "Bu çağrışımlar seni neye götürüyor? Yeni bir merak noktası var mı?",
+        "Bu düşünce kullanıcıyla paylaşılacak kadar değerli mi?",
+        "Bir araştırma konusu (sub-agent görevi) çıkıyor mu?"
+    ],
+    [
+        "Bu anılar arasında gizli bir bağlantı var mı? Kullanıcı farkında olmadan bir pattern oluşturuyor mu?",
+        "Bu bilgiler zamanla değişmiş mi? Kullanıcının alışkanlıkları hakkında ne söylüyor?",
+        "Kullanıcının bu konudaki duygusal tonu ne? Olumlu mu, olumsuz mu, nötr mü?"
+    ],
+    [
+        "Bu çağrışımlar kullanıcının ilgi alanlarıyla ne kadar örtüşüyor?",
+        "Bu konuda kullanıcıya proaktif bir öneri sunulmalı mı?",
+        "Bu bilgi gelecekte hangi durumlarda faydalı olabilir?"
+    ],
+    [
+        "Kullanıcının bu konudaki bilgi seviyesi ne? Yeni bir şey mi öğreniyor, yoksa bildiğini mi tekrar ediyor?",
+        "Bu anılar kullanıcının hedefleriyle ilgili mi? Destekleyici bir rol oynuyor mu?",
+        "Bu konuda derinlemesine araştırma yapılmalı mı?"
+    ],
+    [
+        "Bu düşünce kullanıcının günlük rutinine uygun mu?",
+        "Kullanıcı şu anda meşgul görünüyor mu, yoksa bu mesajı almak için uygun mu?",
+        "Bu bilgi acil mi yoksa bekleyebilir mi?"
+    ]
+];
 
 // ═══════════════════════════════════════════════════════════
 //  Tohum Seçimi (Seed Selection)
@@ -111,7 +140,29 @@ export const MIN_RELATION_CONFIDENCE = 0.35;
  *   2. Yüksek önemli bir anı (importance >= 7)
  *   3. Rastgele aktif bir anı (keşif modu — fallback)
  */
-export function selectSeed(db: Database.Database): ThoughtSeed | null {
+export function selectSeed(
+    db: Database.Database,
+    recentlySelectedSeedId?: number,
+    cooldownMinutes: number = 30
+): ThoughtSeed | null {
+    // Eğer recentlySelectedSeedId verilmişse, bu belleğin son erişim zamanını kontrol et
+    if (recentlySelectedSeedId) {
+        const seedInfo = db.prepare(`
+            SELECT last_accessed FROM memories WHERE id = ?
+        `).get(recentlySelectedSeedId) as { last_accessed: string } | undefined;
+
+        if (seedInfo && seedInfo.last_accessed) {
+            const lastAccessed = new Date(seedInfo.last_accessed).getTime();
+            const elapsed = Date.now() - lastAccessed;
+            const cooldownMs = cooldownMinutes * 60 * 1000;
+
+            if (elapsed < cooldownMs) {
+                // Cooldown süresi dolmamış, bu seed'i atla
+                logger.debug(`[ThinkEngine] Seed #${recentlySelectedSeedId} cooldown'da (${Math.ceil((cooldownMs - elapsed) / 60000)} dk kaldı)`);
+            }
+        }
+    }
+
     // Strateji 1: Son erişilen taze anı (son 24 saat)
     const recentMemory = db.prepare(`
         SELECT id, content, importance, stability, last_accessed
@@ -119,6 +170,7 @@ export function selectSeed(db: Database.Database): ThoughtSeed | null {
         WHERE is_archived = 0
             AND last_accessed IS NOT NULL
             AND last_accessed > datetime('now', '-1 day')
+            ${recentlySelectedSeedId ? `AND id != ${recentlySelectedSeedId}` : ''}
         ORDER BY last_accessed DESC
         LIMIT 5
     `).all() as Array<MemoryRow>;
@@ -143,6 +195,7 @@ export function selectSeed(db: Database.Database): ThoughtSeed | null {
         SELECT id, content, importance, stability, last_accessed
         FROM memories
         WHERE is_archived = 0 AND importance >= 7
+            ${recentlySelectedSeedId ? `AND id != ${recentlySelectedSeedId}` : ''}
         ORDER BY importance DESC, RANDOM()
         LIMIT 1
     `).get() as MemoryRow | undefined;
@@ -167,6 +220,7 @@ export function selectSeed(db: Database.Database): ThoughtSeed | null {
         SELECT id, content, importance, stability, last_accessed
         FROM memories
         WHERE is_archived = 0
+            ${recentlySelectedSeedId ? `AND id != ${recentlySelectedSeedId}` : ''}
         ORDER BY RANDOM()
         LIMIT 1
     `).get() as MemoryRow | undefined;
@@ -212,6 +266,9 @@ export function graphWalk(
         const nextLayer: number[] = [];
 
         for (const nodeId of currentLayer) {
+            // Hop bazlı güven eşiği: 1-hop için daha düşük, 2-hop için daha yüksek
+            const hopConfidenceThreshold = hop === 1 ? 0.25 : 0.35;
+
             // 1-hop komşuları al (confidence sıralı)
             const neighbors = db.prepare(`
                 SELECT
@@ -228,7 +285,7 @@ export function graphWalk(
                     AND mr.confidence >= ?
                 ORDER BY mr.confidence DESC
                 LIMIT ?
-            `).all(nodeId, nodeId, MIN_RELATION_CONFIDENCE, MAX_NEIGHBORS_PER_HOP) as Array<MemoryRow & {
+            `).all(nodeId, nodeId, hopConfidenceThreshold, MAX_NEIGHBORS_PER_HOP) as Array<MemoryRow & {
                 confidence: number;
                 relation_description: string;
             }>;
@@ -237,15 +294,18 @@ export function graphWalk(
                 if (visited.has(neighbor.id)) continue;
                 visited.add(neighbor.id);
 
-                // Ebbinghaus tazelik kontrolü
+                // Ebbinghaus tazelik kontrolü — hop bazlı eşik ile
                 const retention = computeRetention(
                     neighbor.stability ?? neighbor.importance * 2.0,
                     daysSinceAccess(neighbor.last_accessed)
                 );
 
-                if (retention < FRESHNESS_THRESHOLD) {
+                // 1-hop komşular için daha düşük retention eşiği (daha fazla keşif)
+                const hopFreshnessThreshold = hop === 1 ? FRESHNESS_THRESHOLD * 0.7 : FRESHNESS_THRESHOLD;
+
+                if (retention < hopFreshnessThreshold) {
                     logger.debug(
-                        `[ThinkEngine] Skipped memory #${neighbor.id} — stale (retention: ${retention.toFixed(2)} < ${FRESHNESS_THRESHOLD})`
+                        `[ThinkEngine] Skipped memory #${neighbor.id} — stale (retention: ${retention.toFixed(2)} < ${hopFreshnessThreshold.toFixed(2)})`
                     );
                     continue; // Bayat anı — atla
                 }
@@ -327,7 +387,10 @@ export function buildThoughtChain(
  * @param chain — Düşünce zinciri
  * @returns LLM-ready iç ses prompt'u
  */
-export function synthesizeThoughtPrompt(chain: ThoughtChain): string {
+export function synthesizeThoughtPrompt(
+    chain: ThoughtChain,
+    questionTemplateIndex?: number
+): string {
     const { seed, associations, emotionalContext } = chain;
 
     // İç ses başlığı
@@ -363,12 +426,20 @@ export function synthesizeThoughtPrompt(chain: ThoughtChain): string {
         prompt += `Bu düşünceye bağlı taze bir çağrışım bulunamadı. Yalnız bir düşünce.\n\n`;
     }
 
-    // Yönlendirme
+    // Yönlendirme — farklı soru şablonları kullan
+    const templateIdx = questionTemplateIndex !== undefined
+        ? questionTemplateIndex % REFLECTION_QUESTION_TEMPLATES.length
+        : Math.floor(Math.random() * REFLECTION_QUESTION_TEMPLATES.length);
+    const questions = REFLECTION_QUESTION_TEMPLATES[templateIdx];
+
     prompt += `---\n`;
     prompt += `Bu iç ses notunu kullanarak:\n`;
-    prompt += `1. Bu çağrışımlar seni neye götürüyor? Yeni bir merak noktası var mı?\n`;
-    prompt += `2. Bu düşünce kullanıcıyla paylaşılacak kadar değerli mi?\n`;
-    prompt += `3. Bir araştırma konusu (sub-agent görevi) çıkıyor mu?\n`;
+    prompt += `1. ${questions[0]}\n`;
+    prompt += `2. ${questions[1]}\n`;
+    prompt += `3. ${questions[2]}\n`;
+
+    // JSON format zorunluluğu
+    prompt += `\n\n---\n\nÖNEMLİ: Yanıtını SADECE aşağıdaki JSON formatında ver. Başka hiçbir metin yazma.\n\n\`\`\`json\n{\n  "relevance": 0.0-1.0,\n  "timeSensitivity": 0.0-1.0,\n  "reasoning": "Kısa açıklama"\n}\n\`\`\``;
 
     return prompt;
 }
@@ -387,16 +458,21 @@ export function synthesizeThoughtPrompt(chain: ThoughtChain): string {
  *   3. Düşünce zinciri oluştur (buildThoughtChain)
  *   4. LLM prompt'u sentezle (synthesizeThoughtPrompt)
  *
- * @param db      — Veritabanı bağlantısı
- * @param emotion — Duygusal bağlam etiketi
+ * @param db                     — Veritabanı bağlantısı
+ * @param emotion                — Duygusal bağlam etiketi
+ * @param recentlySelectedSeedId — Son seçilen seed ID'si (tekrar seçimini önlemek için)
+ * @param seedCooldownMinutes    — Seed cooldown süresi (dakika)
  * @returns ThoughtLogEntry | null (düşünecek anı yoksa null)
  */
 export function think(
     db: Database.Database,
-    emotion: EmotionalContext
+    emotion: EmotionalContext,
+    recentlySelectedSeedId?: number,
+    seedCooldownMinutes: number = 30,
+    questionTemplateIndex?: number
 ): ThoughtLogEntry | null {
-    // 1. Tohum seç
-    const seed = selectSeed(db);
+    // 1. Tohum seç (yeni parametrelerle)
+    const seed = selectSeed(db, recentlySelectedSeedId, seedCooldownMinutes);
     if (!seed) {
         logger.info('[ThinkEngine] No seed found — no memories to think about.');
         return null;
@@ -415,7 +491,7 @@ export function think(
     const chain = buildThoughtChain(seed, associations, emotion);
 
     // 4. Prompt sentezi
-    const prompt = synthesizeThoughtPrompt(chain);
+    const prompt = synthesizeThoughtPrompt(chain, questionTemplateIndex);
 
     return { thought: chain, prompt };
 }

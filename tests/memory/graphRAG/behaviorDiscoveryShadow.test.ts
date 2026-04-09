@@ -290,4 +290,181 @@ describe('BehaviorDiscoveryShadow', () => {
       expect(config.maxComparisons).toBe(1000); // unchanged
     });
   });
+
+  describe('getStrategyBreakdown', () => {
+    it('Farklı stratejiler için breakdown doğru hesaplanır', async () => {
+      const shadow = createBehaviorDiscovery({ sampleRate: 1.0, maxComparisons: 100 });
+
+      // Farklı stratejilerle comparison'lar ekle
+      await shadow.runComparison('q1', [createResult(1)], [createResult(1)], 'graph_rag');
+      await shadow.runComparison('q2', [createResult(1)], [createResult(1)], 'spreading_activation');
+      await shadow.runComparison('q3', [createResult(1)], [createResult(1)], 'hybrid');
+      await shadow.runComparison('q4', [createResult(1)], [createResult(1)], 'graph_rag');
+
+      const report = shadow.generateReport();
+
+      // Report'ta strategy breakdown olmalı
+      expect(report).toContain('Strategy Breakdown:');
+      expect(report).toContain('graph_rag:');
+      expect(report).toContain('spreading_activation:');
+      expect(report).toContain('hybrid:');
+    });
+
+    it('Tek strateji ile breakdown doğru hesaplanır', async () => {
+      const shadow = createBehaviorDiscovery({ sampleRate: 1.0, maxComparisons: 100 });
+
+      // Sadece graph_rag stratejisi
+      await shadow.runComparison('q1', [createResult(1)], [createResult(1)], 'graph_rag');
+      await shadow.runComparison('q2', [createResult(1)], [createResult(1)], 'graph_rag');
+
+      const report = shadow.generateReport();
+
+      expect(report).toContain('graph_rag:');
+    });
+
+    it('Boş comparison listesinde breakdown boş döner', () => {
+      const shadow = createBehaviorDiscovery();
+      const report = shadow.generateReport();
+
+      expect(report).toContain('Strategy Breakdown:');
+    });
+  });
+
+  describe('estimateTokenCount', () => {
+    it('Farklı input uzunlukları için token tahmini doğru', async () => {
+      const shadow = createBehaviorDiscovery({ sampleRate: 1.0, maxComparisons: 100 });
+
+      // Kısa sonuçlar
+      const shortResults = [createResult(1)];
+      await shadow.runComparison('short', shortResults, shortResults, 'graph_rag');
+
+      // Uzun sonuçlar
+      const longResults = [createResult(1), createResult(2), createResult(3), createResult(4), createResult(5)];
+      await shadow.runComparison('long', longResults, longResults, 'graph_rag');
+
+      const metrics = shadow.getMetrics();
+
+      // Token overhead hesaplanabilmeli
+      expect(metrics.avgTokenOverhead).toBeDefined();
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('Negatif skorlar doğru işlenir', async () => {
+      const shadow = createBehaviorDiscovery({ sampleRate: 1.0, maxComparisons: 100 });
+
+      const baselineResults = [createResult(1, -0.5)];
+      const experimentalResults = [createResult(1, -0.3)];
+
+      const result = await shadow.runComparison(
+        'negative scores',
+        baselineResults,
+        experimentalResults,
+        'graph_rag',
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.query).toBe('negative scores');
+    });
+
+    it('Çok büyük skorlar doğru işlenir', async () => {
+      const shadow = createBehaviorDiscovery({ sampleRate: 1.0, maxComparisons: 100 });
+
+      const baselineResults = [createResult(1, 999999)];
+      const experimentalResults = [createResult(1, 999999)];
+
+      const result = await shadow.runComparison(
+        'large scores',
+        baselineResults,
+        experimentalResults,
+        'graph_rag',
+      );
+
+      expect(result).not.toBeNull();
+    });
+
+    it('Null benzeri değerler doğru işlenir', async () => {
+      const shadow = createBehaviorDiscovery({ sampleRate: 1.0, maxComparisons: 100 });
+
+      const baselineResults = [createResult(1, 0)];
+      const experimentalResults = [createResult(1, 0)];
+
+      const result = await shadow.runComparison(
+        'zero scores',
+        baselineResults,
+        experimentalResults,
+        'graph_rag',
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.overlap).toBe(1);
+    });
+  });
+
+  describe('Concurrent Comparisons', () => {
+    it('Eşzamanlı comparison çağrıları race condition yaratmaz', async () => {
+      const shadow = createBehaviorDiscovery({ sampleRate: 1.0, maxComparisons: 1000 });
+
+      const promises = Array(10).fill(null).map((_, i) =>
+        shadow.runComparison(`q${i}`, [createResult(1)], [createResult(1)], 'graph_rag')
+      );
+
+      const results = await Promise.allSettled(promises);
+
+      // Tüm comparison'lar tamamlanmalı
+      const fulfilled = results.filter(r => r.status === 'fulfilled');
+      expect(fulfilled.length).toBeGreaterThan(0);
+
+      // Comparison count artmış olmalı
+      expect(shadow.getComparisonCount()).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Config Validation', () => {
+    it('Negatif sampleRate doğru işlenir', () => {
+      const shadow = createBehaviorDiscovery({ sampleRate: -0.5 });
+      const config = shadow.getConfig();
+      expect(config.sampleRate).toBe(-0.5);
+      expect(shadow.shouldRun()).toBe(false); // Negatif sampleRate her zaman false
+    });
+
+    it('1\'den büyük sampleRate doğru işlenir', () => {
+      const shadow = createBehaviorDiscovery({ sampleRate: 2.0 });
+      const config = shadow.getConfig();
+      expect(config.sampleRate).toBe(2.0);
+      // 1'den büyük sampleRate her zaman true dönmeli (randomValue < 2.0 her zaman true)
+      expect(shadow.shouldRun()).toBe(true);
+    });
+  });
+
+  describe('Report Generation Edge Cases', () => {
+    it('Çok sayıda comparison ile report doğru oluşturulur', async () => {
+      const shadow = createBehaviorDiscovery({ sampleRate: 1.0, maxComparisons: 100 });
+
+      for (let i = 0; i < 50; i++) {
+        await shadow.runComparison(`q${i}`, [createResult(i)], [createResult(i)], 'graph_rag');
+      }
+
+      const report = shadow.generateReport();
+
+      expect(report).toContain('Total Comparisons:');
+      expect(report).toContain('Avg Jaccard Similarity:');
+    });
+
+    it('Farklı stratejilerle report doğru oluşturulur', async () => {
+      const shadow = createBehaviorDiscovery({ sampleRate: 1.0, maxComparisons: 100 });
+
+      const strategies = ['graph_rag', 'spreading_activation', 'hybrid'];
+      for (let i = 0; i < 30; i++) {
+        const strategy = strategies[i % strategies.length];
+        await shadow.runComparison(`q${i}`, [createResult(i)], [createResult(i)], strategy);
+      }
+
+      const report = shadow.generateReport();
+
+      expect(report).toContain('graph_rag:');
+      expect(report).toContain('spreading_activation:');
+      expect(report).toContain('hybrid:');
+    });
+  });
 });

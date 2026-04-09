@@ -1,0 +1,107 @@
+/**
+ * MCP (Model Context Protocol) — Runtime Integration
+ *
+ * Agent runtime'a MCP entegrasyonu için helper fonksiyonlar.
+ * Uygulama başlangıcında initializeMCP() ve kapanışında shutdownMCP() çağrılır.
+ *
+ * NOT: Circular dependency'yi önlemek için gateway/mcpService yerine
+ * event bus pattern kullanılır. Gateway bu event'leri dinleyerek
+ * gerekli işlemleri yapar.
+ */
+
+import { MCPClientManager } from './client.js';
+import { parseMCPConfig, isMCPEnabled } from './config.js';
+import { getUnifiedToolRegistry } from './registry.js';
+import { getMCPEventBus } from './eventBus.js';
+import { setMCPManager } from '../../gateway/services/mcpService.js';
+import { MCPConfigWatcher } from './watcher.js';
+import { logger } from '../../utils/logger.js';
+
+/** Module-level MCP manager instance */
+let _mcpManager: MCPClientManager | null = null;
+/** Module-level MCP config watcher */
+let _mcpWatcher: MCPConfigWatcher | null = null;
+
+/**
+ * MCP runtime başlatma fonksiyonu.
+ * Uygulama başlangıcında çağrılır.
+ *
+ * @returns MCPClientManager instance veya null (MCP devre dışıysa)
+ */
+export async function initializeMCP(): Promise<MCPClientManager | null> {
+  if (!isMCPEnabled()) {
+    logger.info('[MCP:runtime] MCP is disabled (ENABLE_MCP=false)');
+    return null;
+  }
+
+  const { enabled, servers, runtimeOptions } = parseMCPConfig();
+
+  if (!enabled || servers.length === 0) {
+    logger.info('[MCP:runtime] MCP enabled but no servers configured');
+    return null;
+  }
+
+  logger.info(`[MCP:runtime] Initializing MCP with ${servers.length} server(s)...`);
+
+  const manager = new MCPClientManager();
+
+  // Event logging
+  manager.onEvent((event) => {
+    logger.debug({ event }, `[MCP:runtime] Event: ${event.type}`);
+  });
+
+  try {
+    const connectedCount = await manager.initialize(servers);
+    logger.info(`[MCP:runtime] ✅ MCP initialized — ${connectedCount}/${servers.length} servers connected`);
+
+    // Registry'ye kaydet
+    const registry = getUnifiedToolRegistry();
+    await registry.registerMCPManager(manager);
+
+    // Gateway'e manager'ı bildir (singleton pattern — frontend'den yüklenen server'lar
+    // bu manager'ı kullanacak, böylece tüm araçlar LLM'e görünür olacak)
+    setMCPManager(manager);
+
+    // Event bus ile gateway'e bildir (circular dependency önlenir)
+    const eventBus = getMCPEventBus();
+    eventBus.emit('server:activated', { name: 'runtime-init', toolCount: connectedCount });
+
+    // Store manager instance for shutdown
+    _mcpManager = manager;
+
+    // Watcher başlat (hot reload için)
+    _mcpWatcher = new MCPConfigWatcher(manager);
+    _mcpWatcher.start();
+
+    return manager;
+  } catch (error) {
+    logger.error({ error }, '[MCP:runtime] ❌ MCP initialization failed:');
+    return null;
+  }
+}
+
+/**
+ * MCP runtime kapatma fonksiyonu.
+ * Uygulama kapanışında çağrılır.
+ */
+export async function shutdownMCP(): Promise<void> {
+  if (_mcpWatcher) {
+    _mcpWatcher.stop();
+    _mcpWatcher = null;
+  }
+
+  if (_mcpManager) {
+    try {
+      await _mcpManager.shutdown();
+      logger.info('[MCP:runtime] ✅ MCP manager shut down');
+    } catch (error) {
+      logger.error({ error }, '[MCP:runtime] Error during MCP shutdown:');
+    }
+    _mcpManager = null;
+  }
+
+  // Registry'yi temizle
+  getUnifiedToolRegistry().clear();
+
+  logger.info('[MCP:runtime] MCP shutdown complete');
+}

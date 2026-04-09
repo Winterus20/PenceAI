@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { LLMSettings } from './LLMSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { MemorySettings } from './MemorySettings';
+import { UsageStatsCard } from '@/components/settings/UsageStatsCard';
 import { metaBadgeClassName } from '@/styles/dialog';
 import { SkeletonSettingsDialog } from '@/components/ui/skeleton';
 import { useSettings } from '@/hooks/queries/useSettings';
@@ -87,12 +88,29 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
   const addSensitivePath = useAddSensitivePath();
   const removeSensitivePath = useRemoveSensitivePath();
 
-  // Form'u settings ile doldur
+  // Form'u settings ile doldur - localStorage'dan gelen LLM ayarlarını koru
   useEffect(() => {
     if (settings) {
+      // localStorage'dan kaydedilmiş LLM ayarlarını oku
+      let savedProvider: string | undefined;
+      let savedModel: string | undefined;
+      try {
+        const saved = localStorage.getItem('pence-llm-settings');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          savedProvider = parsed.defaultLLMProvider;
+          savedModel = parsed.defaultLLMModel;
+        }
+      } catch {
+        // localStorage hatası, sessizce geç
+      }
+
       setForm({
         ...emptyForm,
         ...settings,
+        // Kullanıcının seçtiği LLM ayarlarını koru (localStorage öncelikli)
+        defaultLLMProvider: savedProvider || settings.defaultLLMProvider || emptyForm.defaultLLMProvider,
+        defaultLLMModel: savedModel || settings.defaultLLMModel || emptyForm.defaultLLMModel,
         allowShellExecution: !!settings.allowShellExecution,
         autonomousStepLimit: String(settings.autonomousStepLimit ?? emptyForm.autonomousStepLimit),
         memoryDecayThreshold: String(settings.memoryDecayThreshold ?? emptyForm.memoryDecayThreshold),
@@ -108,16 +126,28 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
     return models.filter((model, index) => models.indexOf(model) === index);
   }, [providers, form.defaultLLMProvider]);
 
-  useEffect(() => {
-    if (!modelOptions.length) return;
-    if (!modelOptions.includes(form.defaultLLMModel)) {
-      setForm((current) => ({ ...current, defaultLLMModel: modelOptions[0] }));
-    }
-  }, [modelOptions, form.defaultLLMModel]);
+  // NOT: Kullanıcının model seçimi otomatik olarak değiştirilmez.
+  // localStorage'dan gelen seçim her zaman korunur.
 
   // Alt bileşenler için genel tip updateField wrapper'ları
   const updateLLMField = (key: string, value: string) => {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => {
+      const updated = { ...current, [key]: value };
+      
+      // LLM provider veya model değiştiğinde localStorage'a kaydet
+      if (key === 'defaultLLMProvider' || key === 'defaultLLMModel') {
+        try {
+          localStorage.setItem('pence-llm-settings', JSON.stringify({
+            defaultLLMProvider: key === 'defaultLLMProvider' ? value : updated.defaultLLMProvider,
+            defaultLLMModel: key === 'defaultLLMModel' ? value : updated.defaultLLMModel,
+          }));
+        } catch {
+          // localStorage hatası, sessizce geç
+        }
+      }
+      
+      return updated;
+    });
   };
 
   const updateSecurityField = (key: string, value: string | boolean) => {
@@ -211,6 +241,8 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
                 form={form}
                 updateField={updateMemoryField}
               />
+
+              <UsageStatsCard />
             </div>
           </div>
         </div>

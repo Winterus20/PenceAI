@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Radio, Globe, MessageCircle, Gamepad2, Phone, RefreshCw, Check, X, Search, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Radio, Globe, MessageCircle, Gamepad2, Phone, RefreshCw, Check, X, Search } from 'lucide-react';
 import { useAgentStore, type Channel } from '../../store/agentStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -125,35 +125,23 @@ export const ChannelsView: React.FC = () => {
 
   return (
     <div className={`flex flex-col h-full ${theme === 'dark' ? 'bg-background' : 'bg-gray-50'}`}>
-      {/* Navigasyon Butonları */}
-      <nav className="border-b border-border/60 p-2">
-        <div className="flex gap-1">
+      {/* Header with Back Button */}
+      <div className="flex flex-col gap-3 px-4 py-3 border-b border-border/40 bg-surface/50">
+        <div className="flex items-center gap-3">
           <button
             onClick={() => setActiveView('chat')}
-            className="flex flex-1 flex-col items-center gap-1 rounded-lg px-2 py-2.5 text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-white/10 hover:text-foreground transition-colors"
           >
-            <MessageSquare className="h-4 w-4" />
-            <span>Sohbet</span>
+            <ArrowLeft className="h-4 w-4" />
+            <span>Geri</span>
           </button>
-          <button
-            className="flex flex-1 flex-col items-center gap-1 rounded-lg px-2 py-2.5 text-xs font-medium transition-all duration-200 bg-purple-600/20 text-purple-400 border border-purple-500/50"
-          >
-            <Radio className="h-4 w-4" />
-            <span>Kanallar</span>
-          </button>
-        </div>
-      </nav>
-
-      {/* Header */}
-      <div className="p-4 border-b border-border">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-1">
             <div className="p-2 rounded-lg bg-primary/10">
               <Radio className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-foreground">Kanallar</h1>
-              <p className="text-sm text-muted-foreground">
+              <h1 className="text-lg font-semibold text-foreground">Kanallar</h1>
+              <p className="text-xs text-muted-foreground">
                 {connectedCount} / {filteredChannels.length} kanal bağlı
               </p>
             </div>

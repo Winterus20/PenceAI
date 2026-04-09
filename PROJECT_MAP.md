@@ -1,7 +1,7 @@
 # PenceAI Proje Haritası
 
 > **Son Güncelleme:** 4 Nisan 2026
-> **Versiyon:** 1.2.0
+> **Versiyon:** 1.4.0
 > **Lisans:** MIT
 
 ---
@@ -36,6 +36,9 @@
 - 🧩 **Reconsolidation Pilot**: Bellek birleştirme ve güncelleme güvenlik mekanizması
 - 📊 **Retrieval Orchestration**: Dual-process (System1/System2) bellek getirme mimarisi
 - 🕸️ **GraphRAG**: Graph-aware retrieval, PageRank skorlama, topluluk tespiti ve gölge mod test altyapısı
+- 🎨 **Modern UI/UX**: Markdown render sistemi, syntax highlighting, avatar sistemi ve akıcı animasyonlar
+- ⚡ **Frontend Optimizasyonu**: Component decomposition, React.memo ile render performansı ve sanallaştırılmış mesaj akışı
+- 🔌 **Stabil WebSocket**: Stale closure korumalı, buffer optimizasyonlu gerçek zamanlı iletişim katmanı
 
 ---
 
@@ -771,21 +774,21 @@ class FeedbackManager {
 | [`src/hooks/useSettingsForm.ts`](src/web/react-app/src/hooks/useSettingsForm.ts) | Ayarlar form hook'u |
 | [`src/store/agentStore.ts`](src/web/react-app/src/store/agentStore.ts) | Zustand state |
 | [`src/lib/api-client.ts`](src/web/react-app/src/lib/api-client.ts) | API istemcisi |
-| [`src/lib/utils.ts`](src/web/react-app/src/lib/utils.ts) | Yardımcı fonksiyonlar |
+| [`src/lib/utils.ts`](src/web/react-app/src/lib/utils.ts) | Yardımcı fonksiyonlar (stripThinkTags, formatRelativeTime, formatFileSize) |
 | [`src/lib/queryClient.ts`](src/web/react-app/src/lib/queryClient.ts) | React Query client |
 
 ##### Bileşenler (`src/components/chat/`)
 
 | Bileşen | Açıklama |
 |---------|----------|
-| [`ChatWindow.tsx`](src/web/react-app/src/components/chat/ChatWindow.tsx) | Ana sohbet arayüzü |
-| [`MessageStream.tsx`](src/web/react-app/src/components/chat/MessageStream.tsx) | Mesaj akışı |
-| [`MessageArea.tsx`](src/web/react-app/src/components/chat/MessageArea.tsx) | Mesaj alanı bileşeni |
-| [`MessagePanel.tsx`](src/web/react-app/src/components/chat/MessagePanel.tsx) | Mesaj paneli |
-| [`ConversationSidebar.tsx`](src/web/react-app/src/components/chat/ConversationSidebar.tsx) | Konuşma kenar çubuğu |
-| [`ConversationListItem.tsx`](src/web/react-app/src/components/chat/ConversationListItem.tsx) | Konuşma listesi öğesi |
-| [`ConversationPanel.tsx`](src/web/react-app/src/components/chat/ConversationPanel.tsx) | Konuşma paneli |
-| [`InputPanel.tsx`](src/web/react-app/src/components/chat/InputPanel.tsx) | Giriş paneli |
+| [`ChatWindow.tsx`](src/web/react-app/src/components/chat/ChatWindow.tsx) | Ana sohbet arayüzü ve layout yönetimi |
+| [`MessageStream.tsx`](src/web/react-app/src/components/chat/MessageStream.tsx) | Mesaj akışı (Virtuoso, empty state redesign, quick actions) |
+| [`MessageBubble.tsx`](src/web/react-app/src/components/chat/MessageBubble.tsx) | [NEW] Tekil mesaj bileşeni (Memoize edilmiş, avatar ve animasyon desteği) |
+| [`CodeBlock.tsx`](src/web/react-app/src/components/chat/CodeBlock.tsx) | [NEW] Syntax highlighting (Prism) ve kopyalama desteği sunan kod bloğu |
+| [`MessagePanel.tsx`](src/web/react-app/src/components/chat/MessagePanel.tsx) | Mesaj paneli (scroll container) |
+| [`ConversationListItem.tsx`](src/web/react-app/src/components/chat/ConversationListItem.tsx) | Konuşma listesi öğesi (Relative time desteği) |
+| [`ConversationPanel.tsx`](src/web/react-app/src/components/chat/ConversationPanel.tsx) | Konuşma paneli ve tarih bazlı gruplama |
+| [`InputPanel.tsx`](src/web/react-app/src/components/chat/InputPanel.tsx) | Giriş paneli (Glow-pulse send butonu, auto-resize) |
 | [`ChannelsView.tsx`](src/web/react-app/src/components/chat/ChannelsView.tsx) | Kanal görünümü |
 | [`MemoryDialog.tsx`](src/web/react-app/src/components/chat/MemoryDialog.tsx) | Bellek yönetimi |
 | [`MemoryGraphView.tsx`](src/web/react-app/src/components/chat/MemoryGraphView.tsx) | Bellek grafiği görünümü |
@@ -1147,14 +1150,19 @@ erDiagram
 
 | Kategori | Teknoloji | Versiyon | Amaç |
 |----------|-----------|----------|------|
-| Framework | React | 18.x | UI framework |
+| Framework | React | 19.x | UI framework |
 | Language | TypeScript | 5.x | Tip güvenli geliştirme |
-| Build | Vite | 5.x | Build tool |
-| Styling | Tailwind CSS | 3.x | Utility-first CSS |
-| State | Zustand | 4.x | Global state yönetimi |
+| Build | Vite | 6.x | Build tool |
+| Styling | Tailwind CSS | 4.x | Utility-first CSS (@tailwindcss/postcss) |
+| State | Zustand | 5.x | Global state yönetimi |
 | Data Fetching | @tanstack/react-query | 5.x | Server state yönetimi ve önbellekleme |
 | UI | Radix UI | 1.x | Erişilebilir bileşenler |
 | Icons | Lucide React | 0.x | İkon seti |
+| Markdown | react-markdown + remark-gfm | 10.x / 4.x | Markdown render (GFM destekli) |
+| Syntax Highlighting | react-syntax-highlighter | 15.x | Prism tabanlı kod renklendirme |
+| Animation | framer-motion | 12.x | UI animasyonları |
+| Virtualization | react-virtuoso | 4.x | Sanal liste render |
+| Visualization | d3 | 7.x | Bellek grafiği görselleştirme |
 
 ### AI/ML
 
@@ -1452,6 +1460,14 @@ MAX_TOKENS=4096
 7. **Behavior Discovery Shadow Mode**: Yeni retrieval stratejileri gölge modda test edilir
 8. **GraphRAG Integration**: Graph-aware retrieval, PageRank skorlama ve topluluk tespiti ile bellek getirme iyileştirildi
 9. **React Query Integration**: Web arayüzü React Query ile veri yönetimi ve önbellekleme yapıyor
+10. **Markdown Rendering**: react-markdown + remark-gfm ile GFM destekli markdown render (tablolar, listeler, kod blokları)
+11. **Auto-resize Textarea**: Input paneli mesaj gönderiminde otomatik olarak varsayılan yüksekliğe sıfırlanır
+12. **Scroll Optimization**: Ana ekran boş durumunda viewport'a tam sığan layout (flex-1, min-h kaldırıldı)
+13. **Frontend Decomposition**: MessageStream monolitik yapısı MessageBubble ve CodeBlock bileşenlerine ayrılarak render performansı artırıldı
+14. **WebSocket State Safety**: useAgentSocket hook'u getStore() pattern'i ile stale closure hatalarına karşı koruma altına alındı
+15. **Relative Timing**: Konuşma listesi ve mesajlarda "az önce", "2 dk önce" gibi dinamik göreli zamanlama sistemi eklendi
+16. **Syntax Highlighting**: Prism.js entegrasyonu ile kod blokları için çoklu dil desteği ve kopyalama özelliği eklendi
+17. **Animated Avatars**: AI için dinamik gradient ve kullanıcı için baş harflerden oluşan modern avatar sistemi eklendi
 
 ---
 

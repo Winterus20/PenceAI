@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useAgentStore } from '../store/agentStore';
 import type { ToolCallItem, AttachmentItem } from '../store/agentStore';
 import { useStats } from './useStats';
+import { stripThinkTags } from '@/lib/utils';
 
 // WebSocket mesaj tipleri
 interface WsTokenMessage {
@@ -72,30 +73,15 @@ interface ToolEndEventData {
 	isError?: boolean;
 }
 
-const stripThinkTags = (text?: string) => {
-    if (!text) return '';
-    return text
-        .replace(/<think>[\s\S]*?<\/think>/gi, '')
-        .replace(/<\/?think>/gi, '')
-        .trim();
-};
-
 export function useAgentSocket() {
     const ws = useRef<WebSocket | null>(null);
     const currentAssistantMessageId = useRef<string | null>(null);
     const pendingToolCalls = useRef<ToolCallItem[]>([]);
     const pendingThinking = useRef<string[]>([]);
     const thinkingEnabledRef = useRef(false);
-    const {
-        setConnected,
-        setReceiving,
-        addMessage,
-        appendToMessage,
-        patchMessage,
-        setThinking,
-        setActiveConversationId,
-        setConfirmRequest,
-    } = useAgentStore();
+    
+    // Use getState() pattern to avoid stale closures in WebSocket handlers
+    const getStore = () => useAgentStore.getState();
     const { updateStatsFromWebSocket } = useStats();
 
     // Benzersiz bir referansla mount durumunu takip edelim
@@ -107,7 +93,7 @@ export function useAgentSocket() {
 
     const flushTokens = () => {
         if (tokenBuffer.current && currentAssistantMessageId.current) {
-            appendToMessage(currentAssistantMessageId.current, tokenBuffer.current);
+            getStore().appendToMessage(currentAssistantMessageId.current, tokenBuffer.current);
             tokenBuffer.current = '';
         }
     };
@@ -121,7 +107,7 @@ export function useAgentSocket() {
         const assistantId = currentAssistantMessageId.current;
         if (!assistantId) return;
 
-        patchMessage(assistantId, {
+        getStore().patchMessage(assistantId, {
             toolCalls: pendingToolCalls.current.length > 0 ? [...pendingToolCalls.current] : undefined,
             thinking: pendingThinking.current.length > 0 ? [...pendingThinking.current] : undefined,
         });
@@ -132,9 +118,9 @@ export function useAgentSocket() {
         currentAssistantMessageId.current = assistantId;
         pendingToolCalls.current = [];
         pendingThinking.current = [];
-        setThinking('');
+        getStore().setThinking('');
 
-        addMessage({
+        getStore().addMessage({
             id: assistantId,
             role: 'assistant',
             content: '',
@@ -163,7 +149,7 @@ export function useAgentSocket() {
                 return;
             }
             reconnectAttempts.current = 0; // Bağlantı başarılı olunca deneme sayısını sıfırla
-            setConnected(true);
+            getStore().setConnected(true);
             console.log('[WS] Connected to PenceAI Gateway');
 
             if (thinkingEnabledRef.current) {
@@ -174,8 +160,8 @@ export function useAgentSocket() {
         socket.onclose = () => {
             if (!mounted.current) return; // Unmount olduysa reconnect yapma
 
-            setConnected(false);
-            setReceiving(false);
+            getStore().setConnected(false);
+            getStore().setReceiving(false);
             
             // Exponential Backoff Stratejisi
             const baseDelay = 1000;
@@ -219,14 +205,14 @@ export function useAgentSocket() {
             case 'response':
                 flushAndClearTokens();
                 if (currentAssistantMessageId.current) {
-                    patchMessage(currentAssistantMessageId.current, {
+                    getStore().patchMessage(currentAssistantMessageId.current, {
                         content: data.content ?? '',
                         toolCalls: pendingToolCalls.current.length > 0 ? [...pendingToolCalls.current] : undefined,
                         thinking: pendingThinking.current.length > 0 ? [...pendingThinking.current] : undefined,
                         pending: false,
                     });
                 } else {
-                    addMessage({
+                    getStore().addMessage({
                         id: crypto.randomUUID(),
                         role: 'assistant',
                         content: data.content ?? '',
@@ -237,14 +223,14 @@ export function useAgentSocket() {
                 }
 
                 if (data.conversationId) {
-                    setActiveConversationId(data.conversationId);
+                    getStore().setActiveConversationId(data.conversationId);
                 }
 
                 currentAssistantMessageId.current = null;
                 pendingToolCalls.current = [];
                 pendingThinking.current = [];
-                setThinking('');
-                setReceiving(false);
+                getStore().setThinking('');
+                getStore().setReceiving(false);
                 break;
 
             case 'agent_event':
@@ -253,13 +239,13 @@ export function useAgentSocket() {
 
             case 'clear_stream':
                 if (currentAssistantMessageId.current) {
-                    patchMessage(currentAssistantMessageId.current, { content: '' });
+                    getStore().patchMessage(currentAssistantMessageId.current, { content: '' });
                 }
                 break;
 
             case 'replace_stream':
                 if (currentAssistantMessageId.current) {
-                    patchMessage(currentAssistantMessageId.current, { content: data.content });
+                    getStore().patchMessage(currentAssistantMessageId.current, { content: data.content });
                 }
                 break;
 
@@ -270,14 +256,14 @@ export function useAgentSocket() {
               flushAndClearTokens();
               toast.error(data.message || 'Bilinmeyen bir hata oluştu');
               if (currentAssistantMessageId.current) {
-                patchMessage(currentAssistantMessageId.current, {
+                getStore().patchMessage(currentAssistantMessageId.current, {
                   content: `⚠️ Hata: ${data.message}`,
                   pending: false,
                   toolCalls: pendingToolCalls.current.length > 0 ? [...pendingToolCalls.current] : undefined,
                   thinking: pendingThinking.current.length > 0 ? [...pendingThinking.current] : undefined,
                 });
               } else {
-                addMessage({
+                getStore().addMessage({
                   id: crypto.randomUUID(),
                   role: 'system',
                   content: `⚠️ Hata: ${data.message}`,
@@ -288,8 +274,8 @@ export function useAgentSocket() {
                 currentAssistantMessageId.current = null;
                 pendingToolCalls.current = [];
                 pendingThinking.current = [];
-                setThinking('');
-                setReceiving(false);
+                getStore().setThinking('');
+                getStore().setReceiving(false);
                 break;
 
             case 'stats':
@@ -297,7 +283,7 @@ export function useAgentSocket() {
                 break;
 
             case 'confirm_request':
-                setConfirmRequest(data);
+                getStore().setConfirmRequest(data);
                 break;
         }
     };
@@ -310,7 +296,7 @@ export function useAgentSocket() {
     const cleaned = stripThinkTags(thinkingData.content);
                 if (cleaned) {
                     pendingThinking.current = [...pendingThinking.current, cleaned];
-                    setThinking(pendingThinking.current.join('\n'));
+                    getStore().setThinking(pendingThinking.current.join('\n'));
                     syncAssistantMeta();
                 }
                 break;
@@ -395,18 +381,18 @@ export function useAgentSocket() {
                 contentPreview: content.slice(0, 120),
                 attachments: attachments.length,
             });
-            setReceiving(false);
+            getStore().setReceiving(false);
             return;
         }
 
-        setReceiving(true);
+        getStore().setReceiving(true);
 
         if (appendUserMessage) {
             console.debug('[useAgentSocket] sendChatPayload:addUserMessage', {
                 contentPreview: content.slice(0, 120),
                 attachments: attachments.length,
             });
-            addMessage({
+            getStore().addMessage({
                 id: crypto.randomUUID(),
                 role: 'user',
                 content,
@@ -469,7 +455,7 @@ export function useAgentSocket() {
                 approved,
             }));
         }
-        setConfirmRequest(null);
+        getStore().setConfirmRequest(null);
     };
 
     useEffect(() => {

@@ -13,6 +13,8 @@ export interface ConversationRow {
     title: string;
     summary: string;
     is_summarized: number;
+    is_title_custom: number;
+    message_count: number;
     created_at: string;
     updated_at: string;
 }
@@ -189,6 +191,7 @@ export interface MemoryRelationRow {
     relation_type: string;
     confidence: number;
     description: string;
+    weight?: number;
     created_at: string;
     last_accessed_at: string | null;
     access_count: number | null;

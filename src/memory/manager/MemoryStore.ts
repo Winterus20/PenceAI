@@ -33,7 +33,7 @@ import {
 import { decideMemoryMerge, decideReconsolidationPilot, normalizeMemoryWriteInput } from '../shortTermPhase.js';
 import type { EmbeddingProvider } from '../embeddings.js';
 import type { TaskQueue } from '../../autonomous/queue.js';
-import type { AddMemoryResult, DecayResult, MemoryStats } from './types.js';
+import type { AddMemoryResult, DecayResult, MemoryStats, GraphManagerInterface } from './types.js';
 
 export class MemoryStore {
   private memoryLocks: Map<string, Promise<void>> = new Map();
@@ -43,11 +43,7 @@ export class MemoryStore {
     private db: Database.Database,
     private embeddingProvider: EmbeddingProvider | null,
     private taskQueue: TaskQueue | null,
-    private graphManager: {
-      autoCreateProximityRelations: (memoryId: number) => void;
-      updateStabilityOnAccess: (memory: MemoryRow) => void;
-      cleanupMemoryGraph: (memoryId: number) => void;
-    }
+    private graphManager: GraphManagerInterface
   ) {}
 
   /**

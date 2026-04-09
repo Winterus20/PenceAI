@@ -1,7 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Pin, PinOff, Trash2, Check } from 'lucide-react';
+import { Pin, PinOff, Trash2, Check, MoreVertical, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useAgentStore } from '@/store/agentStore';
 import toast from 'react-hot-toast';
 
@@ -194,28 +200,51 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
           )}
         </div>
         {!isEditing && (
-          <div className="flex gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 rounded-none"
-              onClick={() => onTogglePin(conversation.id)}
-              aria-label={isPinned ? `${displayName} sabitlemesini kaldır` : `${displayName} sohbetini sabitle`}
-              title={isPinned ? 'Sabitlemeyi kaldır' : 'Sabitle'}
-            >
-              {isPinned ? <PinOff className="h-3.5 w-3.5" aria-hidden="true" /> : <Pin className="h-3.5 w-3.5" aria-hidden="true" />}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 rounded-none text-destructive"
-              onClick={() => onDelete(conversation.id)}
-              aria-label={`${displayName} sohbetini sil`}
-              title="Sohbeti sil"
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-            </Button>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 flex-shrink-0"
+                aria-label={`${displayName} için işlemler`}
+              >
+                <MoreVertical className="h-3.5 w-3.5" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[160px]">
+              <DropdownMenuItem
+                onClick={() => {
+                  setEditTitle(conversation.title || '');
+                  setIsEditing(true);
+                }}
+              >
+                <Pencil className="mr-2 h-4 w-4" />
+                Yeniden Adlandır
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => onTogglePin(conversation.id)}
+              >
+                {isPinned ? (
+                  <>
+                    <PinOff className="mr-2 h-4 w-4" />
+                    Sabitlemeyi Kaldır
+                  </>
+                ) : (
+                  <>
+                    <Pin className="mr-2 h-4 w-4" />
+                    Sabitle
+                  </>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => onDelete(conversation.id)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Sil
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
     </div>

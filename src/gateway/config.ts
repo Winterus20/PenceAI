@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { logger } from '../utils/logger.js';
 
@@ -125,7 +126,7 @@ export function loadConfig(): AppConfig {
                 'C:\\Windows',
                 'C:\\Program Files',
                 'C:\\Program Files (x86)',
-                'C:\\Users\\Yigit\\AppData',
+                path.join(os.homedir(), 'AppData'),
                 'C:\\ProgramData',
                 '/etc', '/usr', '/var', '/boot', '/root',
             ],

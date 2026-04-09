@@ -34,6 +34,7 @@ export const ChatWindow = () => {
     setActiveView,
     sendFeedback,
     hideToast,
+    updateConversationTitle,
   } = useAgentStore();
 
   // WebSocket
@@ -58,6 +59,7 @@ export const ChatWindow = () => {
     handleDrop,
     handleDragOver,
     handleDragLeave,
+    removeAttachment,
     clearAttachments,
   } = useFileUpload({ maxFiles: 10, maxSize: 25 * 1024 * 1024 });
 
@@ -85,6 +87,25 @@ export const ChatWindow = () => {
       setThinkingEnabled(showThinking);
     }
   }, [showThinking, setThinkingEnabled]);
+
+  // Rename conversation handler
+  const handleRenameConversation = useCallback(async (id: string, title: string) => {
+    try {
+      const response = await fetch(`/api/conversations/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      if (!response.ok) throw new Error('Rename failed');
+      if (updateConversationTitle) {
+        updateConversationTitle(id, title);
+      }
+      hotToast.success('Sohbet başlığı güncellendi');
+    } catch (error) {
+      console.error('Rename error:', error);
+      hotToast.error('Başlık güncellenirken bir hata oluştu');
+    }
+  }, [updateConversationTitle]);
 
   // Mesaj alma sonrası konuşmaları yenile
   useEffect(() => {
@@ -239,10 +260,9 @@ export const ChatWindow = () => {
                 onLoadConversation={loadConversation}
                 onTogglePinned={togglePinned}
                 onDeleteConversation={deleteConversation}
+                onRenameConversation={handleRenameConversation}
                 isConnected={isConnected}
                 onToggleSidebar={() => setShowConversations(false)}
-                onOpenMemory={() => setIsMemoryOpen(true)}
-                onOpenSettings={() => setIsSettingsOpen(true)}
               />
             </div>
           </motion.aside>
@@ -328,7 +348,7 @@ export const ChatWindow = () => {
                 setInput={setInput}
                 isReceiving={isReceiving}
                 pendingAttachments={pendingAttachments}
-                setPendingAttachments={() => {}}
+                onRemoveAttachment={removeAttachment}
                 onSend={handleSend}
                 onFileSelection={handleFileSelection}
               />
@@ -381,11 +401,10 @@ export const ChatWindow = () => {
               onLoadConversation={loadConversation}
               onTogglePinned={togglePinned}
               onDeleteConversation={deleteConversation}
+              onRenameConversation={handleRenameConversation}
                 isConnected={isConnected}
                 isMobile={true}
                 onCloseMobile={() => setIsMobileSidebarOpen(false)}
-                onOpenMemory={() => setIsMemoryOpen(true)}
-                onOpenSettings={() => setIsSettingsOpen(true)}
               />
           </aside>
         </div>

@@ -18,6 +18,16 @@ import { BehaviorDiscoveryShadow } from '../memory/graphRAG/BehaviorDiscoverySha
 import { PageRankScorer } from '../memory/graphRAG/PageRankScorer.js';
 import { CommunityDetector } from '../memory/graphRAG/CommunityDetector.js';
 import type { MemoryGraph, GraphNode, GraphEdge } from '../memory/types.js';
+import {
+  getMarketplace,
+  getInstalledServers,
+  installServer,
+  activateServer,
+  deactivateServer,
+  uninstallServer,
+  getServerTools,
+  getServerStatus,
+} from './services/mcpService.js';
 
 export interface RouteDeps {
     memory: MemoryManager;
@@ -59,6 +69,28 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     app.get('/api/conversations/:id/messages', (req, res) => {
         const messages = memory.getConversationHistory(req.params.id, 100);
         res.json(messages);
+    });
+
+    // Konuşma başlığı güncelleme
+    app.patch('/api/conversations/:id', (req, res) => {
+      const { id } = req.params;
+      const { title } = req.body;
+
+      if (!title || typeof title !== 'string') {
+        return res.status(400).json({ error: 'Başlık zorunludur' });
+      }
+
+      if (title.length > 200) {
+        return res.status(400).json({ error: 'Başlık maksimum 200 karakter olabilir' });
+      }
+
+      try {
+        // Manuel güncelleme olduğu için is_title_custom = 1 yap
+        memory.updateConversationTitle(id, title.trim(), true);
+        res.json({ success: true, title: title.trim() });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
     });
 
     app.delete('/api/conversations/:id', (req, res) => {
@@ -198,7 +230,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
             let pageRankScores = new Map<number, number>();
             if (doPageRank) {
                 try {
-                    const db = (memory as any).db;
+                    const db = memory.getDatabase();
                     if (db) {
                         const scorer = new PageRankScorer(db);
                         const allNodeIds = limitedGraph.nodes
@@ -217,7 +249,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
             let communityMap = new Map<number, string>();
             if (doCommunities) {
                 try {
-                    const db = (memory as any).db;
+                    const db = memory.getDatabase();
                     if (db) {
                         const detector = new CommunityDetector(db);
                         const result = detector.detectCommunities();
@@ -613,6 +645,146 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       const shadow = getBehaviorDiscoveryShadow();
       shadow.clear();
       res.json({ success: true });
+    });
+
+    // ============ MCP Marketplace API ============
+
+    // GET /api/mcp/marketplace — Marketplace catalog'unu getir
+    app.get('/api/mcp/marketplace', async (_req, res) => {
+      try {
+        const { query } = _req.query;
+        const catalog = await getMarketplace(query as string);
+        res.json({ success: true, catalog });
+      } catch (err) {
+        logger.error({ err }, '[MCP:routes] Failed to fetch marketplace');
+        res.status(500).json({ success: false, error: 'Failed to fetch marketplace' });
+      }
+    });
+
+    // GET /api/mcp/servers — Kurulu server'ları getir
+    app.get('/api/mcp/servers', (_req, res) => {
+      try {
+        const servers = getInstalledServers();
+        const summary = {
+          total: servers.length,
+          active: servers.filter(s => s.status === 'active').length,
+          disabled: servers.filter(s => s.status === 'disabled').length,
+          error: servers.filter(s => s.status === 'error').length,
+        };
+        res.json({ success: true, servers, summary });
+      } catch (error) {
+        logger.error({ error }, '[MCP:routes] Failed to fetch servers');
+        res.status(500).json({ success: false, error: 'Failed to fetch servers' });
+      }
+    });
+
+    // POST /api/mcp/servers — Yeni server kur
+    app.post('/api/mcp/servers', async (req, res) => {
+      try {
+        const { name, description, command, args, env, cwd, timeout } = req.body;
+        if (!name || !command) {
+          return res.status(400).json({ success: false, error: 'name and command required' });
+        }
+        const result = await installServer({
+          name,
+          description: description || '',
+          command,
+          args: args || [],
+          env,
+          cwd,
+          timeout,
+        });
+        if (result.success) {
+          res.status(201).json(result);
+        } else {
+          res.status(409).json(result);
+        }
+      } catch (error) {
+        logger.error({ error }, '[MCP:routes] Failed to install server');
+        res.status(500).json({ success: false, error: 'Failed to install server' });
+      }
+    });
+
+    // PATCH /api/mcp/servers/:name/toggle — Server'ı aktif/pasif et
+    app.patch('/api/mcp/servers/:name/toggle', async (req, res) => {
+      try {
+        const { name } = req.params;
+        const { action } = req.body;
+        if (action === 'enable') {
+          const result = await activateServer(name);
+          res.json(result);
+        } else if (action === 'disable') {
+          const result = await deactivateServer(name);
+          res.json(result);
+        } else {
+          res.status(400).json({ success: false, error: 'action must be enable or disable' });
+        }
+      } catch (error) {
+        logger.error({ error }, '[MCP:routes] Failed to toggle server');
+        res.status(500).json({ success: false, error: 'Failed to toggle server' });
+      }
+    });
+
+    // DELETE /api/mcp/servers/:name — Server'ı kaldır
+    app.delete('/api/mcp/servers/:name', async (req, res) => {
+      try {
+        const { name } = req.params;
+        const result = await uninstallServer(name);
+        res.json(result);
+      } catch (error) {
+        logger.error({ error }, '[MCP:routes] Failed to uninstall server');
+        res.status(500).json({ success: false, error: 'Failed to uninstall server' });
+      }
+    });
+
+    // GET /api/mcp/servers/:name/tools — Server'ın araçlarını getir
+    app.get('/api/mcp/servers/:name/tools', (req, res) => {
+      try {
+        const { name } = req.params;
+        const tools = getServerTools(name);
+        res.json({ success: true, tools });
+      } catch (error) {
+        logger.error({ error }, '[MCP:routes] Failed to fetch tools');
+        res.status(500).json({ success: false, error: 'Failed to fetch tools' });
+      }
+    });
+
+    // GET /api/mcp/servers/:name/status — Server durumunu getir
+    app.get('/api/mcp/servers/:name/status', (req, res) => {
+      try {
+        const { name } = req.params;
+        const server = getServerStatus(name);
+        if (server) {
+          res.json({ success: true, server });
+        } else {
+          res.status(404).json({ success: false, error: 'Server not found' });
+        }
+      } catch (error) {
+        logger.error({ error }, '[MCP:routes] Failed to fetch status');
+        res.status(500).json({ success: false, error: 'Failed to fetch status' });
+      }
+    });
+
+    // ============ Token Usage Stats API ============
+
+    // GET /api/usage/stats?period=day|week|month|all
+    app.get('/api/usage/stats', (req, res) => {
+      try {
+        const period = (req.query.period as string) || 'week';
+        const stats = memory.getTokenUsageStats(period);
+        const dailyUsage = memory.getDailyUsage(period);
+        
+        res.json({
+          period,
+          totalTokens: stats.totalTokens,
+          totalCost: stats.totalCost,
+          providerBreakdown: stats.providerBreakdown,
+          dailyUsage,
+        });
+      } catch (err: any) {
+        logger.error({ err }, '[API] Token usage stats error:');
+        res.status(500).json({ error: 'Token usage stats alınamadı' });
+      }
     });
 
     // API 404 handler

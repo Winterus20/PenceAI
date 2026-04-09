@@ -1,13 +1,15 @@
-import React from 'react';
-import { Search, Plus, Pin, PinOff, Trash2, MessageSquare, Radio, PanelLeftClose, BookOpen, Settings } from 'lucide-react';
+import React, { useState } from 'react';
+import { Search, Plus, Pin, PinOff, Trash2, PanelLeftClose, MoreVertical, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import type { ConversationItem, ActiveView } from '../../store/agentStore';
-
-const normalizeTimestamp = (value?: string) => {
-  if (!value) return new Date().toISOString();
-  if (value.endsWith('Z')) return value;
-  return value.includes('T') ? `${value}Z` : value.replace(' ', 'T') + 'Z';
-};
+import { normalizeTimestamp, formatRelativeTime } from '@/lib/utils';
+import { SidebarMenu } from './SidebarMenu';
 
 export type SortOrder = 'newest' | 'oldest' | 'messages';
 
@@ -34,6 +36,7 @@ export interface ConversationPanelProps {
   onLoadConversation: (id: string) => void;
   onTogglePinned: (id: string) => void;
   onDeleteConversation: (id: string) => void;
+  onRenameConversation?: (id: string, title: string) => void;
   stats?: {
     conversations: number;
     messages: number;
@@ -43,12 +46,9 @@ export interface ConversationPanelProps {
   isMobile?: boolean;
   onCloseMobile?: () => void;
   onToggleSidebar?: () => void;
-  onOpenMemory?: () => void;
-  onOpenSettings?: () => void;
 }
 
 export const ConversationPanel: React.FC<ConversationPanelProps> = ({
-  activeView,
   setActiveView,
   searchQuery,
   setSearchQuery,
@@ -60,12 +60,11 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
   onLoadConversation,
   onTogglePinned,
   onDeleteConversation,
+  onRenameConversation,
   isConnected,
   isMobile = false,
   onCloseMobile,
   onToggleSidebar,
-  onOpenMemory,
-  onOpenSettings,
 }) => {
   const groupedConversations = React.useMemo(() => {
     const filtered = conversations
@@ -104,13 +103,6 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
     return { pinned, groups };
   }, [conversations, pinnedConversations, searchQuery, sortOrder]);
 
-  const handleViewChange = (view: ActiveView) => {
-    setActiveView(view);
-    if (isMobile && onCloseMobile) {
-      onCloseMobile();
-    }
-  };
-
   const handleLoadConversation = (id: string) => {
     onLoadConversation(id);
     if (isMobile && onCloseMobile) {
@@ -118,30 +110,100 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
     }
   };
 
-  const renderConversationItem = (conversation: ConversationItem, isPinned: boolean) => (
-    <div
-      key={conversation.id}
-      className={`group w-full rounded-lg transition-colors ${activeConversationId === conversation.id ? 'bg-white/10' : 'hover:bg-white/5'}`}
-    >
-      <div className="flex items-center justify-between gap-2 p-2 px-3">
-        <button
-          type="button"
-          onClick={() => handleLoadConversation(conversation.id)}
-          className="min-w-0 flex-1 text-left flex items-center gap-2"
-        >
-          <div className="truncate text-[14px] font-normal text-foreground/90">{conversation.title || conversation.user_name || 'Sohbet'}</div>
-        </button>
-        <div className="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
-          <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md hover:bg-white/10 text-muted-foreground hover:text-foreground" onClick={() => onTogglePinned(conversation.id)}>
-            {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-          </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6 rounded-md hover:bg-red-500/20 text-muted-foreground hover:text-red-400" onClick={() => onDeleteConversation(conversation.id)}>
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+
+  const handleStartRename = (conversation: ConversationItem) => {
+    setEditingId(conversation.id);
+    setEditTitle(conversation.title || '');
+  };
+
+  const handleSaveRename = (id: string) => {
+    const trimmed = editTitle.trim();
+    if (trimmed && onRenameConversation) {
+      onRenameConversation(id, trimmed);
+    }
+    setEditingId(null);
+    setEditTitle('');
+  };
+
+  const renderConversationItem = (conversation: ConversationItem, isPinned: boolean) => {
+    const isEditing = editingId === conversation.id;
+
+    return (
+      <div
+        key={conversation.id}
+        className={`group w-full rounded-lg transition-colors ${activeConversationId === conversation.id ? 'bg-white/10' : 'hover:bg-white/5'}`}
+      >
+        <div className="flex items-center justify-between gap-2 p-2 px-3">
+          {isEditing ? (
+            <div className="flex-1 flex gap-1">
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveRename(conversation.id);
+                  if (e.key === 'Escape') { setEditingId(null); setEditTitle(''); }
+                }}
+                onBlur={() => handleSaveRename(conversation.id)}
+                autoFocus
+                className="flex-1 h-7 px-2 text-sm bg-white/10 border border-white/20 rounded text-foreground focus:outline-none focus:ring-1 focus:ring-white/30"
+              />
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => handleLoadConversation(conversation.id)}
+                className="min-w-0 flex-1 text-left flex flex-col gap-0.5"
+              >
+                <div className="truncate text-[14px] font-normal text-foreground/90">{conversation.title || conversation.user_name || 'Sohbet'}</div>
+                <div className="text-[11px] text-muted-foreground/50">{formatRelativeTime(conversation.updated_at || conversation.created_at)}</div>
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/10"
+                  >
+                    <MoreVertical className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[160px]">
+                  <DropdownMenuItem onClick={() => handleStartRename(conversation)}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Yeniden Adlandır
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onTogglePinned(conversation.id)}>
+                    {isPinned ? (
+                      <>
+                        <PinOff className="mr-2 h-4 w-4" />
+                        Sabitlemeyi Kaldır
+                      </>
+                    ) : (
+                      <>
+                        <Pin className="mr-2 h-4 w-4" />
+                        Sabitle
+                      </>
+                    )}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => onDeleteConversation(conversation.id)}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Sil
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="flex flex-col h-full bg-sidebar">
@@ -178,31 +240,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
         </div>
       </div>
 
-      {/* Navigasyon (Proje Özel) */}
-      <nav className="px-3 pb-2 flex gap-1">
-        <button
-          onClick={() => handleViewChange('chat')}
-          className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-2 py-2 text-xs font-medium transition-all duration-200 ${
-            activeView === 'chat'
-              ? 'bg-white/10 text-foreground'
-              : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
-          }`}
-        >
-          <MessageSquare className="h-4 w-4" />
-          <span className={isMobile ? '' : 'hidden sm:inline'}>Sohbet</span>
-        </button>
-        <button
-          onClick={() => handleViewChange('channels')}
-          className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-2 py-2 text-xs font-medium transition-all duration-200 ${
-            activeView === 'channels'
-              ? 'bg-white/10 text-foreground'
-              : 'text-muted-foreground hover:bg-white/5 hover:text-foreground'
-          }`}
-        >
-          <Radio className="h-4 w-4" />
-          <span className={isMobile ? '' : 'hidden sm:inline'}>Kanallar</span>
-        </button>
-      </nav>
+      {/* Navigasyon kaldırıldı — SidebarMenu kullanılıyor */}
 
       {/* Sohbet Listesi */}
       <div className="flex-1 overflow-y-auto subtle-scrollbar px-3 pb-4">
@@ -245,22 +283,9 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
         </div>
       )}
 
-      {/* Alt Bölge - Bellek ve Ayarlar */}
-      <div className="mt-auto border-t border-border/40 bg-white/[0.02] p-3 flex items-center justify-center gap-2">
-        <button
-          onClick={onOpenMemory}
-          className="flex flex-[1] items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-medium text-muted-foreground transition-all hover:bg-white/10 hover:text-foreground"
-        >
-          <BookOpen className="h-4 w-4" />
-          <span>Bellek</span>
-        </button>
-        <button
-          onClick={onOpenSettings}
-          className="flex flex-[1] items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-medium text-muted-foreground transition-all hover:bg-white/10 hover:text-foreground"
-        >
-          <Settings className="h-4 w-4" />
-          <span>Ayarlar</span>
-        </button>
+      {/* Alt Bölge - Menü */}
+      <div className="mt-auto border-t border-border/40 bg-white/[0.02] p-3">
+        <SidebarMenu setActiveView={setActiveView} />
       </div>
     </div>
   );

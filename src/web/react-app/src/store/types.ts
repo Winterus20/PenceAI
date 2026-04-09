@@ -49,7 +49,7 @@ export interface ConfirmRequest {
   description?: string;
 }
 
-export type ActiveView = 'chat' | 'channels' | 'memory' | 'settings';
+export type ActiveView = 'chat' | 'channels' | 'memory' | 'settings' | 'mcp-marketplace';
 export type Theme = 'light' | 'dark';
 
 export interface Channel {
@@ -153,6 +153,8 @@ export interface SettingsSlice {
   channels: Channel[];
   selectedChannel: string | null;
   feedbacks: Record<string, FeedbackState>;
+  defaultLLMProvider: string;
+  defaultLLMModel: string;
   
   setUserName: (name: string) => void;
   setSensitivePaths: (paths: string[]) => void;
@@ -163,6 +165,8 @@ export interface SettingsSlice {
   fetchChannels: () => Promise<void>;
   sendFeedback: (messageId: string, conversationId: string, type: 'positive' | 'negative', comment?: string) => Promise<void>;
   setFeedback: (messageId: string, feedback: FeedbackState | null) => void;
+  setDefaultLLMProvider: (provider: string) => void;
+  setDefaultLLMModel: (model: string) => void;
 }
 
 // Global Agent State birleşimi

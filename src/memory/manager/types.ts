@@ -74,6 +74,11 @@ export interface PromptContextBundle {
   reviewMemories: MemoryRow[];
   followUpCandidates: MemoryRow[];
   recentMessages: RecentMessage[];
+  graphRAG?: {
+    memories: MemoryRow[];
+    communitySummaries: Array<{ communityId: string; summary: string }>;
+    graphContext: Record<string, unknown>;
+  } | null;
 }
 
 export interface PromptContextOptions {
@@ -86,6 +91,14 @@ export interface PromptContextOptions {
   fallbackMemoryLimit?: number;
   recentHours?: number;
   recentMessagesLimit?: number;
+}
+
+// ========== Graph Manager Interface ==========
+
+export interface GraphManagerInterface {
+  autoCreateProximityRelations(memoryId: number): void;
+  updateStabilityOnAccess(memory: MemoryRow): void;
+  cleanupMemoryGraph(memoryId: number): void;
 }
 
 // ========== Bağımlılık Tipleri ==========

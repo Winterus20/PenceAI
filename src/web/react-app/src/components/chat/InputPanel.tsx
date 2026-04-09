@@ -11,9 +11,10 @@ export interface InputPanelProps {
   setInput: (value: string) => void;
   isReceiving: boolean;
   pendingAttachments: AttachmentItem[];
-  setPendingAttachments: React.Dispatch<React.SetStateAction<AttachmentItem[]>>;
+  onRemoveAttachment: (index: number) => void;
   onSend: (contentOverride?: string) => void;
   onFileSelection: (files: File[]) => void;
+  onSent?: () => void;
 }
 
 export const InputPanel: React.FC<InputPanelProps> = ({
@@ -21,9 +22,10 @@ export const InputPanel: React.FC<InputPanelProps> = ({
   setInput,
   isReceiving,
   pendingAttachments,
-  setPendingAttachments,
+  onRemoveAttachment,
   onSend,
   onFileSelection,
+  onSent,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -32,6 +34,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       onSend();
+      resetTextareaHeight();
     }
   };
 
@@ -53,6 +56,13 @@ export const InputPanel: React.FC<InputPanelProps> = ({
     e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 160)}px`;
   };
 
+  const resetTextareaHeight = () => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+    onSent?.();
+  };
+
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     onFileSelection(files);
@@ -60,7 +70,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
   };
 
   const removeAttachment = (index: number) => {
-    setPendingAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    onRemoveAttachment(index);
   };
 
   return (
@@ -139,10 +149,10 @@ export const InputPanel: React.FC<InputPanelProps> = ({
             {isReceiving ? (
               <Loader2 className="animate-spin w-5 h-5 text-foreground/50" />
             ) : (
-              <Button 
-                onClick={() => onSend()} 
+              <Button
+                onClick={() => { onSend(); resetTextareaHeight(); }}
                 disabled={!input.trim() && pendingAttachments.length === 0} 
-                className={`h-8 w-8 rounded-full p-0 transition-all duration-300 flex items-center justify-center border-0 ${input.trim() || pendingAttachments.length ? 'bg-purple-600 text-white hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.4)]' : 'bg-[#2a2a2a] text-white/30'}`}
+                className={`h-8 w-8 rounded-full p-0 transition-all duration-300 flex items-center justify-center border-0 ${input.trim() || pendingAttachments.length ? 'bg-purple-600 text-white hover:bg-purple-500 glow-pulse hover:scale-110' : 'bg-[#2a2a2a] text-white/30'}`}
               >
                  <Send className="h-4 w-4 relative right-[1px]" strokeWidth={2} />
               </Button>

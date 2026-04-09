@@ -7,6 +7,7 @@ export interface WorkerConfig {
     boredomThresholdMs: number; // How long to run before getting "bored"
     cpuLoadThreshold: number; // Max CPU load average (1m) before sleeping
     checkIntervalMs: number; // How often to check for idle state
+    maxIterationsPerLoop: number; // Maximum number of tasks to execute per loop iteration
 }
 
 export class BackgroundWorker {
@@ -25,6 +26,7 @@ export class BackgroundWorker {
             boredomThresholdMs: 15 * 60 * 1000, // Default 15 mins max work
             cpuLoadThreshold: os.cpus().length * 0.8, // 80% of available cores
             checkIntervalMs: 60 * 1000, // Check every minute
+            maxIterationsPerLoop: 5, // Default: max 5 tasks per loop
             ...config
         };
     }
@@ -97,11 +99,18 @@ export class BackgroundWorker {
         this.isRunning = true;
         this.abortController = new AbortController();
         const startTime = Date.now();
+        let iterationCount = 0;
 
         logger.info('[Worker] Entering active autonomous loop...');
 
         try {
             while (this.queue.length > 0 && !this.abortController.signal.aborted) {
+                // Check iteration limit
+                if (iterationCount >= this.config.maxIterationsPerLoop) {
+                    logger.info(`[Worker] Reached max iterations per loop (${iterationCount}/${this.config.maxIterationsPerLoop}). Going to sleep.`);
+                    break;
+                }
+
                 // Check if we're bored (running too long)
                 if (Date.now() - startTime > this.config.boredomThresholdMs) {
                     logger.info('[Worker] Reached boredom threshold. Going to sleep.');
@@ -140,13 +149,16 @@ export class BackgroundWorker {
                     this.activeTaskId = null;
                 }
 
+                // Increment iteration counter
+                iterationCount++;
+
                 // Micro-task breathing room: prevent blocking Node.js event loop
                 await new Promise(resolve => setImmediate(resolve));
             }
         } finally {
             this.isRunning = false;
             this.abortController = null;
-            logger.info('[Worker] Exited autonomous loop.');
+            logger.info(`[Worker] Exited autonomous loop. (Completed ${iterationCount} iterations)`);
         }
     }
 

@@ -209,9 +209,20 @@ export class ConversationManager {
 
   /**
    * Konuşma başlığını günceller.
+   * @param isCustom - true ise kullanıcı manuel değiştirmiş (LLM üzerine yazamaz)
    */
-  updateConversationTitle(conversationId: string, title: string): void {
-    this.db.prepare(`UPDATE conversations SET title = ? WHERE id = ?`).run(title, conversationId);
+  updateConversationTitle(conversationId: string, title: string, isCustom: boolean = false): void {
+    if (isCustom) {
+      // Manuel güncelleme: is_title_custom = 1
+      this.db.prepare(`
+        UPDATE conversations SET title = ?, is_title_custom = 1 WHERE id = ?
+      `).run(title, conversationId);
+    } else {
+      // LLM güncellemesi: sadece is_title_custom = 0 ise güncelle
+      this.db.prepare(`
+        UPDATE conversations SET title = ? WHERE id = ? AND is_title_custom = 0
+      `).run(title, conversationId);
+    }
   }
 
   /**
