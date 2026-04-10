@@ -888,8 +888,18 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
 
         // Add final attributes to trace span if it exists
         if (traceSpan) {
-            traceSpan.setAttribute('agent.response_length', response.length);
-            traceSpan.setAttribute('agent.conversation_id', conversationId);
+            // Langfuse observation ise update kullan, OTel span ise setAttribute
+            if (typeof traceSpan.update === 'function') {
+                traceSpan.update({
+                    metadata: {
+                        response_length: response.length,
+                        conversation_id: conversationId,
+                    },
+                });
+            } else if (typeof traceSpan.setAttribute === 'function') {
+                traceSpan.setAttribute('agent.response_length', response.length);
+                traceSpan.setAttribute('agent.conversation_id', conversationId);
+            }
         }
 
         return { response, conversationId };
