@@ -74,8 +74,31 @@ export function resolveWebUserName(candidate: unknown): string {
 export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void {
     const { memory, agent, semanticRouter, autonomousWorker, broadcastStats } = deps;
 
+    // --- Keep-Alive Ping/Pong ---
+    const keepAliveInterval = setInterval(() => {
+        wss.clients.forEach((client) => {
+            const wsWithAlive = client as WebSocket & { isAlive?: boolean };
+            if (wsWithAlive.isAlive === false) {
+                logger.debug('[Gateway] 💀 Zombi WebSocket bağlantısı sonlandırıldı');
+                return client.terminate();
+            }
+            wsWithAlive.isAlive = false;
+            client.ping();
+        });
+    }, 30000);
+
+    wss.on('close', () => {
+        clearInterval(keepAliveInterval);
+    });
+
     wss.on('connection', (ws) => {
         logger.info(`[Gateway] 🔗 WebSocket bağlantısı açıldı`);
+
+        const wsWithAlive = ws as WebSocket & { isAlive?: boolean };
+        wsWithAlive.isAlive = true;
+        ws.on('pong', () => {
+            wsWithAlive.isAlive = true;
+        });
 
         // --- Per-connection mesaj kuyruğu (race condition önleme) ---
         const messageQueue: Array<{ data: WebSocketMessage }> = [];

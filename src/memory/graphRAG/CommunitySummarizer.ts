@@ -266,7 +266,6 @@ export class CommunitySummarizer {
     community: Community,
     members: MemoryRow[],
   ): CommunitySummary {
-    // Basit parsing: JSON formatı beklenir
     let parsed: {
       summary?: string;
       keyEntities?: Array<{ name: string; type: string; importance?: number }>;
@@ -274,33 +273,56 @@ export class CommunitySummarizer {
       topics?: string[];
     } = {};
 
+    let parseSuccess = false;
+
+    // 1. Direkt JSON dene
     try {
-      // JSON block'u bul
-      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) ||
-                        content.match(/```\s*([\s\S]*?)\s*```/);
-      const jsonStr = jsonMatch ? jsonMatch[1] : content;
-      parsed = JSON.parse(jsonStr);
+      parsed = JSON.parse(content);
+      parseSuccess = true;
     } catch {
-      // JSON parse başarısız → metin olarak kullan
-      logger.warn('[CommunitySummarizer] JSON parse failed, using text fallback');
+      // 2. Markdown JSON block dene (```json veya ```)
+      const jsonMatch = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+      if (jsonMatch) {
+        try {
+          parsed = JSON.parse(jsonMatch[1]);
+          parseSuccess = true;
+        } catch { /* devam et */ }
+      }
     }
 
+    // 3. Son çare: İlk { ve son } arasını parse et
+    if (!parseSuccess) {
+      const startIdx = content.indexOf('{');
+      const endIdx = content.lastIndexOf('}');
+      if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+        try {
+          parsed = JSON.parse(content.slice(startIdx, endIdx + 1));
+          parseSuccess = true;
+        } catch { /* fallback'e geç */ }
+      }
+    }
+
+    if (!parseSuccess) {
+      logger.warn('[CommunitySummarizer] All JSON parsing attempts failed, using text fallback');
+    }
+
+    // Safe extraction
     const summary = parsed.summary || content.substring(0, 500);
-    const keyEntities = (parsed.keyEntities || [])
-      .slice(0, 10)
-      .map(e => ({
-        name: e.name || '',
-        type: e.type || 'unknown',
-        importance: e.importance ?? 0.5,
-      }));
-    const keyRelations = (parsed.keyRelations || [])
-      .slice(0, 5)
-      .map(r => ({
-        source: r.source || '',
-        target: r.target || '',
-        type: r.type || 'related_to',
-      }));
-    const topics = parsed.topics || [];
+    const keyEntities = Array.isArray(parsed.keyEntities)
+      ? parsed.keyEntities.slice(0, 10).map((e: any) => ({
+          name: e?.name || '',
+          type: e?.type || 'unknown',
+          importance: typeof e?.importance === 'number' ? e.importance : 0.5,
+        }))
+      : [];
+    const keyRelations = Array.isArray(parsed.keyRelations)
+      ? parsed.keyRelations.slice(0, 5).map((r: any) => ({
+          source: r?.source || '',
+          target: r?.target || '',
+          type: r?.type || 'related_to',
+        }))
+      : [];
+    const topics = Array.isArray(parsed.topics) ? parsed.topics : [];
 
     return {
       communityId: community.id,
@@ -424,7 +446,10 @@ Lütfen aşağıdaki formatta JSON olarak özet üret:
 2. keyEntities en fazla ${options.maxKeyEntities} adet olmalı
 3. keyRelations en fazla ${options.maxKeyRelations} adet olmalı
 4. topics 3-5 adet olmalı
-5. Sadece JSON döndür, başka açıklama ekleme`;
+5. Sadece JSON döndür, başka açıklama ekleme
+6. ÇIKTI SADECE JSON OLMALIDIR. Başlangıç karakteri {, bitiş karakteri } olmalıdır.
+7. Markdown code block (\`\`\` veya \`\`\`json) KULLANMA.
+8. Açıklama, selamlama veya başka hiçbir metin EKLEME.`;
   }
 
   /**

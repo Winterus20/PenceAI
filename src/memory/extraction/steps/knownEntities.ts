@@ -11,13 +11,13 @@ export class KnownEntitiesStep implements ExtractorStep {
         let newUnprocessedText = context.unprocessedText;
         const newEntities: ExtractedEntity[] = [];
 
-        // Hızlıca cümle içindeki kelimeleri/öbekleri kontrol et (Greedy match tavsiye edilir, bu basit bir sürüm)
-        const entries = Array.from(context.existingEntitiesCache);
+        // Map'i array'e çevir (name, type pair olarak)
+        const entries = Array.from(context.existingEntitiesCache.entries());
 
         // Uzundan kısaya sırala ki 'Yapay Zeka' varken önce 'Yapay'ı bulmasın
-        entries.sort((a, b) => b.length - a.length);
+        entries.sort((a, b) => b[0].length - a[0].length);
 
-        for (const knownEntity of entries) {
+        for (const [knownEntity, entityType] of entries) {
             // Regex ile tam kelime eşleşmesi ara (case-insensitive)
             // Sadece harf, rakam ve Türkçe karakter içeren kelimeleri tam eşleştirmek için \b sınırını kullanırız
             const regex = new RegExp(`\\b${escapeRegExp(knownEntity)}\\b`, 'gi');
@@ -25,8 +25,8 @@ export class KnownEntitiesStep implements ExtractorStep {
             if (regex.test(newUnprocessedText)) {
                 // Eşleşme bulundu
                 newEntities.push({
-                    name: knownEntity, // Orijinal formatlı halini cache'den almak daha iyi olabilir, şu an cache string
-                    type: 'concept', // Veritabanından tipi de yüklememiz gerekirdi ama cache Set<string> olunca genel 'concept' veriyoruz
+                    name: knownEntity,
+                    type: entityType, // Artık doğru entity type kullanılıyor (concept yerine gerçek tip)
                     confidence: 1.0,
                     source: 'cache'
                 });

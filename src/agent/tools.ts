@@ -672,10 +672,11 @@ function extractPathsFromCommand(command: string): string[] {
         if (looksLikePath(m[1])) paths.push(m[1]);
     }
 
-    // 3) Tırnaksız yollar — boşluklarla ayrılmış tokenlardan çıkar
+    // 3) Tırnaksız yollar — boşluklarla veya "=" işaretiyle ayrılmış tokenlardan çıkar
     //    Windows: C:\... veya \\... 
     //    Linux: /home/... /usr/...
-    const tokens = command.split(/\s+/);
+    //    Flags: --config=C:\... vb. durumları yakalamak için "=" de dahil edilir.
+    const tokens = command.split(/[\s=]+/);
     for (const token of tokens) {
         const clean = token.replace(/^["']|["']$/g, '');
         if (looksLikePath(clean) && !paths.includes(clean)) {

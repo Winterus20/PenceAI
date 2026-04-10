@@ -520,44 +520,12 @@ export function getServerStatus(name: string): MCPServerRecord | null {
 }
 
 /**
- * Kurulu MCP server'ları MCP_SERVERS environment variable'ına yazar.
- * Hem process.env'i hem de .env dosyasını günceller.
- * Bu sayede runtime.ts'den parseMCPConfig() çağrıldığında marketplace'ten
- * kurulan server'lar da dahil edilir ve uygulama yeniden başlatıldığında
- * kaybolmaz.
+ * Server'ları senkronize eder. (Artık .env dosyasına YAZILMIYOR)
+ * Bütün yapılandırma veritabanında saklanır.
  */
 async function updateMCPServersEnv(): Promise<void> {
-  const activeServers = Array.from(installedServers.values())
-    .filter(s => s.status === 'active')
-    .map(s => ({
-      name: s.name,
-      command: s.command,
-      args: s.args,
-      env: s.env,
-      cwd: s.cwd,
-      timeout: s.timeout,
-    }));
-
-  const jsonValue = activeServers.length > 0 ? JSON.stringify(activeServers) : '';
-
-  // process.env'i güncelle
-  if (jsonValue) {
-    process.env.MCP_SERVERS = jsonValue;
-    process.env.ENABLE_MCP = 'true';
-    logger.info(`[MCP:service] MCP_SERVERS process.env updated — ${activeServers.length} server(s)`);
-  } else {
-    delete process.env.MCP_SERVERS;
-    delete process.env.ENABLE_MCP;
-    logger.info('[MCP:service] MCP_SERVERS process.env cleared (no active servers)');
-  }
-
-  // .env dosyasını güvenli şekilde güncelle
-  try {
-    await secureUpdateEnvFile('MCP_SERVERS', jsonValue);
-    await secureUpdateEnvFile('ENABLE_MCP', activeServers.length > 0 ? 'true' : '');
-  } catch (error) {
-    logger.error({ error }, '[MCP:service] Failed to securely update .env file');
-  }
+  const activeServersCount = Array.from(installedServers.values()).filter(s => s.status === 'active').length;
+  logger.info(`[MCP:service] Registry synchronized. Active servers: ${activeServersCount}`);
 }
 
 /**

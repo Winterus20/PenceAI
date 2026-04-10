@@ -18,13 +18,14 @@ import { initializeMCP, shutdownMCP } from '../agent/mcp/runtime.js';
 import { initMCPPersistence } from './services/mcpService.js';
 
 import { TaskQueue, BackgroundWorker, TaskPriority } from '../autonomous/index.js';
-import { FeedbackManager, filterThought } from '../autonomous/urgeFilter.js';
+import { FeedbackManager } from '../autonomous/urgeFilter.js';
 import { SubAgentManager } from '../autonomous/curiosityEngine.js';
-import { think } from '../autonomous/thinkEngine.js';
 import { SemanticRouter } from '../router/semantic.js';
 import { logger, runWithTraceId } from '../utils/logger.js';
 import { registerRoutes } from './routes.js';
 import { setupWebSocket } from './websocket.js';
+import { registerSystemJobs } from './jobs/systemTasks.js';
+import { registerAutonomousWorkerJobs } from './jobs/autonomousWorker.js';
 import {
     attachDashboardWebSocketUpgrade,
     createDashboardAuthMiddleware,
@@ -78,8 +79,20 @@ async function main() {
         process.exit(1);
     }
 
-    // 3.5 MCP Initialization (feature flag ile kontrollü)
-    const mcpManager = await initializeMCP();
+    // 3.5 MCP Initialization
+    const { getInstalledServers } = await import('./services/mcpService.js');
+    const activeServers = getInstalledServers()
+        .filter(s => s.status === 'active')
+        .map(s => ({
+            name: s.name,
+            command: s.command,
+            args: s.args,
+            env: s.env,
+            cwd: s.cwd,
+            timeout: s.timeout,
+        }));
+    
+    const mcpManager = await initializeMCP(activeServers);
     if (mcpManager) {
         logger.info(`[Gateway] 🔌 MCP Runtime initialized — ${mcpManager.connectedServerCount} server(s), ${mcpManager.totalToolCount} tool(s)`);
     }
@@ -95,272 +108,22 @@ async function main() {
     // AgentRuntime'a Feedback Manager'ı bağla ki message events (read/reply vb) yakalansın.
     agent.setAutonomousManagers(feedbackManager);
 
+    // ============ EXPRESS & WSS INIT ============
+    const app = express();
+    const server = createServer(app);
+    const wss = new WebSocketServer({ noServer: true });
+
     // 4.6 Autonomous Worker (With SQLite Checkpointing)
     const taskQueue = new TaskQueue(database.getDb());
     const autonomousWorker = new BackgroundWorker(taskQueue);
     logger.info(`[Gateway] ⚙️ Autonomous Background Worker and Persistent Priority Queue initialized`);
 
-    taskQueue.registerHandler('memory_decay', async (payload, signal) => {
-        if (signal.aborted) return;
-        try {
-            const result = memory.decayMemories();
-            if (result.decayed > 0 || result.archived > 0) {
-                logger.info(`[Worker] 🧹 Bellek bakımı: ${result.decayed} azaltıldı, ${result.archived} arşivlendi`);
-            }
-            const relResult = memory.decayRelationships();
-            if (relResult.pruned > 0) {
-                logger.info(`[Worker] 🧹 İlişki bakımı: ${relResult.pruned} zayıf ilişki temizlendi`);
-            }
-            broadcastStats();
-        } catch (err) {
-            logger.error({ err }, '[Worker] Bellek/İlişki bakımı hatası');
-        }
-    });
+    // Background jobs ayrıştırıldı
+    registerSystemJobs(taskQueue, { memory, agent, broadcastStats });
+    registerAutonomousWorkerJobs(taskQueue, { memory, llm, feedbackManager, subAgentManager, wss, config });
 
-    taskQueue.registerHandler('embedding_backfill', async (payload, signal) => {
-        if (signal.aborted) return;
-        try {
-            const count = await memory.ensureAllEmbeddings();
-            if (count > 0) {
-                logger.info(`[Worker] 🔢 ${count} bellek için embedding hesaplandı (backfill)`);
-            }
-
-            if (signal.aborted) return;
-            const relCount = await memory.ensureAllMemoryGraphRelations();
-            if (relCount && relCount > 0) {
-                logger.info(`[Worker] 🔗 ${relCount} bellek için graf ilişkisi oluşturuldu (backfill)`);
-            }
-
-            if (signal.aborted) return;
-            const msgCount = await memory.ensureAllMessageEmbeddings();
-            if (msgCount && msgCount > 0) {
-                logger.info(`[Worker] 🔢 ${msgCount} mesaj için embedding hesaplandı (backfill)`);
-            }
-        } catch (err) {
-            logger.warn({ err }, '[Worker] Embedding/Graph backfill hatası');
-        }
-    });
-
-    // Ebbinghaus stability güncellemeleri — searchMemories'den enqueue edilen ID'leri toplu işle
-    taskQueue.registerHandler('ebbinghaus_update', async (payload, signal) => {
-        if (signal.aborted) return;
-        try {
-            const memoryIds: number[] = payload.memoryIds ?? [];
-            if (memoryIds.length > 0) {
-                memory.executeEbbinghausUpdates(memoryIds);
-            }
-        } catch (err) {
-            logger.warn({ err }, '[Worker] Ebbinghaus güncelleme hatası');
-        }
-    });
-
-    // MemoryManager'a TaskQueue referansını bağla — Ebbinghaus update'leri artık worker'a gider
     memory.setTaskQueue(taskQueue);
-
-    // AgentRuntime'a TaskQueue bağla — arka plan LLM görevleri kuyruğa alınır
     agent.setTaskQueue(taskQueue);
-
-    // OPT-3: Derin bellek çıkarımı handler'ı — TaskQueue üzerinden çalışır
-    taskQueue.registerHandler('deep_memory_extraction', async (payload, signal) => {
-        if (signal.aborted) return;
-        try {
-            await agent.extractMemoriesDeep(payload.conversationId);
-        } catch (err) {
-            logger.error({ err }, '[Worker] Derin bellek çıkarımı hatası');
-        }
-    });
-
-    // OPT-3: Konuşma özetleme handler'ı — TaskQueue üzerinden çalışır
-    taskQueue.registerHandler('conversation_summarization', async (payload, signal) => {
-        if (signal.aborted) return;
-        try {
-            await agent.summarizeConversation(payload.conversationId);
-        } catch (err) {
-            logger.error({ err }, '[Worker] Konuşma özetleme hatası');
-        }
-    });
-
-    // ═══════════════════════════════════════════════════════════
-    // OTONOM İŞLEYİCİLER (AUTONOMOUS HANDLERS)
-    // ═══════════════════════════════════════════════════════════
-
-    // Autonomous tick state — son seçilen seed'i takip et
-    let lastSelectedSeedId: number | undefined = undefined;
-    let lastSeedSelectedAt: number = 0; // Unix timestamp ms
-
-    // 1. Otonom Düşünme Döngüsü
-    taskQueue.registerHandler('autonomous_tick', async (payload, signal) => {
-        if (signal.aborted) return;
-
-        // --- 1. PRE-LLM GATEKEEPER: Feedback-based kontrol ---
-        const preFeedback = feedbackManager.getState();
-        if (preFeedback.reluctancePenalty > 0.4) {
-            logger.info('[Worker] 💤 Kullanıcı isteksiz, otonom döngü uykuda.');
-            let sleepDelayMinutes = 15;
-            if (preFeedback.lastSignalAt > 0) {
-                const hoursSinceActive = (Date.now() - preFeedback.lastSignalAt) / (1000 * 60 * 60);
-                if (hoursSinceActive > 24) sleepDelayMinutes = 1440;
-                else if (hoursSinceActive > 4) sleepDelayMinutes = 120;
-            }
-            taskQueue.enqueue({ id: `auto_tick_${Date.now()}`, type: 'autonomous_tick', priority: TaskPriority.P4_LOW, payload: {}, addedAt: Date.now() + (sleepDelayMinutes * 60 * 1000) });
-            return;
-        }
-
-        // --- 2. THINK ENGINE: Saf Düşünme ---
-        const neutralEmotion = { primary: 'Nötr', intensity: 'low' as const, description: 'Sakin ve odaklı' };
-
-        // Seed cooldown kontrolü
-        const SEED_COOLDOWN_MS = 30 * 60 * 1000; // 30 dakika
-        const now = Date.now();
-        if (lastSelectedSeedId && (now - lastSeedSelectedAt) < SEED_COOLDOWN_MS) {
-            logger.debug(`[Worker] Seed #${lastSelectedSeedId} cooldown'da, alternatif seed aranıyor...`);
-        }
-
-        // Rastgele soru şablonu seç (0-4 arası)
-        const questionIdx = Math.floor(Math.random() * 5);
-        const thoughtResult = think(database.getDb(), neutralEmotion, lastSelectedSeedId, 30, questionIdx);
-        if (!thoughtResult) {
-            // Düşünecek bir tohum bulunamadı. Kısa bekle ve tekrar dene.
-            taskQueue.enqueue({ id: `auto_tick_${Date.now()}`, type: 'autonomous_tick', priority: TaskPriority.P4_LOW, payload: {}, addedAt: Date.now() + (30 * 60 * 1000) });
-            return;
-        }
-
-        // Seçilen seed'i kaydet
-        lastSelectedSeedId = thoughtResult.thought.seed.memoryId;
-        lastSeedSelectedAt = Date.now();
-
-        if (signal.aborted) return;
-
-        // --- 3. MODEL TIERING: Hafif LLM ile Öz Düşünüm (Self-Reflection) ---
-        // Burada ağır bir model yerine arka plan araştırmaları için daha hafif bir model kullanılmalı
-        // Şimdilik ana modeli (llm objesi) kullanıyoruz; ileride config üzerinden config.backgroundLLMModel ile ayrıştırılabilir.
-        logger.info(`[Worker] 🤔 Otonom düşünce başlıyor. Konu: "${thoughtResult.thought.seed.content.substring(0, 30)}..."`);
-        let llmThoughtOutput = "";
-        try {
-            const result = await llm.chat([{ role: 'user', content: thoughtResult.prompt }], { temperature: 0.6, maxTokens: 800 });
-            llmThoughtOutput = result.content;
-        } catch (err) {
-            logger.error({ err }, '[Worker] LLM Self-Reflection çağrısı başarısız oldu.');
-            return;
-        }
-
-        if (signal.aborted) return;
-
-        // --- 4. OPT F-15: URGE FILTER — Dinamik Değerlendirme ---
-        // LLM çıktısından JSON metadata parse et; başarısızlıkta güvenli varsayılanlar kullan.
-        let relevanceScore = 0.5;
-        let timeSensitivity = 0.3;
-        let llmReasoning = '';
-        try {
-            // 1) Markdown code fence içindeki JSON'u bul
-            const codeFenceMatch = llmThoughtOutput.match(/```json\s*([\s\S]*?)```/i);
-            const jsonStr = codeFenceMatch ? codeFenceMatch[1] : llmThoughtOutput;
-            
-            // 2) İlk { ... } bloğunu bul
-            const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                const parsed = JSON.parse(jsonMatch[0]);
-                if (typeof parsed.relevance === 'number') {
-                    relevanceScore = Math.max(0, Math.min(1, parsed.relevance));
-                }
-                if (typeof parsed.timeSensitivity === 'number') {
-                    timeSensitivity = Math.max(0, Math.min(1, parsed.timeSensitivity));
-                }
-                if (typeof parsed.reasoning === 'string') {
-                    llmReasoning = parsed.reasoning;
-                }
-            }
-        } catch (err) {
-            logger.warn({ err }, '[Worker] LLM JSON parse başarısız, fallback değerler kullanılıyor.');
-        }
-
-        const evaluation = {
-            relevanceScore,
-            timeSensitivity,
-            emotionalIntensity: 0.5,
-            sourceType: 'thought_chain' as const
-        };
-        const currentHour = new Date().getHours();
-        const decisionResult = filterThought(evaluation, feedbackManager.getState(), currentHour);
-
-        logger.info(`[Worker] ⚖️ Otonom Karar: ${decisionResult.decision.toUpperCase()}. Skor: ${decisionResult.score.toFixed(2)} (Eşik: ${decisionResult.threshold.toFixed(2)}) [Relevance: ${relevanceScore.toFixed(2)}, TimeSensitivity: ${timeSensitivity.toFixed(2)}]`);
-        if (llmReasoning) {
-            logger.debug(`[Worker] 🧠 LLM Reasoning: ${llmReasoning}`);
-        }
-
-        // --- 5. AKSİYON AL ---
-        if (decisionResult.decision === 'send') {
-            // Kullanıcıya mesaj atmaya karar verdik! (Uygulamanın aktif bir Frontend WebSocket kanalı olması lazım, 
-            // şimdilik sisteme broadcast atıyoruz veya DB ye Action olarka ekliyoruz.)
-            logger.info(`[Worker] 🚀 PROAKTİF MESAJ GÖNDERİLİYOR: ` + llmThoughtOutput.substring(0, 100));
-        } else if (decisionResult.decision === 'digest') {
-            // Bir kenara not et
-            logger.info(`[Worker] 📥 Düşünce Digest havuzuna alındı.`);
-            // TODO: Digest tablosuna ekle
-        }
-
-        // Bir sonraki döngüyü exponential backoff ile planla
-        const feedback = feedbackManager.getState();
-        let delayMinutes = 15;
-
-        if (decisionResult.decision === 'send') {
-            // Mesaj gönderildiyse daha uzun bekle (kullanıcıyı rahatsız etme)
-            delayMinutes = 60;
-        } else if (decisionResult.decision === 'digest') {
-            delayMinutes = 30;
-        } else {
-            // Discard - kısa bekle
-            delayMinutes = 15;
-        }
-
-        // Kullanıcı aktivitesine göre ayarla
-        if (feedback.lastSignalAt > 0) {
-            const hoursSinceActive = (Date.now() - feedback.lastSignalAt) / (1000 * 60 * 60);
-            if (hoursSinceActive > 24) delayMinutes = 1440; // 24 saatte bir
-            else if (hoursSinceActive > 4) delayMinutes = 120; // 2 saatte bir
-            else if (hoursSinceActive < 0.5) delayMinutes = Math.min(delayMinutes, 30); // Aktif kullanıcı - daha sık
-        }
-
-        logger.info(`[Worker] ⏭️ Sonraki otonom tick: ${delayMinutes} dakika sonra`);
-        taskQueue.enqueue({ id: `auto_tick_${Date.now()}`, type: 'autonomous_tick', priority: TaskPriority.P4_LOW, payload: {}, addedAt: Date.now() + (delayMinutes * 60 * 1000) });
-    });
-
-    // 2. Alt Ajan Merak Motoru
-    taskQueue.registerHandler('subagent_research', async (payload, signal) => {
-        if (signal.aborted) return;
-        const fixationTopic = payload.fixationTopic;
-        if (!fixationTopic) return;
-
-        // Görevi Yarat
-        const task = subAgentManager.createTask({
-            topic: fixationTopic,
-            urgency: 'medium',
-            source: 'thought_chain',
-            relatedMemoryIds: []
-        });
-
-        if (!task) {
-            logger.info(`[Worker] 🛑 SubAgent limiti doldu. Merak iptal: "${fixationTopic}"`);
-            return;
-        }
-
-        logger.info(`[Worker] 🔎 SubAgent Merak Motoru başladı: "${fixationTopic}"`);
-
-        // --- BURADA WEB ARAMASI YAPILIP ÖZETLENMELİ (MOCK) ---
-        // Şimdilik hafif modeli çağırarak mock bir rapor dönüyoruz.
-        const mockReportStr = await llm.chat([{ role: 'user', content: `Lütfen şu konu hakkında genel bilgi ver ve kısaca özetle: ${fixationTopic}.` }], { temperature: 0.3, maxTokens: 400 });
-
-        subAgentManager.completeTask(task.id, {
-            summary: mockReportStr.content,
-            keyFindings: ['Örnek bulgu 1', 'Örnek bulgu 2'],
-            sources: ["web_search_mock"],
-            relevanceScore: 0.8,
-            isTimeSensitive: false,
-            generatedAt: new Date().toISOString()
-        });
-
-        logger.info(`[Worker] ✅ SubAgent Raporu Tamamlandı: "${fixationTopic}"`);
-    });
 
     taskQueue.loadPendingTasks();
 
@@ -393,11 +156,7 @@ async function main() {
 
     logger.info(`[Gateway] 🧠 Semantic Router hazır (Lokal Niyet Algılama Aktif)`);
 
-    // 6. Express + WebSocket
-    const app = express();
-    const server = createServer(app);
-    const wss = new WebSocketServer({ noServer: true });
-
+    // 6. Express (WebSocket zaten init edildi)
     attachDashboardWebSocketUpgrade(server, wss, config.dashboardPassword);
 
     // Static dosyalar (Dashboard)
@@ -523,6 +282,7 @@ async function main() {
     // Graceful shutdown
     const shutdown = async () => {
         logger.info('\n[Gateway] 🛑 Kapatılıyor...');
+        if (statsDebounceTimer) clearTimeout(statsDebounceTimer);
         clearInterval(decayTimer);
         autonomousWorker.stop();
         try {

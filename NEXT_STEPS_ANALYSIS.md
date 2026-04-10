@@ -211,8 +211,6 @@ Benim tavsiyem **MCP Entegrasyonu (1.1)** ile başlamak. Nedenleri:
 3. **Diğer modüllere bağımlılık yok** — Hemen başlanabilir
 4. **Planlar hazır** — `FUTURE_IMPLEMENTATION_PLAN.md`'de detaylı tasarım mevcut
 
-Alternatif olarak, eğer daha somut ve kullanıcı-facing bir iyileştirme isteniyorsa **Token Usage Tracking (1.2)** küçük ama etkili bir başlangıç adımı olabilir.
-
 ---
 
 ## 🤔 Sana Sorular

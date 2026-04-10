@@ -122,6 +122,12 @@ export class PageRankScorer {
       scores.set(nodeId, 1 / N);
     }
 
+    // Dangling node katkısını önceden hesapla (iterasyonlar arasında değişmez)
+    const danglingNodeCount = this.countDanglingNodes(graph);
+    const danglingContribution = danglingNodeCount > 0
+      ? (danglingNodeCount / N) * (1 / N)
+      : 0;
+
     // Power iteration
     let iteration = 0;
     let maxDiff = Infinity;
@@ -145,12 +151,6 @@ export class PageRankScorer {
             incomingContribution += neighborScore / neighborOutDegree;
           }
         }
-
-        // Dangling node katkısı
-        const danglingNodes = this.countDanglingNodes(graph);
-        const danglingContribution = danglingNodes > 0
-          ? (danglingNodes / N) * (1 / N)
-          : 0;
 
         // PageRank formülü
         const newScore = (1 - dampingFactor) / N

@@ -17,19 +17,18 @@ export class LLMFallbackStep implements ExtractorStep {
             return context;
         }
 
-        // We give LLM the *unprocessed* text but also inform it of what we *already* found
-        // So LLM doesn't hallucinate dates or emails that we already caught perfectly.
+        // LLM'e zaten bulunan entity'leri bilgi olarak ver — tekrar bulmasını önle
+        // Bu bilgi, extractFn içindeki prompt'a enjekte edilecek
         const hints = context.entities.map(e => `${e.name} (${e.type})`).join(', ');
 
-        // This is a simplified integration. In reality, the prompt should be adjusted inside the tool logic 
-        // to say "I already found: ${hints}, now find the rest in this text: ${context.unprocessedText}"
-        // For backwards compatibility and ease of integration right now, we will pass existing 
-        // cached entities + our newly found entities to the LLM's `existingEntities` param.
+        // Mevcut cache + yeni bulunan entity'leri birleştir
+        const combinedExisting = new Map(context.existingEntitiesCache);
+        context.entities.forEach(e => combinedExisting.set(e.name, e.type));
 
-        const combinedExisting = Array.from(context.existingEntitiesCache);
-        context.entities.forEach(e => combinedExisting.push(e.name));
-
-        const result = await this.llmExtractFn(context.unprocessedText, combinedExisting);
+        // extractFn'e hints ve combinedExisting entity listesi geçir
+        // extractFn, bu bilgiyi prompt'a ekleyerek LLM'in duplikasyon yapmasını önler
+        const existingEntityNames = Array.from(combinedExisting.keys());
+        const result = await this.llmExtractFn(context.unprocessedText, existingEntityNames);
 
         const newEntities: ExtractedEntity[] = result.entities.map(e => ({
             name: e.name,

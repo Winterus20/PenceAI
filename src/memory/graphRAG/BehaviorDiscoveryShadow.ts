@@ -81,7 +81,6 @@ function estimateTokenCount(results: { id: number; score: number }[]): number {
 export class BehaviorDiscoveryShadow {
   private config: BehaviorDiscoveryConfig;
   private comparisons: RetrievalComparison[] = [];
-  private randomSeed: number = Math.random();
 
   constructor(config?: Partial<BehaviorDiscoveryConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -99,9 +98,7 @@ export class BehaviorDiscoveryShadow {
     }
     
     // Sample rate kontrolü
-    this.randomSeed = (this.randomSeed * 9301 + 49297) % 233280;
-    const randomValue = this.randomSeed / 233280;
-    return randomValue < this.config.sampleRate;
+    return Math.random() < this.config.sampleRate;
   }
 
   /**
@@ -118,6 +115,7 @@ export class BehaviorDiscoveryShadow {
     baselineResults: { id: number; score: number }[],
     experimentalResults: { id: number; score: number }[],
     strategy: string,
+    duration: number = 0,
   ): Promise<RetrievalComparison | null> {
     if (!this.shouldRun()) return null;
 
@@ -142,7 +140,7 @@ export class BehaviorDiscoveryShadow {
       overlap: jaccard,
       experimentalUniqueCount,
       baselineUniqueCount,
-      duration: 0, // caller should set if needed
+      duration,
       timestamp: new Date(),
       strategy,
     };

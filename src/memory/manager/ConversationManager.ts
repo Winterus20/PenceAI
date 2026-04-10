@@ -303,4 +303,45 @@ export class ConversationManager {
 
     return deletedConvs > 0;
   }
+
+  /**
+   * Birden çok konuşmayı tek bir transaction içinde siler.
+   */
+  deleteConversations(conversationIds: string[]): { deletedCount: number, results: { id: string, deleted: boolean }[] } {
+    if (!conversationIds || conversationIds.length === 0) return { deletedCount: 0, results: [] };
+
+    const results: { id: string; deleted: boolean }[] = [];
+    
+    const runBulkDelete = this.db.transaction((ids: string[]) => {
+      for (const id of ids) {
+        let deleted = false;
+        try {
+          const msgIds = this.db.prepare(`SELECT id FROM messages WHERE conversation_id = ?`).all(id) as Array<{ id: number }>;
+
+          if (msgIds.length > 0) {
+            const deleteEmbStmt = this.db.prepare(`DELETE FROM message_embeddings WHERE rowid = CAST(? AS INTEGER)`);
+            for (const { id: mId } of msgIds) {
+              deleteEmbStmt.run(BigInt(mId));
+            }
+          }
+
+          this.db.prepare(`DELETE FROM messages WHERE conversation_id = ?`).run(id);
+          const { changes: deletedConvs } = this.db.prepare(`DELETE FROM conversations WHERE id = ?`).run(id);
+          deleted = deletedConvs > 0;
+        } catch (err) {
+          logger.warn({ err }, `[Memory] Toplu silme sırasında hata (conv=${id})`);
+        }
+        results.push({ id, deleted });
+      }
+    });
+
+    runBulkDelete(conversationIds);
+
+    const deletedCount = results.filter(r => r.deleted).length;
+    if (deletedCount > 0) {
+      logger.info(`[Memory] Toplu silme tamamlandı: ${deletedCount}/${conversationIds.length} konuşma silindi.`);
+    }
+
+    return { deletedCount, results };
+  }
 }

@@ -42,7 +42,9 @@ export class OpenAIProvider extends LLMProvider {
         }
         this.client = new OpenAI({
             apiKey,
-            baseURL: customBaseUrl
+            baseURL: customBaseUrl,
+            timeout: 120000, // 2 dakika timeout - LLM yanıtları için makul süre
+            maxRetries: 2,   // Network hatalarında 2 kez retry
         });
     }
 

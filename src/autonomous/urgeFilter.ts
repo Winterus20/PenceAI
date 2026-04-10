@@ -96,21 +96,27 @@ export const SIGNAL_HISTORY_SIZE = 20;
 /**
  * Sessiz saat kontrolü — gece yarısından sonra sessiz periyotta mıyız?
  *
- * @param hour — saat (0-23)
+ * @param hour — saat (UTC veya yerel saat)
+ * @param userTimezoneOffset — kullanıcının saat dilimi ofseti (örn: +3). Belirtilmezse `hour` yerel saat kabul edilir.
  * @returns true ise mesaj gönderilmez
  */
-export function isQuietHour(hour: number): boolean {
-    return hour >= QUIET_HOURS_START && hour < QUIET_HOURS_END;
+export function isQuietHour(hour: number, userTimezoneOffset?: number): boolean {
+    let localHour = hour;
+    if (userTimezoneOffset !== undefined) {
+        localHour = (hour + userTimezoneOffset + 24) % 24;
+    }
+    return localHour >= QUIET_HOURS_START && localHour < QUIET_HOURS_END;
 }
 
 /**
  * Tüm hard rule'ları kontrol eder.
  *
- * @param hour — current hour (0-23)
+ * @param hour — current hour (UTC veya local)
+ * @param userTimezoneOffset — kullanıcının timezone offset'i
  * @returns null = geçti, string = engelleyen kural adı
  */
-export function checkHardRules(hour: number): string | null {
-    if (isQuietHour(hour)) {
+export function checkHardRules(hour: number, userTimezoneOffset?: number): string | null {
+    if (isQuietHour(hour, userTimezoneOffset)) {
         return `quiet_hours (${QUIET_HOURS_START}:00-${QUIET_HOURS_END}:00)`;
     }
     return null;
@@ -284,18 +290,20 @@ export function decayFeedbackState(
  * @param evaluation    — düşünce değerlendirme girdisi
  * @param feedbackState — geri bildirim döngüsü durumu
  * @param currentHour   — mevcut saat (0-23), varsayılan: şimdiki saat
+ * @param userTimezoneOffset — kullanıcının saat dilimi ofseti
  * @returns FilterResult
  */
 export function filterThought(
     evaluation: ThoughtEvaluation,
     feedbackState: FeedbackState,
-    currentHour?: number
+    currentHour?: number,
+    userTimezoneOffset?: number
 ): FilterResult {
     const hour = currentHour ?? new Date().getHours();
     const reasons: string[] = [];
 
     // ── Katman 1: Hard Rules ──────────────────
-    const blockedBy = checkHardRules(hour);
+    const blockedBy = checkHardRules(hour, userTimezoneOffset);
     if (blockedBy) {
         return {
             decision: 'blocked',

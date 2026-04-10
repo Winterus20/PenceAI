@@ -137,44 +137,48 @@ describe('TokenPruner', () => {
 
     it('should prune memories when over budget', () => {
       const budget: TokenBudget = {
-        total: 100,
-        memories: 10,
+        total: 400,
+        memories: 50,
         communitySummaries: 50,
-        graphContext: 40,
+        graphContext: 300,
       };
 
       const pruner = new TokenPruner({ budget, tokenizer: simpleTokenizer });
       const memories = [
         createMemory(1, 'high importance memory content here with many words to exceed budget', 9),
-        createMemory(2, 'low importance memory with extra words', 1),
-        createMemory(3, 'medium importance memory test with more words', 5),
+        createMemory(2, 'low importance memory with extra words to make it longer content', 1),
+        createMemory(3, 'medium importance memory test with more words and content here too', 5),
+        createMemory(4, 'another low importance memory with quite a few words to push over', 2),
+        createMemory(5, 'yet another memory with lots of words to ensure we exceed the budget limit easily', 3),
       ];
 
       const result = pruner.prune(memories, []);
 
-      // With very tight budget, some memories should be pruned
+      // With tight budget, some memories should be pruned
       expect(result.prunedMemories.length).toBeLessThanOrEqual(memories.length);
       expect(result.withinBudget).toBe(true);
     });
 
     it('should prune summaries when over budget', () => {
       const budget: TokenBudget = {
-        total: 100,
+        total: 450,
         memories: 50,
-        communitySummaries: 5,
-        graphContext: 45,
+        communitySummaries: 20,
+        graphContext: 300,
       };
 
       const pruner = new TokenPruner({ budget, tokenizer: simpleTokenizer });
       const summaries = [
-        createSummary('c1', 'first community summary with lots of text words here'),
-        createSummary('c2', 'second summary with extra words'),
-        createSummary('c3', 'third community summary text here more words'),
+        createSummary('c1', 'first community summary with lots of text words here and more content'),
+        createSummary('c2', 'second summary with extra words and additional text to push over'),
+        createSummary('c3', 'third community summary text here more words and extra content too'),
+        createSummary('c4', 'fourth summary with many words to ensure budget is exceeded'),
+        createSummary('c5', 'fifth summary with lots of text content to test pruning works'),
       ];
 
       const result = pruner.prune([], summaries);
 
-      // With very tight budget, some summaries should be pruned
+      // With tight budget, some summaries should be pruned
       expect(result.prunedSummaries.length).toBeLessThanOrEqual(summaries.length);
       expect(result.withinBudget).toBe(true);
     });

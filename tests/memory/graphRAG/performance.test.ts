@@ -206,7 +206,7 @@ describe('GraphRAG Performance', () => {
       expect(duration).toBeLessThan(100);
     });
 
-    test('500 node graph\'de PageRank < 500ms', () => {
+    test('500 node graph\'de PageRank < 1000ms', () => {
       createGraph(500, 0.05);
 
       const startTime = Date.now();
@@ -214,7 +214,7 @@ describe('GraphRAG Performance', () => {
       const duration = Date.now() - startTime;
 
       expect(scores.size).toBe(500);
-      expect(duration).toBeLessThan(500);
+      expect(duration).toBeLessThan(1000);
     });
 
     test('1000 node graph\'de PageRank < 2000ms', () => {

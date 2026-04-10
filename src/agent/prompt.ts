@@ -340,8 +340,75 @@ export function buildLightExtractionPrompt(userName: string = 'Kullanıcı'): st
 - Teknik hata mesajları veya geçici debugging bilgileri
 - Anlık planlar ("yarın şunu yapacağım" gibi kısa vadeli)
 - Sadece "isim" beyanları (kullanıcının adı haricinde, bağlamsız özel isimler)
-- Mesajın sonundaki "Bellekte Zaten Kayıtlı Bilgiler" listesindeki bilgilerin TEKRARLARI, YENİDEN İFADELERİ veya ALT KÜMELERİ (örn: bellekte "Kullanıcı 21 yaşında" varsa, "Yaş: 21" ÇIKARMA)
-- Mevcut bir bilgiyle aynı anlama gelen ama farklı kelimelerle yazılmış bilgileri ASLA çıkarma.
+
+## Kategori Tanımları (Karıştırma)
+
+- preference: Kullanıcının SEVDİKLERİ/SEVMEDİKLERİ (yemek, müzik, renk, teknoloji tercihi)
+  Örnek: "Kahveyi sütsüz sever", "VS Code kullanır"
+  
+- fact: Değişmez GERÇEKLER (yaş, meslek, konum, dil, eğitim)
+  Örnek: "İstanbul'da yaşıyor", "25 yaşında", "Yazılım mühendisi"
+  
+- habit: DÜZENLİ tekrarlanan davranışlar (alışkanlıklar, rutinler)
+  Örnek: "Her sabah 6'da kalkar", "Haftada 3 gün spor yapar"
+  
+- project: Aktif veya planlanan PROJELER/İŞLER (uzun vadeli)
+  Örnek: "E-ticaret sitesi geliştiriyor", "Startup kuruyor"
+  
+- event: ÖNEMLİ YAŞAM OLAYLARI (nadiren değişir, yaşam değiştirici)
+  Örnek: "2024'te taşındı", "Mezun oldu", "İş değiştirdi"
+  
+- other: Yukarıdaki kategorilere uymayan (çok nadir kullan)
+
+## Importance Skorlama Rehberi
+
+10: HAYATİ bilgiler (isim, yaş, ana meslek, yaşam konumu)
+8-9: ÖNEMLİ yaşam/iş bilgileri (eş, çocuk, ana hedef)
+6-7: KALICI tercihler (yemek, teknoloji, hobi)
+4-5: SPESİFİK detaylar (ikincil tercihler)
+2-3: ÇOK SPESİF/geçici (yakında değişebilir)
+1: NEREDEYSE GEREKSİZ (şüphe duyuyorsan 1 ver)
+
+## Bellek Kontrolü — Esnek Kurallar (Katı Değil!)
+
+Yeni bilgiyi mevcut belleklerle karşılaştır. 3 durum var:
+
+1️⃣ ATLA — Tamamen aynı anlama geliyorsa:
+   Mevcut: "Python biliyor"
+   Yeni: "Python kullanıyorum"
+   Karar: ATLA (aynı anlama geliyor)
+
+2️⃣ GÜNCELLE — Mevcut bilgiyi güncelliyorsa (süre, detay, konum değişti):
+   Mevcut: "Python ile 2 yıldır çalışıyor"
+   Yeni: "Python ile 3 yıldır çalışıyor, Django'ya da başladı"
+   Karar: "Python ile 3 yıldır çalışıyor, Django kullanıyor" (GÜNCELLE)
+
+3️⃣ EKLE — Mevcut bilgiye ek bilgi ekliyorsa veya tamamen yeniyse:
+   Mevcut: "Python biliyor"
+   Yeni: "Python ile 3 yıldır çalışıyor, Django kullanıyor"
+   Karar: "Django kullanıyor" (EKLE — Python zaten var)
+   NOT: Mevcut belleği GÜNCELLEME, sadece yeni kısmı ekle
+
+ÖNEMLİ: Mesajın sonundaki "Bellekte Zaten Kayıtlı Bilgiler" listesindeki bilgilerin TEKRARLARINI, YENİDEN İFADELERİNİ veya ALT KÜMELERİNİ çıkarma. Mevcut bir bilgiyle aynı anlama gelen ama farklı kelimelerle yazılmış bilgileri ATLA.
+
+## Örnekler
+
+✅ DOĞRU — Kalıcı bilgi:
+Kullanıcı: "Python ile 5 yıldır çalışıyorum, Django projeleri yaparım"
+Çıktı: [{"content": "Python ve Django ile 5 yıllık deneyime sahip", "category": "fact", "importance": 8}]
+
+✅ DOĞRU — Tercih:
+Kullanıcı: "Kahveyi sütsüz içmeyi tercih ederim"
+Çıktı: [{"content": "Kahveyi sütsüz içer", "category": "preference", "importance": 6}]
+
+❌ YANLIŞ — Geçici durum:
+Kullanıcı: "Bugün çok yorgunum, yarın devam ederiz"
+Çıktı: [] (kaydetme!)
+
+❌ YANLIŞ — Tekrar:
+Mevcut bellek: "Python biliyor"
+Kullanıcı: "Python kullanıyorum"
+Çıktı: [] (tekrar çıkarma!)
 
 ## Kurallar
 - ÇOK seçici ol — şüpheliysen veya anlık bir heves ise KAYDETME
@@ -350,7 +417,6 @@ export function buildLightExtractionPrompt(userName: string = 'Kullanıcı'): st
 - Bilgi kimin hakkındaysa, cümle o isimle başlayabilir VEYA gizli özne olabilir, ancak doğal bir dil kullan. ("Piyano çalmayı sever", "Yiğit Emre, Ayşegül ile tanıştı" gibi doğal ifadeler bırak)
 - Bilgi yoksa boş dizi döndür (çoğu mesajda bilgi OLMAYACAK — bu normal)
 - Direkt bilgiyi yaz, gereksiz betimleme yapma
-- MEVCUT BELLEK KONTROLÜ: Yeni çıkaracağın bir bilgi, "Bellekte Zaten Kayıtlı Bilgiler" listesindeki HERHANGİ BİR bilginin mantıksal olarak aynısı veya bir parçasıysa KESİNLİKLE ÇIKARMA.
 - DİKKAT: Bilgileri mutlaka diyaloğun konuşulduğu dilde (orijinal dilde) çıkar.
 
 ## Yanıt Formatı
@@ -387,17 +453,82 @@ export function buildDeepExtractionPrompt(userName: string = 'Kullanıcı'): str
 - Kısa vadeli planlar (örn. yarınki toplantı)
 - Bağlamı olmayan tek kelimelik isimler
 
+## Kategori Tanımları (Karıştırma)
+
+- preference: Kullanıcının SEVDİKLERİ/SEVMEDİKLERİ (yemek, müzik, renk, teknoloji tercihi)
+  Örnek: "Kahveyi sütsüz sever", "VS Code kullanır"
+  
+- fact: Değişmez GERÇEKLER (yaş, meslek, konum, dil, eğitim)
+  Örnek: "İstanbul'da yaşıyor", "25 yaşında", "Yazılım mühendisi"
+  
+- habit: DÜZENLİ tekrarlanan davranışlar (alışkanlıklar, rutinler)
+  Örnek: "Her sabah 6'da kalkar", "Haftada 3 gün spor yapar"
+  
+- project: Aktif veya planlanan PROJELER/İŞLER (uzun vadeli)
+  Örnek: "E-ticaret sitesi geliştiriyor", "Startup kuruyor"
+  
+- event: ÖNEMLİ YAŞAM OLAYLARI (nadiren değişir, yaşam değiştirici)
+  Örnek: "2024'te taşındı", "Mezun oldu", "İş değiştirdi"
+  
+- other: Yukarıdaki kategorilere uymayan (çok nadir kullan)
+
+## Importance Skorlama Rehberi
+
+10: HAYATİ bilgiler (isim, yaş, ana meslek, yaşam konumu)
+8-9: ÖNEMLİ yaşam/iş bilgileri (eş, çocuk, ana hedef)
+6-7: KALICI tercihler (yemek, teknoloji, hobi)
+4-5: SPESİFİK detaylar (ikincil tercihler)
+2-3: ÇOK SPESİF/geçici (yakında değişebilir)
+1: NEREDEYSE GEREKSİZ (şüphe duyuyorsan 1 ver)
+
+## Bellek Kontrolü — Esnek Kurallar (Katı Değil!)
+
+Yeni bilgiyi mevcut belleklerle karşılaştır. 3 durum var:
+
+1️⃣ ATLA — Tamamen aynı anlama geliyorsa:
+   Mevcut: "Python biliyor"
+   Yeni: "Python kullanıyorum"
+   Karar: ATLA (aynı anlama geliyor)
+
+2️⃣ GÜNCELLE — Mevcut bilgiyi güncelliyorsa (süre, detay, konum değişti):
+   Mevcut: "Python ile 2 yıldır çalışıyor"
+   Yeni: "Python ile 3 yıldır çalışıyor, Django'ya da başladı"
+   Karar: "Python ile 3 yıldır çalışıyor, Django kullanıyor" (GÜNCELLE)
+
+3️⃣ EKLE — Mevcut bilgiye ek bilgi ekliyorsa veya tamamen yeniyse:
+   Mevcut: "Python biliyor"
+   Yeni: "Python ile 3 yıldır çalışıyor, Django kullanıyor"
+   Karar: "Django kullanıyor" (EKLE — Python zaten var)
+   NOT: Mevcut belleği GÜNCELLEME, sadece yeni kısmı ekle
+
+ÖNEMLİ: Mesajın sonundaki "Bellekte Zaten Kayıtlı Bilgiler" listesindeki bilgilerin TEKRARLARINI, YENİDEN İFADELERİNİ veya ALT KÜMELERİNİ çıkarma. Mevcut bir bilgiyle aynı anlama gelen ama farklı kelimelerle yazılmış bilgileri ATLA.
+
+## Örnekler
+
+✅ DOĞRU — Kalıcı bilgi:
+Kullanıcı: "Python ile 5 yıldır çalışıyorum, Django projeleri yaparım"
+Çıktı: [{"content": "Python ve Django ile 5 yıllık deneyime sahip", "category": "fact", "importance": 8}]
+
+✅ DOĞRU — Tercih:
+Kullanıcı: "Kahveyi sütsüz içmeyi tercih ederim"
+Çıktı: [{"content": "Kahveyi sütsüz içer", "category": "preference", "importance": 6}]
+
+❌ YANLIŞ — Geçici durum:
+Kullanıcı: "Bugün çok yorgunum, yarın devam ederiz"
+Çıktı: [] (kaydetme!)
+
+❌ YANLIŞ — Tekrar:
+Mevcut bellek: "Python biliyor"
+Kullanıcı: "Python kullanıyorum"
+Çıktı: [] (tekrar çıkarma!)
+
 ## Kurallar
 - ÇOK seçici ol — sadece gelecekte aylarca/yıllarca geçerli olacak kalıcı gerçekleri kaydet
 - Mümkünse birden fazla kısa bilgiyi, aynı konu altındaysa tek bir anlamlı ve uzun cümlede birleştir.
-- Her bilgiyi kısa ve net bir cümle olarak yaz. 
+- Her bilgiyi kısa ve net bir cümle olarak yaz.
 - Bilgi kimin hakkındaysa, cümle o isimle başlayabilir VEYA gizli özne olabilir, ancak doğal bir dil kullan. ("Piyano çalmayı sever", "Yiğit Emre, Ayşegül ile tanıştı" gibi doğal ifadeler bırak)
 - Çelişen bilgiler varsa en son geçerli olanı al
 - Şüpheliysen KAYDETME, bilgi yoksa boş dizi döndür (bu normal)
-- importance skoru: gerçekten önemli hayat/iş bilgileri 8-10, genel tercihler 5-7, çok spesifik detaylar 1-4
-- Mesajın sonundaki "Bellekte Zaten Kayıtlı Bilgiler" listesindeki bilgilerin TEKRARLARI, YENİDEN İFADELERİ veya ALT KÜMELERİ (örn: bellekte "Kullanıcı 21 yaşında" varsa, "Yaş: 21" ÇIKARMA)
-- Mevcut bir bilgiyle aynı anlama gelen ama farklı kelimelerle yazılmış bilgileri ASLA çıkarma.
-- MEVCUT BELLEK KONTROLÜ: Yeni çıkaracağın bir bilgi, "Bellekte Zaten Kayıtlı Bilgiler" listesindeki HERHANGİ BİR bilginin mantıksal olarak aynısı veya bir parçasıysa KESİNLİKLE ÇIKARMA.
 - DİKKAT: Bilgileri mutlaka diyaloğun konuşulduğu dilde (orijinal dilde) çıkar.
 
 ## Yanıt Formatı

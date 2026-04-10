@@ -871,23 +871,6 @@ class FeedbackManager {
 |-------|----------|
 | [`dialog.ts`](src/web/react-app/src/styles/dialog.ts) | Dialog stilleri |
 
-#### Eski Arayüz (`src/web/public_old/`)
-
-| Dosya | Açıklama |
-|-------|----------|
-| [`app.js`](src/web/public_old/app.js) | Eski vanilla JS |
-| [`index.html`](src/web/public_old/index.html) | Eski HTML |
-| [`style.css`](src/web/public_old/style.css) | Eski stiller |
-| [`app/core.js`](src/web/public_old/app/core.js) | Eski çekirdek |
-| [`app/dashboard.js`](src/web/public_old/app/dashboard.js) | Eski dashboard |
-| [`app/constants.js`](src/web/public_old/app/constants.js) | Uygulama sabitleri |
-| [`lib/d3.v7.min.js`](src/web/public_old/lib/d3.v7.min.js) | D3.js kütüphanesi |
-| [`lib/highlight.min.js`](src/web/public_old/lib/highlight.min.js) | Kod vurgulama |
-| [`lib/katex.min.js`](src/web/public_old/lib/katex.min.js) | Matematik render |
-| [`lib/marked.min.js`](src/web/public_old/lib/marked.min.js) | Markdown parser |
-
----
-
 ### 8. Utils Modülü (`src/utils/`)
 
 | Dosya | Açıklama |
@@ -1098,24 +1081,6 @@ erDiagram
     MEMORY_ENTITIES ||--o{ MEMORY_RELATIONS : target
 ```
 
-### Tablo Detayları
-
-| Tablo | Amaç | İndeksler |
-|-------|------|-----------|
-| `conversations` | Konuşma metadata | id, channel_type+channel_id, updated_at |
-| `messages` | Mesaj geçmişi | id, conversation_id, created_at, conv+role+created_at |
-| `memories` | Uzun vadeli bellekler | id, user_id, is_archived |
-| `memory_entities` | Entity (kişi, teknoloji, proje) | id, normalized_name, normalized_name+type |
-| `memory_relations` | Bellek ilişkileri (graph edges) | id, source_id, target_id, last_accessed_at |
-| `memory_entity_links` | Memory-entity bağlantıları | memory_id+entity_id, entity_id |
-| `memory_embeddings` | Semantik arama vektörleri (sqlite-vec) | rowid |
-| `message_embeddings` | Mesaj semantik arama vektörleri | rowid |
-| `memories_fts` | FTS5 tam metin arama (memories) | content |
-| `messages_fts` | FTS5 tam metin arama (messages) | content |
-| `autonomous_tasks` | Görev kuyruğu kalıcılığı | id, status, added_at |
-| `feedback` | Kullanıcı geri bildirimleri | id, conversation_id, message_id |
-| `settings` | Anahtar-değer ayarlar | key |
-
 ---
 
 ## Teknoloji Yığını
@@ -1131,6 +1096,7 @@ erDiagram
 | Database | better-sqlite3 | 11.7+ | SQLite veritabanı |
 | Vectors | sqlite-vec | 0.1.7+ | Vektör depolama |
 | AI SDK | @anthropic-ai/sdk | 0.39+ | Anthropic API |
+| AI SDK | openai | 4.77+ | OpenAI API |
 | AI SDK | openai | 4.77+ | OpenAI API |
 | AI Inference | @azure-rest/ai-inference | 1.0+ | Azure AI Inference |
 | Embedding | @xenova/transformers | 2.17+ | ONNX embedding |
@@ -1164,23 +1130,6 @@ erDiagram
 | Virtualization | react-virtuoso | 4.x | Sanal liste render |
 | Visualization | d3 | 7.x | Bellek grafiği görselleştirme |
 
-### AI/ML
-
-| Kategori | Teknoloji | Amaç |
-|----------|-----------|------|
-| Embedding | Xenova/all-MiniLM-L6-v2 | Semantik benzerlik |
-| Quantization | INT8 | Model boyutu optimizasyonu |
-| Inference | ONNX Runtime | Worker thread'de çalıştırma |
-
-### DevOps
-
-| Kategori | Teknoloji | Amaç |
-|----------|-----------|------|
-| Testing | Jest | Birim testler |
-| Linting | ESLint | Kod kalitesi |
-| Type Check | TypeScript | Tip kontrolü |
-| Version Control | Git | Versiyon kontrolü |
-
 ---
 
 ## API Endpoints
@@ -1197,7 +1146,7 @@ erDiagram
 | `/api/conversations/:id` | DELETE | Konuşma silme |
 | `/api/conversations/:id/messages` | GET | Mesaj geçmişi |
 | `/api/memories` | GET | Bellek listesi |
-| `/api/memories` | POST | Yeni bellek ekle |
+| `/api/memories` | POST | Yeni bir tane bellek ekle |
 | `/api/memories/search` | GET | Bellek arama |
 | `/api/memories/:id` | PUT | Bellek güncelle |
 | `/api/memories/:id` | DELETE | Bellek silme |
@@ -1233,17 +1182,6 @@ erDiagram
 | `error` | Server → Client | Hata mesajı |
 | `stats` | Server → Client | Sistem istatistikleri |
 
-### WebSocket Konfigürasyonu
-
-```typescript
-const WS_CONFIG = {
-  confirmationTimeoutMs: 60000,     // 60 saniye onay zaman aşımı
-  maxMessageLength: 50000,          // 50K karakter mesaj limiti
-  maxAttachmentBase64Size: 10MB,    // 10MB base64 dosya boyutu limiti
-  maxTextFileLength: 20000,         // 20K karakter metin dosyası kısaltma
-};
-```
-
 ---
 
 ## Güvenlik
@@ -1263,108 +1201,6 @@ const blockedAbsolute = [
   'C:\\Windows\\System32\\config',
   '/etc/shadow', '/etc/passwd',
 ];
-const blockedSegments = [
-  '.env', '.ssh', 'id_rsa', '.aws', '.npmrc', '.netrc', '.pgpass',
-];
-```
-
-### Shell Komut Güvenliği
-
-```typescript
-// Engellenen komutlar
-const BLOCKED_COMMANDS = [
-  'rm -rf /', 'format ', 'del /f /s /q', 'mkfs',
-  'shutdown', 'reboot', 'chmod -r 000 /',
-];
-
-// Tehlikeli pattern'ler
-const dangerousPatterns = [
-  /\|\s*(sh|bash|cmd|powershell)\b/i,  // pipe ile kabuk çağrısı
-  /\$\(.*\)/,                           // subshell
-  /;\s*(rm|del|shutdown)\b/i,          // chain ile tehlikeli komut
-  /\beval\s+/i,                         // eval komutu
-];
-```
-
-### Zod Runtime Validation
-
-```typescript
-// Tüm araç argümanları Zod şemaları ile doğrulanır
-const ReadFileArgsSchema = z.object({
-  path: z.string().min(1),
-});
-const WriteFileArgsSchema = z.object({
-  path: z.string().min(1),
-  content: z.string(),
-});
-// ... diğer şemalar
-```
-
----
-
-## Test Yapısı
-
-### Test Kategorileri
-
-```mermaid
-graph TB
-    subgraph "Unit Tests"
-        UT1[Memory Types]
-        UT2[WebSocket Utils]
-    end
-    
-    subgraph "Integration Tests"
-        IT1[Reconsolidation Pilot]
-        IT2[Retrieval Orchestrator]
-        IT3[Hybrid Search]
-        IT4[Graph Search]
-        IT5[GraphRAG Integration]
-    end
-    
-    subgraph "GraphRAG Tests"
-        GR1[GraphRAG Engine]
-        GR2[PageRank Scorer]
-        GR3[Community Detection]
-        GR4[Shadow Mode]
-        GR5[Graph Worker]
-        GR6[Token Pruner]
-    end
-    
-    subgraph "Benchmark Tests"
-        BM1[Retrieval Benchmark]
-        BM2[Metrics]
-        BM3[Baselines]
-        BM4[GraphRAG Benchmark]
-    end
-    
-    subgraph "Edge Case Tests"
-        EC1[Retrieval Edge Cases]
-        EC2[Observability]
-    end
-    
-    UT1 --> IT1
-    UT2 --> IT3
-    IT1 --> BM1
-    IT2 --> BM1
-    IT3 --> EC1
-    IT4 --> EC1
-    IT5 --> GR1
-    GR1 --> BM4
-    GR2 --> BM4
-    GR3 --> BM4
-```
-
-### Test Çalıştırma
-
-```bash
-# Tüm testler
-npm test
-
-# Belirli test
-npm test -- --testPathPattern=memory
-
-# Coverage raporu
-npm test -- --coverage
 ```
 
 ---
@@ -1379,105 +1215,14 @@ npm install
 
 # Geliştirme sunucusu (backend + frontend)
 npm run dev
-
-# Sadece backend
-npm run dev:backend-only
-
-# Production build
-npm run build
-
-# Test çalıştır
-npm test
-
-# CLI bakım aracı
-npm run maintenance
 ```
-
-### Ortam Değişkenleri
-
-```bash
-# .env.example
-PORT=3000
-HOST=localhost
-
-# LLM Provider
-DEFAULT_LLM_PROVIDER=openai
-DEFAULT_LLM_MODEL=gpt-4o
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-MINIMAX_API_KEY=...
-GITHUB_TOKEN=...
-GROQ_API_KEY=...
-MISTRAL_API_KEY=...
-NVIDIA_API_KEY=...
-
-# Ollama
-OLLAMA_BASE_URL=http://localhost:11434
-ENABLE_OLLAMA_TOOLS=false
-
-# Embedding
-EMBEDDING_PROVIDER=openai
-EMBEDDING_MODEL=text-embedding-3-small
-
-# Database
-DB_PATH=data/penceai.db
-
-# Security
-ALLOW_SHELL_EXECUTION=false
-FS_ROOT_DIR=
-DASHBOARD_PASSWORD=
-SENSITIVE_PATHS=C:\Windows,C:\Program Files,/etc,/usr
-
-# Features
-BRAVE_SEARCH_API_KEY=
-JINA_READER_API_KEY=
-
-# Advanced
-SYSTEM_PROMPT=
-AUTONOMOUS_STEP_LIMIT=5
-MEMORY_DECAY_THRESHOLD=30
-SEMANTIC_SEARCH_THRESHOLD=0.7
-LOG_LEVEL=info
-TEMPERATURE=0.7
-MAX_TOKENS=4096
-```
-
-### Kod Standartları
-
-- **TypeScript**: Strict mode aktif
-- **Linting**: ESLint
-- **Module System**: ES Modules (ES2022)
-- **Module Resolution**: bundler
 
 ### Mimari Kararlar
 
-1. **Facade Pattern**: MemoryManager, alt modülleri (ConversationManager, MemoryStore, RetrievalService) tek bir arayüz altında toplar
-2. **Worker Thread Isolation**: Embedding işlemleri ana thread'i bloklamaz
-3. **SQLite Checkpointing**: Autonomous görevler veritabanında kalıcıdır
-4. **Ebbinghaus Spaced Repetition**: Bellek erişimleri arka plan worker'ında güncellenir
-5. **Dual-Process Retrieval**: System1 (hızlı) ve System2 (derin) bellek getirme modları
-6. **Reconsolidation Pilot**: Bellek birleştirme güvenlik mekanizması
-7. **Behavior Discovery Shadow Mode**: Yeni retrieval stratejileri gölge modda test edilir
-8. **GraphRAG Integration**: Graph-aware retrieval, PageRank skorlama ve topluluk tespiti ile bellek getirme iyileştirildi
-9. **React Query Integration**: Web arayüzü React Query ile veri yönetimi ve önbellekleme yapıyor
-10. **Markdown Rendering**: react-markdown + remark-gfm ile GFM destekli markdown render (tablolar, listeler, kod blokları)
-11. **Auto-resize Textarea**: Input paneli mesaj gönderiminde otomatik olarak varsayılan yüksekliğe sıfırlanır
-12. **Scroll Optimization**: Ana ekran boş durumunda viewport'a tam sığan layout (flex-1, min-h kaldırıldı)
-13. **Frontend Decomposition**: MessageStream monolitik yapısı MessageBubble ve CodeBlock bileşenlerine ayrılarak render performansı artırıldı
-14. **WebSocket State Safety**: useAgentSocket hook'u getStore() pattern'i ile stale closure hatalarına karşı koruma altına alındı
-15. **Relative Timing**: Konuşma listesi ve mesajlarda "az önce", "2 dk önce" gibi dinamik göreli zamanlama sistemi eklendi
-16. **Syntax Highlighting**: Prism.js entegrasyonu ile kod blokları için çoklu dil desteği ve kopyalama özelliği eklendi
-17. **Animated Avatars**: AI için dinamik gradient ve kullanıcı için baş harflerden oluşan modern avatar sistemi eklendi
-
----
-
-## Ek Kaynaklar
-
-- [README.md](README.md) - Proje dokümantasyonu
-- [LICENSE](LICENSE) - MIT Lisansı
-- [package.json](package.json) - Bağımlılıklar ve scriptler
-- [tsconfig.json](tsconfig.json) - TypeScript yapılandırması
-- [jest.config.js](jest.config.js) - Jest yapılandırması
+1. **Facade Pattern**: MemoryManager, alt modülleri tek bir arayüz altında toplar.
+2. **Worker Thread Isolation**: Embedding işlemleri ana thread'i bloklamaz.
+3. **Dual-Process Retrieval**: System1 (hızlı) ve System2 (derin) bellek getirme modları.
+4. **GraphRAG Integration**: Graph-aware retrieval ile bellek getirme iyileştirildi.
 
 ---
 

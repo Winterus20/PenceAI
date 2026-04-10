@@ -14,8 +14,14 @@ export class NetworkStep implements ExtractorStep {
         for (let i = 0; i < tokens.length; i++) {
             let token = tokens[i];
 
-            // Clean up basic punctuations at the end of token (e.g. "https://google.com.")
-            const cleanToken = token.replace(/[.,;!?()]+$/, '');
+            // Daha robust token temizleme: baştaki ve sondaki non-alphanumeric karakterleri temizle
+            // Bu, tırnak, parantez, noktalama gibi karakterleri de kapsar
+            // Örn: "https://google.com." → "https://google.com"
+            // Örn: "(test@example.com)" → "test@example.com"
+            const cleanToken = token.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '');
+
+            // Boş token kontrolü
+            if (!cleanToken) continue;
 
             // Email kontrolü URL'den önce — isURL({require_protocol:false}) email'leri de URL sayar
             if (validator.isEmail(cleanToken)) {

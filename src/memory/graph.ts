@@ -128,6 +128,19 @@ export class MemoryGraphManager {
         return rows.map(r => r.name);
     }
 
+    /**
+     * Tüm entity isimlerini ve tiplerini Map olarak döndürür (name → type).
+     * Extraction pipeline'da kullanılır, entity type bilgisini korumak için.
+     */
+    getAllEntityNamesWithType(): Map<string, string> {
+        const rows = this.db.prepare(`SELECT name, type FROM memory_entities ORDER BY name`).all() as Array<{ name: string; type: string }>;
+        const entityMap = new Map<string, string>();
+        for (const row of rows) {
+            entityMap.set(row.name, row.type);
+        }
+        return entityMap;
+    }
+
     // ========== İlişki Yönetimi ==========
 
     /**
@@ -476,8 +489,7 @@ export class MemoryGraphManager {
             const { KnownEntitiesStep } = await import('./extraction/steps/knownEntities.js');
             const { LLMFallbackStep } = await import('./extraction/steps/llmFallback.js');
 
-            const existingEntities = this.getAllEntityNames();
-            const entityCacheSet = new Set(existingEntities);
+            const existingEntities = this.getAllEntityNamesWithType();
 
             const extractionPipeline = new ExtractorPipeline([
                 new DateTimeStep(),
@@ -486,7 +498,7 @@ export class MemoryGraphManager {
                 new LLMFallbackStep(extractFn)
             ]);
 
-            const result = await extractionPipeline.run(content, entityCacheSet);
+            const result = await extractionPipeline.run(content, existingEntities);
 
             for (const entity of result.entities) {
                 // Minimum confidence threshold to prevent false positives from flooding DB

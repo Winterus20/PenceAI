@@ -21,7 +21,8 @@ export class DateTimeStep implements ExtractorStep {
             });
 
             // Mask the found string so LLM won't process it anymore
-            newUnprocessedText = newUnprocessedText.replace(res.text, '[DATETIME]');
+            // split().join() ile TÜM eşleşmeleri değiştir (String.replace sadece ilk eşleşmeyi değiştirir)
+            newUnprocessedText = newUnprocessedText.split(res.text).join('[DATETIME]');
         }
 
         return {

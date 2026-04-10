@@ -88,7 +88,7 @@ export const MemoryGraphView = ({
         onIncludeCommunitiesChange={handleIncludeCommunitiesChange}
       />
 
-      {/* Legend */}
+      {/* Legend - Moved down with more bottom margin */}
       <MemoryGraphLegend metadata={metadata} />
 
       {/* Selected Node Info Panel */}
@@ -100,7 +100,7 @@ export const MemoryGraphView = ({
       )}
 
       {/* Graph Container */}
-      <div ref={containerRef} className="min-h-[400px] flex-1">
+      <div ref={containerRef} className="min-h-[400px] flex-1 pb-24">
         <svg ref={svgRef} className="h-full w-full" />
       </div>
     </div>

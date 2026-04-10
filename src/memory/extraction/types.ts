@@ -25,7 +25,11 @@ export interface ExtractionContext {
     unprocessedText: string;
     entities: ExtractedEntity[];
     relations: ExtractedRelation[];
-    existingEntitiesCache: Set<string>;
+    /**
+     * Mevcut entity cache'i — name → type mapping olarak tutulur.
+     * Set<string> yerine Map<string, string> kullanılarak entity type bilgisi korunur.
+     */
+    existingEntitiesCache: Map<string, string>;
     /**
      * Optional "escape hatch" payload returned by the LLM fallback step.
      * This keeps the extraction pipeline generic while allowing graph logic

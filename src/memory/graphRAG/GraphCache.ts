@@ -76,10 +76,10 @@ export class GraphCache {
   set(entry: GraphCacheEntry, ttlSeconds: number = DEFAULT_TTL_SECONDS, isFullPhase: boolean = false): void {
     const effectiveTtl = isFullPhase ? FULL_PHASE_TTL_SECONDS : ttlSeconds;
     try {
-      // expiresAt'i effectiveTtl kullanarak yeniden hesapla
-      const expiresAt = new Date(Date.now() + effectiveTtl * 1000);
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + effectiveTtl * 1000);
+      const createdAtStr = now.toISOString().replace('T', ' ').substring(0, 19);
       const expiresAtStr = expiresAt.toISOString().replace('T', ' ').substring(0, 19);
-      const createdAtStr = entry.createdAt.toISOString().replace('T', ' ').substring(0, 19);
 
       this.db.prepare(`
         INSERT INTO graph_traversal_cache (query_hash, max_depth, node_ids, relation_ids, score, created_at, expires_at)

@@ -40,7 +40,7 @@ export class GraphRAGRollbackManager {
   private static rollbackHistory: RollbackEvent[] = [];
   private static lastRollbackTime: Date | null = null;
   private static cooldownMs: number = 30 * 60 * 1000; // 30 dakika cooldown
-  private static isCooldownActive: boolean = false;
+  private static cooldownUntilTimestamp: number = 0;
 
   /**
    * Acil geri alma — FULL → PARTIAL.
@@ -60,7 +60,7 @@ export class GraphRAGRollbackManager {
     }
 
     // Cooldown kontrolü
-    if (this.isCooldownActive) {
+    if (this.isOnCooldown()) {
       logger.warn('[GraphRAGRollback] Cooldown active, ignoring emergency rollback');
       return;
     }
@@ -106,7 +106,7 @@ export class GraphRAGRollbackManager {
     }
 
     // Cooldown kontrolü
-    if (this.isCooldownActive) {
+    if (this.isOnCooldown()) {
       logger.warn('[GraphRAGRollback] Cooldown active, ignoring gradual rollback');
       return;
     }
@@ -155,7 +155,7 @@ export class GraphRAGRollbackManager {
     }
 
     // Cooldown kontrolü
-    if (this.isCooldownActive) {
+    if (this.isOnCooldown()) {
       logger.warn('[GraphRAGRollback] Cooldown active, ignoring rollback');
       return;
     }
@@ -196,14 +196,14 @@ export class GraphRAGRollbackManager {
    * Cooldown durumunu getir.
    */
   static isOnCooldown(): boolean {
-    return this.isCooldownActive;
+    return Date.now() < this.cooldownUntilTimestamp;
   }
 
   /**
    * Cooldown'u sıfırla (manuel override için).
    */
   static resetCooldown(): void {
-    this.isCooldownActive = false;
+    this.cooldownUntilTimestamp = 0;
     logger.info('[GraphRAGRollback] Cooldown reset');
   }
 
@@ -237,12 +237,8 @@ export class GraphRAGRollbackManager {
    * Cooldown'u başlat.
    */
   private static startCooldown(): void {
-    this.isCooldownActive = true;
-
-    setTimeout(() => {
-      this.isCooldownActive = false;
-      logger.info('[GraphRAGRollback] Cooldown ended, rollback available again');
-    }, this.cooldownMs);
+    this.cooldownUntilTimestamp = Date.now() + this.cooldownMs;
+    logger.debug(`[GraphRAGRollback] Cooldown started for ${this.cooldownMs / 1000}s`);
   }
 
   /**

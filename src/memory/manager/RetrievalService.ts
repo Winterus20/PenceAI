@@ -528,6 +528,53 @@ export class RetrievalService {
     `).all(limit) as MemoryRow[];
   }
 
+  // ========== Autonomous Engine Helpers ==========
+
+  /**
+   * Otonom düşünme motoru için "tohum" bellek bulur.
+   * Rastgele, en son seçilmiş tohumu hariç tutarak ve cooldown mantığıyla filtreler.
+   */
+  getAutonomousSeedMemories(limit: number, excludedSeedId?: number, cooldownMinutes: number = 2): MemoryRow[] {
+    if (excludedSeedId) {
+      return this.deps.db.prepare(`
+        SELECT * FROM memories
+        WHERE is_archived = 0
+        AND importance >= 4
+        AND id != ?
+        AND (last_accessed < datetime('now', '-' || ? || ' minutes') OR last_accessed IS NULL)
+        ORDER BY RANDOM()
+        LIMIT ?
+      `).all(excludedSeedId, cooldownMinutes, limit) as MemoryRow[];
+    } else {
+      return this.deps.db.prepare(`
+        SELECT * FROM memories
+        WHERE is_archived = 0
+        AND importance >= 4
+        AND (last_accessed < datetime('now', '-' || ? || ' minutes') OR last_accessed IS NULL)
+        ORDER BY RANDOM()
+        LIMIT ?
+      `).all(cooldownMinutes, limit) as MemoryRow[];
+    }
+  }
+
+  /**
+   * Otonom Graph Walk işlemi için bir belleğin komşularını güven skoruna göre getirir.
+   */
+  getAutonomousGraphWalkNeighbors(seedId: number, confidenceThreshold: number = 0.5, limit: number = 5): Array<MemoryRow & { relation_description?: string, relation_confidence?: number }> {
+    return this.deps.db.prepare(`
+      SELECT m.*, mr.description as relation_description, mr.confidence as relation_confidence
+      FROM memory_relations mr
+      JOIN memories m ON (
+          (mr.source_memory_id = ? AND m.id = mr.target_memory_id)
+          OR
+          (mr.target_memory_id = ? AND m.id = mr.source_memory_id)
+      )
+      WHERE m.is_archived = 0 AND mr.confidence >= ?
+      ORDER BY mr.confidence DESC
+      LIMIT ?
+    `).all(seedId, seedId, confidenceThreshold, limit) as Array<MemoryRow & { relation_description?: string, relation_confidence?: number }>;
+  }
+
   /**
    * Son N saat içindeki kullanıcı mesajlarını döndürür (tüm konuşmalardan).
    * Günlük bağlam oluşturmak için kullanılır — bellekte saklanmayan kısa vadeli bilgiler.

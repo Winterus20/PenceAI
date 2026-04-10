@@ -196,13 +196,9 @@ export class RateLimiter {
 
 /**
  * MCP tool çıktısını sanitize eder.
- *
- * NOT: sensitivePatterns 'g' flag OLMADAN tanımlanır.
- * 'g' flag'lı regex'ler lastIndex state'i tutar ve
- * tekrarlanan çağrılarda eşleşmeleri atlayabilir.
- * String.replace() zaten 'g' flag olmadan da çalışır
- * (sadece ilk eşleşmeyi değiştirir) — ancak biz replaceAll
- * yerine regex'i her çağrıda yeniden oluşturuyoruz.
+ * NOT: sensitivePatterns her iterasyonda yeni bir `RegExp` (gi flag'leriyle)
+ * örneği oluşturularak kullanılır. Böylece 'g' flag'inin `lastIndex` state'i 
+ * tutup sonraki çağrılarda pattern atlamasına (bug) sebep olması engellenir.
  */
 export class OutputSanitizer {
   /** Maksimum çıktı boyutu (karakter) */

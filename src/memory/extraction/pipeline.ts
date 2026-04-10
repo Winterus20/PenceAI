@@ -4,13 +4,13 @@ import { logger } from '../../utils/logger.js';
 export class ExtractorPipeline {
     constructor(private steps: ExtractorStep[]) { }
 
-    async run(text: string, existingCache: Set<string>): Promise<ExtractionContext> {
+    async run(text: string, existingEntitiesCache: Map<string, string>): Promise<ExtractionContext> {
         let context: ExtractionContext = {
             originalText: text,
             unprocessedText: text,
             entities: [],
             relations: [],
-            existingEntitiesCache: existingCache
+            existingEntitiesCache
         };
 
         for (const step of this.steps) {

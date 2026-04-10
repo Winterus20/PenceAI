@@ -56,7 +56,7 @@ const DEFAULT_TOKEN_BUDGET: TokenBudget = {
 };
 
 /** Graph context için sabit token sayısı */
-const GRAPH_CONTEXT_TOKENS = 100;
+const GRAPH_CONTEXT_TOKENS = 300;
 
 /** Default tokenizer: gpt-tokenizer */
 function defaultTokenizer(text: string): number {
@@ -84,10 +84,16 @@ function memoryPriorityFn(memory: MemoryRow): number {
 /**
  * Priority fonksiyonu: CommunitySummary için modularity score kullanır.
  */
-function summaryPriorityFn(_summary: CommunitySummary): number {
-  // CommunitySummary'nın kendisi modularity score içermiyor
-  // Fallback: keyEntities sayısına göre priority
-  return 0.5; // Default orta priority
+function summaryPriorityFn(summary: CommunitySummary): number {
+  const entityCount = summary.keyEntities?.length ?? 0;
+  const summaryLength = summary.summary?.length ?? 0;
+
+  // Normalize: 0-1 arası
+  const entityScore = Math.min(entityCount / 10, 1);
+  const lengthScore = Math.min(summaryLength / 500, 1);
+
+  // Min 0.4, Max 1.0
+  return 0.4 + (entityScore * 0.3) + (lengthScore * 0.3);
 }
 
 export class TokenPruner {

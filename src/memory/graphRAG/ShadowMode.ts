@@ -96,7 +96,6 @@ export class ShadowMode {
   private config: ShadowModeConfig;
   private comparisons: ShadowModeComparison[] = [];
   private isRunning: boolean = false;
-  private randomSeed: number = Math.random();
 
   constructor(
     private graphRAGEngine: GraphRAGEngine,
@@ -164,11 +163,9 @@ export class ShadowMode {
       this.isRunning = false;
       return false;
     }
-    
-    // Sample rate kontrolü
-    this.randomSeed = (this.randomSeed * 9301 + 49297) % 233280;
-    const randomValue = this.randomSeed / 233280;
-    return randomValue < this.config.sampleRate;
+
+    // Basit ve güvenilir random sample
+    return Math.random() < this.config.sampleRate;
   }
 
   /**

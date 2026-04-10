@@ -346,18 +346,13 @@ export class GraphWorker {
       const elapsed = Date.now() - startTime;
       logger.info(`[GraphWorker] ✅ Task completed: ${name} (${elapsed}ms)`);
     } catch (err) {
-      task.status = 'error';
+      task.status = 'idle'; // Hemen idle'a çevir (race condition yok)
       task.errorCount++;
-      task.nextRunAt = Date.now() + Math.min(task.intervalMs, 5 * 60 * 1000); // Max 5 dakika retry
+      // Exponential backoff: 10s, 20s, 40s, max 5min
+      const backoff = Math.min(10000 * Math.pow(2, task.errorCount - 1), 5 * 60 * 1000);
+      task.nextRunAt = Date.now() + backoff;
 
-      logger.error({ err, errorCount: task.errorCount }, `[GraphWorker] ❌ Task failed: ${name}`);
-
-      // Hata sonrası status'u idle'a çevir (retry için)
-      setTimeout(() => {
-        if (task.status === 'error') {
-          task.status = 'idle';
-        }
-      }, 10000);
+      logger.error({ err, errorCount: task.errorCount, nextRetryInMs: backoff }, `[GraphWorker] ❌ Task failed: ${name}`);
     }
   }
 

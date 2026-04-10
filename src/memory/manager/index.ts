@@ -20,7 +20,6 @@ import type { ConversationMessage, ChannelType } from '../../router/types.js';
 import { createEmbeddingProvider, type EmbeddingProvider } from '../embeddings.js';
 import { getConfig } from '../../gateway/config.js';
 import { logger } from '../../utils/logger.js';
-import { calculateCost } from '../../utils/costCalculator.js';
 import type { TaskQueue } from '../../autonomous/queue.js';
 import { MemoryGraphManager } from '../graph.js';
 import { MemoryRetrievalOrchestrator } from '../retrievalOrchestrator.js';
@@ -38,24 +37,19 @@ import {
   DEFAULT_USER_NAME,
 } from '../types.js';
 
-// Spreading Activation tipleri
-interface SpreadingActivationConfig {
-  decayFactor: number;
-  maxIterations: number;
-  minActivation: number;
-  relationTypeWeights: Record<string, number>;
-}
-
-interface SpreadingActivationResult {
-  nodeActivations: Map<number, number>;
-  iterations: number;
-  converged: boolean;
-}
+// Spreading Activation tipleri (re-export from service)
+import type {
+  SpreadingActivationConfig,
+  SpreadingActivationResult,
+} from './SpreadingActivationService.js';
 
 // Alt modüller
 import { ConversationManager } from './ConversationManager.js';
 import { MemoryStore } from './MemoryStore.js';
 import { RetrievalService, type RetrievalDeps } from './RetrievalService.js';
+import { TokenUsageService } from './TokenUsageService.js';
+import { FeedbackService } from './FeedbackService.js';
+import { SpreadingActivationService } from './SpreadingActivationService.js';
 import { selectConversationAwareSupplementalMemories } from '../contextUtils.js';
 
 // Tip exports
@@ -96,6 +90,9 @@ export class MemoryManager {
   private memoryStore: MemoryStore;
   private retrievalService: RetrievalService;
   private retrievalOrchestrator: MemoryRetrievalOrchestrator;
+  private tokenUsageService: TokenUsageService;
+  private feedbackService: FeedbackService;
+  private spreadingActivationService: SpreadingActivationService;
 
   constructor(penceDb: PenceDatabase) {
     this.db = penceDb.getDb();
@@ -140,6 +137,11 @@ export class MemoryManager {
     };
     this.retrievalService = new RetrievalService(retrievalDeps);
 
+    // Çıkarılmış servisler
+    this.tokenUsageService = new TokenUsageService(this.db);
+    this.feedbackService = new FeedbackService(this.db);
+    this.spreadingActivationService = new SpreadingActivationService(this.graph);
+
     // Retrieval Orchestrator (graphRAGEngine setGraphRAGEngine ile sonradan set edilir)
     this.retrievalOrchestrator = new MemoryRetrievalOrchestrator({
       graphAwareSearch: (query, limit, maxDepth) => this.graphAwareSearch(query, limit, maxDepth),
@@ -149,7 +151,7 @@ export class MemoryManager {
       getRecentMessages: (hours, limit, excludeConversationId) => this.getRecentMessages(hours, limit, excludeConversationId),
       getUserMemories: (limit) => this.getUserMemories(limit),
       getMemoryNeighborsBatch: (memoryIds, limitPerNode) => this.graph.getMemoryNeighborsBatch(memoryIds, limitPerNode),
-      getSpreadingActivationConfig: () => this.getSpreadingActivationConfigForOrchestrator(),
+      getSpreadingActivationConfig: () => this.spreadingActivationService.getOrchestratorConfig() as any,
       getBehaviorDiscoveryConfig: () => ({ retrieval: { state: 'shadow' } }),
       prioritizeConversationMemories: (memories, recentMessages, activeConversationId, limit) =>
         this.prioritizeConversationMemories(memories, recentMessages, activeConversationId, limit),
@@ -248,6 +250,10 @@ export class MemoryManager {
 
   deleteConversation(conversationId: string): boolean {
     return this.conversationManager.deleteConversation(conversationId);
+  }
+
+  deleteConversations(conversationIds: string[]): { deletedCount: number, results: { id: string, deleted: boolean }[] } {
+    return this.conversationManager.deleteConversations(conversationIds);
   }
 
   // ========== Uzun Vadeli Bellek (MemoryStore'a delege) ==========
@@ -355,6 +361,16 @@ export class MemoryManager {
 
   getUserMemories(limit?: number): MemoryRow[] {
     return this.retrievalService.getUserMemories(limit);
+  }
+
+  // ========== Autonomous Engine Helpers ==========
+
+  getAutonomousSeedMemories(limit: number, excludedSeedId?: number, cooldownMinutes?: number): MemoryRow[] {
+    return this.retrievalService.getAutonomousSeedMemories(limit, excludedSeedId, cooldownMinutes);
+  }
+
+  getAutonomousGraphWalkNeighbors(seedId: number, confidenceThreshold?: number, limit?: number): Array<MemoryRow & { relation_description?: string, relation_confidence?: number }> {
+    return this.retrievalService.getAutonomousGraphWalkNeighbors(seedId, confidenceThreshold, limit);
   }
 
   getRecentMessages(hours?: number, limit?: number, excludeConversationId?: string): Array<{ role: string; content: string; created_at: string; conversation_title: string }> {
@@ -489,248 +505,35 @@ export class MemoryManager {
     });
   }
 
-  // ========== Feedback Yönetimi ==========
+  // ========== Feedback Yönetimi (FeedbackService'e delege) ==========
 
-  /**
-   * Kullanıcı feedback'ini kaydeder.
-   */
   saveFeedback(input: FeedbackInput): FeedbackRow {
-    const stmt = this.db.prepare(`
-      INSERT INTO feedback (message_id, conversation_id, type, comment, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    
-    const result = stmt.run(
-      input.messageId,
-      input.conversationId,
-      input.type,
-      input.comment || null,
-      input.timestamp
-    );
-
-    return {
-      id: Number(result.lastInsertRowid),
-      message_id: input.messageId,
-      conversation_id: input.conversationId,
-      type: input.type,
-      comment: input.comment || null,
-      created_at: input.timestamp,
-    };
+    return this.feedbackService.saveFeedback(input);
   }
 
-  /**
-   * Bir konuşmaya ait tüm feedback'leri getirir.
-   */
   getFeedbacks(conversationId: string): FeedbackRow[] {
-    const stmt = this.db.prepare(`
-      SELECT id, message_id, conversation_id, type, comment, created_at
-      FROM feedback
-      WHERE conversation_id = ?
-      ORDER BY created_at DESC
-    `);
-    return stmt.all(conversationId) as FeedbackRow[];
+    return this.feedbackService.getFeedbacks(conversationId);
   }
 
-  /**
-   * Bir mesaja ait feedback'i getirir.
-   */
   getFeedbackByMessageId(messageId: string): FeedbackRow | null {
-    const stmt = this.db.prepare(`
-      SELECT id, message_id, conversation_id, type, comment, created_at
-      FROM feedback
-      WHERE message_id = ?
-      LIMIT 1
-    `);
-    return stmt.get(messageId) as FeedbackRow | null;
+    return this.feedbackService.getFeedbackByMessageId(messageId);
   }
 
-  // ========== Spreading Activation ==========
+  // ========== Spreading Activation (SpreadingActivationService'e delege) ==========
 
-  /**
-   * Spreading Activation config döndürür.
-   * RetrievalOrchestrator ile uyumlu olması için Partial config döner.
-   */
   getSpreadingActivationConfig(): Partial<SpreadingActivationConfig> {
-    return {
-      decayFactor: 0.85,
-      maxIterations: 10,
-      minActivation: 0.01,
-      relationTypeWeights: {
-        'related_to': 1.0,
-        'part_of': 0.9,
-        'caused_by': 0.8,
-        'associated_with': 0.7,
-        'shared_entity': 0.6,
-        'default': 0.5,
-      },
-    };
+    return this.spreadingActivationService.getConfig();
   }
 
-  /**
-   * RetrievalOrchestrator için spreading activation config döndürür.
-   * RetrievalSpreadingActivationConfig formatında config sağlar.
-   */
-  private getSpreadingActivationConfigForOrchestrator(): Partial<import('../retrievalOrchestrator.js').RetrievalSpreadingActivationConfig> {
-    return {
-      enabled: true,
-      rolloutState: 'soft',
-      seedLimit: 5,
-      neighborsPerSeed: 10,
-      maxCandidates: 15,
-      maxHopDepth: 2,
-      seedConfidenceFloor: 0.65,
-      seedScoreFloor: 1.0,
-      candidateConfidenceFloor: 0.6,
-      relationConfidenceFloor: 0.5,
-      minEffectiveBonus: 0.02,
-      hopDecay: 0.7,
-      activationScale: 0.08,
-      maxCandidateBonus: 0.15,
-    };
-  }
-
-  /**
-   * Klasik iterative spreading activation algoritması.
-   *
-   * Seed node'lardan başlayarak graph üzerinde activation yayar.
-   * Her iterasyonda komşulara activation aktarılır, decay uygulanır.
-   * Convergence sağlanana veya maxIterations'a ulaşılana kadar devam eder.
-   *
-   * @param seedNodeIds - Başlangıç node ID'leri
-   * @param config - Opsiyonel konfigürasyon override'ları
-   * @returns Activation sonuçları (nodeActivations, iterations, converged)
-   */
   computeSpreadingActivation(
     seedNodeIds: number[],
     config?: Partial<SpreadingActivationConfig>
   ): SpreadingActivationResult {
-    const cfg = this.buildSpreadingActivationConfig(config);
-    const activations = new Map<number, number>();
-
-    if (seedNodeIds.length === 0) {
-      return { nodeActivations: activations, iterations: 0, converged: true };
-    }
-
-    // Seed node'larına başlangıç aktivasyonu
-    const seedActivation = 1.0 / seedNodeIds.length;
-    for (const id of seedNodeIds) {
-      activations.set(id, seedActivation);
-    }
-
-    let currentActivations = new Map(activations);
-    let iterations = 0;
-    let converged = false;
-
-    for (let iter = 0; iter < cfg.maxIterations; iter++) {
-      iterations++;
-      const newActivations = new Map(currentActivations);
-      let maxChange = 0;
-
-      // Aktif node'ları getir (minActivation üstü)
-      const activeNodeIds = Array.from(currentActivations.keys())
-        .filter(id => currentActivations.get(id)! > cfg.minActivation);
-
-      if (activeNodeIds.length === 0) {
-        converged = true;
-        break;
-      }
-
-      // Batch neighbor retrieval
-      const neighbors = this.getMemoryNeighborsBatch(activeNodeIds, 20);
-
-      // Activation yayma
-      for (const sourceId of activeNodeIds) {
-        const sourceActivation = currentActivations.get(sourceId) ?? 0;
-        if (sourceActivation <= cfg.minActivation) continue;
-
-        const sourceNeighbors = neighbors.get(sourceId) || [];
-        if (sourceNeighbors.length === 0) continue;
-
-        // Toplam ağırlık hesapla
-        const totalWeight = sourceNeighbors.reduce((sum, n) => {
-          const relWeight = cfg.relationTypeWeights[n.relation_type] ?? cfg.relationTypeWeights['default'];
-          return sum + ((n.confidence ?? 0.7) * relWeight);
-        }, 0);
-
-        if (totalWeight === 0) continue;
-
-        // Komşulara activation dağıt
-        for (const neighbor of sourceNeighbors) {
-          const relWeight = cfg.relationTypeWeights[neighbor.relation_type] ?? cfg.relationTypeWeights['default'];
-          const neighborConfidence = neighbor.confidence ?? 0.7;
-
-          const propagatedActivation = (
-            sourceActivation
-            * cfg.decayFactor
-            * neighborConfidence
-            * relWeight
-          ) / totalWeight;
-
-          const currentNeighborActivation = newActivations.get(neighbor.id) ?? 0;
-          const newActivation = Math.min(1.0, currentNeighborActivation + propagatedActivation);
-          newActivations.set(neighbor.id, newActivation);
-
-          maxChange = Math.max(maxChange, Math.abs(newActivation - currentNeighborActivation));
-        }
-      }
-
-      currentActivations = newActivations;
-
-      // Convergence kontrolü
-      if (maxChange < cfg.minActivation) {
-        converged = true;
-        break;
-      }
-    }
-
-    // Min activation altındaki node'ları temizle
-    for (const [id, activation] of currentActivations) {
-      if (activation < cfg.minActivation) {
-        currentActivations.delete(id);
-      }
-    }
-
-    logger.debug({
-      seedCount: seedNodeIds.length,
-      resultCount: currentActivations.size,
-      iterations,
-      converged,
-    }, '[Memory] Spreading activation completed');
-
-    return {
-      nodeActivations: currentActivations,
-      iterations,
-      converged,
-    };
+    return this.spreadingActivationService.compute(seedNodeIds, config);
   }
 
-  /**
-   * Spreading Activation config oluşturur.
-   */
-  private buildSpreadingActivationConfig(overrides?: Partial<SpreadingActivationConfig>): SpreadingActivationConfig {
-    return {
-      decayFactor: 0.85,
-      maxIterations: 10,
-      minActivation: 0.01,
-      relationTypeWeights: {
-        'related_to': 1.0,
-        'part_of': 0.9,
-        'caused_by': 0.8,
-        'associated_with': 0.7,
-        'shared_entity': 0.6,
-        'default': 0.5,
-      },
-      ...overrides,
-    };
-  }
+  // ========== Token Usage (TokenUsageService'e delege) ==========
 
-  // ============================================
-  // Token Usage Tracking
-  // ============================================
-
-  /**
-   * Yeni token usage kaydı ekler.
-   */
   saveTokenUsage(record: {
     provider: string;
     model: string;
@@ -738,89 +541,19 @@ export class MemoryManager {
     completionTokens: number;
     totalTokens: number;
   }): void {
-    const cost = calculateCost(record.provider, record.model, record.promptTokens, record.completionTokens);
-    this.db.prepare(`
-      INSERT INTO token_usage (provider, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    `).run(record.provider, record.model, record.promptTokens, record.completionTokens, record.totalTokens, cost);
+    this.tokenUsageService.saveTokenUsage(record);
   }
 
-  /**
-   * Toplam kullanım istatistiğini döndürür.
-   * @param period - 'day', 'week', 'month', 'all'
-   */
   getTokenUsageStats(period: string = 'week'): {
     totalTokens: number;
     totalCost: number;
     providerBreakdown: Record<string, { tokens: number; cost: number }>;
   } {
-    const now = Math.floor(Date.now() / 1000);
-    let periodSeconds: number;
-    switch (period) {
-      case 'day': periodSeconds = 86400; break;
-      case 'week': periodSeconds = 604800; break;
-      case 'month': periodSeconds = 2592000; break;
-      default: periodSeconds = 0;
-    }
-
-    const whereClause = periodSeconds > 0 ? `WHERE created_at >= datetime(${now} - ${periodSeconds}, 'unixepoch')` : '';
-
-    const totalRow = this.db.prepare(`
-      SELECT
-        COALESCE(SUM(total_tokens), 0) as totalTokens,
-        COALESCE(SUM(estimated_cost_usd), 0) as totalCost
-      FROM token_usage ${whereClause}
-    `).get() as { totalTokens: number; totalCost: number };
-
-    const providerRows = this.db.prepare(`
-      SELECT
-        provider,
-        SUM(total_tokens) as tokens,
-        SUM(estimated_cost_usd) as cost
-      FROM token_usage ${whereClause}
-      GROUP BY provider
-      ORDER BY tokens DESC
-    `).all() as Array<{ provider: string; tokens: number; cost: number }>;
-
-    const providerBreakdown: Record<string, { tokens: number; cost: number }> = {};
-    for (const row of providerRows) {
-      providerBreakdown[row.provider] = { tokens: row.tokens, cost: row.cost };
-    }
-
-    return {
-      totalTokens: totalRow.totalTokens,
-      totalCost: totalRow.totalCost,
-      providerBreakdown,
-    };
+    return this.tokenUsageService.getTokenUsageStats(period);
   }
 
-  /**
-   * Günlük kullanım serisini döndürür.
-   * @param period - 'day', 'week', 'month', 'all'
-   */
   getDailyUsage(period: string = 'week'): Array<{ date: string; tokens: number; cost: number }> {
-    const now = Math.floor(Date.now() / 1000);
-    let periodSeconds: number;
-    switch (period) {
-      case 'day': periodSeconds = 86400; break;
-      case 'week': periodSeconds = 604800; break;
-      case 'month': periodSeconds = 2592000; break;
-      default: periodSeconds = 0;
-    }
-
-    const whereClause = periodSeconds > 0 ? `WHERE created_at >= datetime(${now} - ${periodSeconds}, 'unixepoch')` : '';
-
-    const rows = this.db.prepare(`
-      SELECT
-        DATE(created_at) as date,
-        SUM(total_tokens) as tokens,
-        SUM(estimated_cost_usd) as cost
-      FROM token_usage ${whereClause}
-      GROUP BY DATE(created_at)
-      ORDER BY date ASC
-    `).all() as Array<{ date: string; tokens: number; cost: number }>;
-
-    return rows.map(r => ({ date: r.date, tokens: r.tokens, cost: r.cost }));
+    return this.tokenUsageService.getDailyUsage(period);
   }
 }
 

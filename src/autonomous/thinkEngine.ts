@@ -21,7 +21,7 @@
  * LLM entegrasyonu üst katmanda (agent/runtime) yapılacaktır.
  */
 
-import type Database from 'better-sqlite3';
+import { MemoryManager } from '../memory/manager.js';
 import type { MemoryRow } from '../memory/types.js';
 import { computeRetention, daysSinceAccess } from '../memory/ebbinghaus.js';
 import { logger } from '../utils/logger.js';
@@ -141,10 +141,12 @@ export const REFLECTION_QUESTION_TEMPLATES = [
  *   3. Rastgele aktif bir anı (keşif modu — fallback)
  */
 export function selectSeed(
-    db: Database.Database,
+    manager: MemoryManager,
     recentlySelectedSeedId?: number,
     cooldownMinutes: number = 30
 ): ThoughtSeed | null {
+    const db = manager.getDatabase();
+
     // Eğer recentlySelectedSeedId verilmişse, bu belleğin son erişim zamanını kontrol et
     if (recentlySelectedSeedId) {
         const seedInfo = db.prepare(`
@@ -246,13 +248,13 @@ export function selectSeed(
  * Tohum bellek noktasından başlayarak graph üzerinde Breadth-First-Search (BFS) yapar.
  * Her adımda Ebbinghaus tazelik filtresi uygulanır.
  *
- * @param db         — Veritabanı bağlantısı
+ * @param manager         — MemoryManager örneği
  * @param seedId     — Başlangıç bellek ID'si
  * @param maxDepth   — Maksimum hop derinliği (varsayılan: 2)
  * @returns Tazelik filtresinden geçen çağrışım listesi
  */
 export function graphWalk(
-    db: Database.Database,
+    manager: MemoryManager,
     seedId: number,
     maxDepth: number = MAX_HOP_DEPTH
 ): Association[] {
@@ -270,25 +272,11 @@ export function graphWalk(
             const hopConfidenceThreshold = hop === 1 ? 0.25 : 0.35;
 
             // 1-hop komşuları al (confidence sıralı)
-            const neighbors = db.prepare(`
-                SELECT
-                    m.id, m.content, m.category, m.importance,
-                    m.stability, m.last_accessed,
-                    mr.confidence, mr.description as relation_description
-                FROM memory_relations mr
-                JOIN memories m ON (
-                    (mr.source_memory_id = ? AND m.id = mr.target_memory_id)
-                    OR
-                    (mr.target_memory_id = ? AND m.id = mr.source_memory_id)
-                )
-                WHERE m.is_archived = 0
-                    AND mr.confidence >= ?
-                ORDER BY mr.confidence DESC
-                LIMIT ?
-            `).all(nodeId, nodeId, hopConfidenceThreshold, MAX_NEIGHBORS_PER_HOP) as Array<MemoryRow & {
-                confidence: number;
-                relation_description: string;
-            }>;
+            const neighbors = manager.getAutonomousGraphWalkNeighbors(
+                nodeId,
+                hopConfidenceThreshold,
+                MAX_NEIGHBORS_PER_HOP
+            );
 
             for (const neighbor of neighbors) {
                 if (visited.has(neighbor.id)) continue;
@@ -318,7 +306,7 @@ export function graphWalk(
                     retention,
                     hopDistance: hop,
                     relationDescription: neighbor.relation_description || '',
-                    confidence: neighbor.confidence,
+                    confidence: neighbor.relation_confidence ?? 0,
                 });
 
                 nextLayer.push(neighbor.id);
@@ -465,23 +453,27 @@ export function synthesizeThoughtPrompt(
  * @returns ThoughtLogEntry | null (düşünecek anı yoksa null)
  */
 export function think(
-    db: Database.Database,
+    manager: MemoryManager,
     emotion: EmotionalContext,
     recentlySelectedSeedId?: number,
     seedCooldownMinutes: number = 30,
     questionTemplateIndex?: number
 ): ThoughtLogEntry | null {
-    // 1. Tohum seç (yeni parametrelerle)
-    const seed = selectSeed(db, recentlySelectedSeedId, seedCooldownMinutes);
+    // 1. Tohum seç (bir önceki seçileni dışla)
+    const seed = selectSeed(manager, recentlySelectedSeedId);
     if (!seed) {
-        logger.info('[ThinkEngine] No seed found — no memories to think about.');
+        return null;
+    }
+
+    // 2. Ağı Gez (Graph Walk)
+    const associations = graphWalk(manager, seed.memoryId);
+    if (associations.length === 0) {
+        logger.info('[ThinkEngine] No associations found — no memories to think about.');
         return null;
     }
 
     logger.info(`[ThinkEngine] Seed selected: "${seed.content.substring(0, 50)}..." (${seed.type})`);
 
-    // 2. Graph-Walk
-    const associations = graphWalk(db, seed.memoryId);
     logger.info(
         `[ThinkEngine] Graph-Walk completed: ${associations.length} associations found ` +
         `(max depth: ${MAX_HOP_DEPTH})`

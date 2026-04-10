@@ -46,14 +46,19 @@ export class AgentRuntime {
     private graphRAGEngine?: GraphRAGEngine;
     private shadowMode?: ShadowMode;
 
-    // Light extraction throttle — her mesajda değil, her N mesajda bir LLM çağrısı ya
+    private feedbackManager?: FeedbackManager;
+    private taskQueue?: TaskQueue;
+    private _lastConfirmCallback?: ConfirmCallback;
+
+    // Light extraction throttle — her mesajda değil, her N mesajda bir LLM çağrısı
     private _extractionCounter: number = 0;
     private static readonly EXTRACTION_INTERVAL = 3; // 3 mesajda 1 extraction
     private _pendingExtractionContext: Array<{ user: string; assistant: string; prevAssistant: string; userName?: string }> = [];
 
-    private feedbackManager?: FeedbackManager;
-    private taskQueue?: TaskQueue;
-    private _lastConfirmCallback?: ConfirmCallback;
+    // Graph Queue with retry support
+    private _graphQueue: Array<{ task: () => Promise<void>; retries: number; maxRetries: number }> = [];
+    private _isGraphQueueRunning = false;
+    private static readonly MAX_GRAPH_QUEUE_RETRIES = 3;
 
     constructor(llm: LLMProvider, memory: MemoryManager) {
         this.llm = llm;
@@ -413,23 +418,17 @@ export class AgentRuntime {
         // GraphRAG sonuçlarını relevantMemories'e ekle (eğer varsa)
         let finalRelevantMemories = relevantMemories;
         if (graphRAGResult && graphRAGResult.memories.length > 0) {
-            // GraphRAG'den gelen bellekleri mevcut listede olmayanları hybrid search ile getir
+            // GraphRAG'den gelen bellekleri mevcut listede olmayanları doğrudan context'e ekle
             const existingIds = new Set(relevantMemories.map(m => m.id));
-            const missingContents = graphRAGResult.memories
-                .filter(gm => !existingIds.has(gm.id))
-                .map(gm => gm.content);
+            const missingMemories = graphRAGResult.memories.filter(gm => !existingIds.has(gm.id));
 
-            if (missingContents.length > 0) {
-                // Eksik bellekleri hybrid search ile bul
-                const searchResults = await this.memory.hybridSearch(missingContents.join(' '), missingContents.length * 2);
-                const memoryMap = new Map(relevantMemories.map(m => [m.id, m]));
-                for (const sr of searchResults) {
-                    if (!memoryMap.has(sr.id)) {
-                        memoryMap.set(sr.id, sr);
-                    }
+            if (missingMemories.length > 0) {
+                const memoryMap = new Map(relevantMemories.map(m => [m.id, m as any]));
+                for (const gm of missingMemories) {
+                    memoryMap.set(gm.id, gm as any);
                 }
                 finalRelevantMemories = Array.from(memoryMap.values());
-                logger.info(`[Agent] GraphRAG added ${finalRelevantMemories.length - relevantMemories.length} new memories to context`);
+                logger.info(`[Agent] GraphRAG added ${missingMemories.length} new memories to context directly`);
             }
         }
 
@@ -632,18 +631,17 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
 
             // Fallback: Model tool_calls array yerine content içerisine direkt JSON veya fonksiyon formatı döndürdüyse
             if ((!llmResponse.toolCalls || llmResponse.toolCalls.length === 0) && cleanContent) {
-                const fallbackCalls = this.extractFallbackToolCalls(cleanContent);
-                if (fallbackCalls.length > 0) {
-                    llmResponse.toolCalls = fallbackCalls;
-                    // Fallback aracı bulunduğu için araç formatı metinden silinir (ui kirliliği için)
+                const fallbackResult = this.extractFallbackToolCalls(cleanContent);
+                if (fallbackResult.calls.length > 0) {
+                    llmResponse.toolCalls = fallbackResult.calls;
+                    // Fallback aracı bulunduğu için tespit edilen tam metinler (rawMatches) içerikten silinir
                     let strippedContent = cleanContent;
-                    fallbackCalls.forEach(tc => {
-                        const regex = new RegExp(`\\b${tc.name}\\s*\\([\\s\\S]*?\\)`, 'g');
-                        strippedContent = strippedContent.replace(regex, '').trim();
+                    fallbackResult.rawMatches.forEach(matchStr => {
+                        strippedContent = strippedContent.replace(matchStr, '').trim();
                     });
 
                     llmResponse.content = strippedContent;
-                    logger.warn(`[Agent] ⚠️ Fallback parser: ${fallbackCalls.length} araç çağrısı yakalandı — ${fallbackCalls.map(tc => tc.name).join(', ')}`);
+                    logger.warn(`[Agent] ⚠️ Fallback parser: ${fallbackResult.calls.length} araç çağrısı yakalandı — ${fallbackResult.calls.map(tc => tc.name).join(', ')}`);
                     
                     uiContent = this.joinUIContent(uiContent, strippedContent);
                     onEvent?.({ type: 'replace_stream', data: { content: uiContent } });
@@ -804,6 +802,46 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
         }
 
         return { response, conversationId };
+    }
+
+    // ==========================================
+    // LLM Async Graph Extraction Queue Manager
+    // ==========================================
+
+    private async _runGraphQueue() {
+        if (this._isGraphQueueRunning) return;
+        this._isGraphQueueRunning = true;
+
+        while (this._graphQueue.length > 0) {
+            const queueItem = this._graphQueue.shift();
+            if (!queueItem) continue;
+
+            const { task, retries, maxRetries } = queueItem;
+            try {
+                await task();
+            } catch (err) {
+                if (retries < maxRetries) {
+                    // Retry mekanizması: kalan denemeler varsa tekrar kuyruğa ekle
+                    const backoffMs = Math.min(1000 * Math.pow(2, retries), 10000); // Exponential backoff: 1s, 2s, 4s
+                    logger.warn(`[Agent] Graph extraction task failed (attempt ${retries + 1}/${maxRetries + 1}), retrying in ${backoffMs}ms`);
+                    
+                    setTimeout(() => {
+                        this._graphQueue.unshift({ task, retries: retries + 1, maxRetries });
+                        this._runGraphQueue().catch(() => {});
+                    }, backoffMs);
+                    break; // Mevcut loop'u dur, retry için bekle
+                } else {
+                    logger.error({ err }, `[Agent] Background Graph extraction task failed after ${maxRetries + 1} attempts, giving up`);
+                }
+            }
+        }
+
+        this._isGraphQueueRunning = false;
+    }
+
+    private enqueueGraphTask(task: () => Promise<void>) {
+        this._graphQueue.push({ task, retries: 0, maxRetries: AgentRuntime.MAX_GRAPH_QUEUE_RETRIES });
+        this._runGraphQueue().catch(() => {});
     }
 
     // ========== Otomatik Bellek Çıkarımı ==========
@@ -967,6 +1005,55 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
 
 
     /**
+     * Semantic duplikasyon filtresi — mevcut belleklerle benzerlik hesaplar.
+     * Yüksek benzerlikli bellekleri LLM'e gösterir, duplikasyonu önler.
+     */
+    private async getSimilarMemoriesForDedup(query: string, limit: number = 10): Promise<Array<{ id: number; content: string; similarity: number }>> {
+        try {
+            // Embedding provider varsa semantic search kullan
+            const similarMemories = await this.memory.semanticSearch(query, limit);
+            return similarMemories
+                .filter(m => m.similarity > 0.6) // Düşük benzerlikleri filtrele
+                .map(m => ({
+                    id: m.id,
+                    content: m.content,
+                    similarity: m.similarity,
+                }));
+        } catch (err) {
+            // Semantic search başarısızsa, fallback olarak user memories kullan
+            logger.warn({ err }, '[Agent] Semantic dedup başarısız, fallback kullanılıyor:');
+            const fallbackMemories = this.memory.getUserMemories(20);
+            return fallbackMemories.map(m => ({
+                id: m.id,
+                content: m.content,
+                similarity: 0, // Benzerlik bilgisi yok
+            }));
+        }
+    }
+
+    /**
+     * Mevcut bellekleri LLM'e gönderilecek formatta hazırlar.
+     * Semantic benzerlik ile filtrelenmiş bellekleri gösterir.
+     */
+    private formatExistingMemoriesForLLM(
+        similarMemories: Array<{ id: number; content: string; similarity: number }>
+    ): string {
+        if (similarMemories.length === 0) return '';
+
+        const existingStr = similarMemories
+            .filter(m => m.similarity > 0.7) // Sadece yüksek benzerlikli bellekleri göster
+            .map((m, i) => {
+                const similarityLabel = m.similarity > 0 ? `[benzerlik: ${Math.round(m.similarity * 100)}%]` : '';
+                return `${i + 1}. ${m.content} ${similarityLabel}`;
+            })
+            .join('\n');
+
+        if (!existingStr.trim()) return '';
+
+        return `\n\n## Bellekte Zaten Kayıtlı Benzer Bilgiler (bunları tekrar çıkarma)\n${existingStr}`;
+    }
+
+    /**
      * Hafif bellek çıkarımı — son mesaj çiftinden hızlı bilgi çıkarır.
      * Arka planda çalışır, kullanıcı yanıtını beklemez.
      */
@@ -981,11 +1068,9 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             logger.info('[Agent] 🧩 Hafif tarama çalışıyor');
             const extractionPrompt = buildLightExtractionPrompt(userName);
 
-            // Mevcut bellekleri LLM'e göster — tekrar çıkarımını engelle
-            const existingMemories = this.memory.getUserMemories(20);
-            const existingStr = existingMemories.length > 0
-                ? `\n\n## Bellekte Zaten Kayıtlı Bilgiler (bunları tekrar çıkarma)\n${existingMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}`
-                : '';
+            // Semantic dedup — kullanıcının mesajına benzer mevcut bellekleri bul
+            const similarMemories = await this.getSimilarMemoriesForDedup(userMessage, 10);
+            const existingStr = this.formatExistingMemoriesForLLM(similarMemories);
 
             let contextStr = ``;
             if (previousAssistantMessage) {
@@ -1011,9 +1096,13 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                 for (const mem of memories) {
                     const result = await this.memory.addMemory(mem.content, mem.category, mem.importance, mergeFn);
 
-                    // Arka planda memory graph'ı güncelle
-                    this.processMemoryGraphWithLLM(result.id, mem.content, userName).catch(err => {
-                        logger.warn({ err: err }, `[Agent] Graph güncelleme hatası (hafif):`);
+                    // Arka planda memory graph'ı güncelle - queue ile (rate-limit koruması)
+                    this.enqueueGraphTask(async () => {
+                        try {
+                            await this.processMemoryGraphWithLLM(result.id, mem.content, userName);
+                        } catch (err) {
+                            logger.warn({ err }, `[Agent] Graph güncelleme hatası (hafif):`);
+                        }
                     });
                 }
                 logger.info(`[Agent] 🧩 Hafif tarama: ${memories.length} bellek çıkarıldı`);
@@ -1039,10 +1128,12 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             }
 
             const extractionPrompt = buildDeepExtractionPrompt(transcript.userName);
-            const existingMemories = this.memory.getUserMemories(50);
-            const existingStr = existingMemories.length > 0
-                ? `\n\n## Bellekte Zaten Kayıtlı Bilgiler (bunları tekrar çıkarma)\n${existingMemories.map((m, i) => `${i + 1}. ${m.content}`).join('\n')}`
-                : '';
+
+            // Semantic dedup — konuşmanın son mesajına benzer mevcut bellekleri bul
+            const lastMessage = transcript.history[transcript.history.length - 1]?.content || '';
+            const similarMemories = await this.getSimilarMemoriesForDedup(lastMessage, 10);
+            const existingStr = this.formatExistingMemoriesForLLM(similarMemories);
+
             const messages = [{
                 role: 'user' as const,
                 content: `${transcript.conversationText}${existingStr}`,
@@ -1051,7 +1142,7 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             logger.debug({
                 conversationId,
                 transcriptLength: transcript.conversationText.length,
-                existingMemoryCount: existingMemories.length,
+                similarMemoryCount: similarMemories.length,
             }, '[Agent] Deep extraction context prepared');
 
             const result = await this.llm.chat(messages, {
@@ -1067,9 +1158,13 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                 for (const mem of memories) {
                     const result = await this.memory.addMemory(mem.content, mem.category, mem.importance, mergeFn);
 
-                    // Arka planda memory graph'ı güncelle
-                    this.processMemoryGraphWithLLM(result.id, mem.content, transcript.userName).catch(err => {
-                        logger.warn({ err: err }, `[Agent] Graph güncelleme hatası (derin):`);
+                    // Arka planda memory graph'ı güncelle - queue ile (rate-limit koruması)
+                    this.enqueueGraphTask(async () => {
+                        try {
+                            await this.processMemoryGraphWithLLM(result.id, mem.content, transcript.userName);
+                        } catch (err) {
+                            logger.warn({ err }, `[Agent] Graph güncelleme hatası (derin):`);
+                        }
                     });
                 }
                 logger.info(`[Agent] 🔍 Derin analiz: ${memories.length} bellek çıkarıldı (konuşma: ${conversationId.substring(0, 8)}...)`);
@@ -1104,9 +1199,13 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                 for (const mem of memories) {
                     const added = await this.memory.addMemory(mem.content, mem.category, mem.importance, mergeFn);
 
-                    // Arka planda memory graph'ı güncelle
-                    this.processMemoryGraphWithLLM(added.id, mem.content, userName).catch(err => {
-                        logger.warn({ err: err }, `[Agent] Raw text graph güncelleme hatası:`);
+                    // Arka planda memory graph'ı güncelle - queue ile (rate-limit koruması)
+                    this.enqueueGraphTask(async () => {
+                        try {
+                            await this.processMemoryGraphWithLLM(added.id, mem.content, userName);
+                        } catch (err) {
+                            logger.warn({ err }, `[Agent] Raw text graph güncelleme hatası:`);
+                        }
                     });
                 }
                 logger.info(`[Agent] 🔍 Düz metin analizi: ${memories.length} bellek çıkarıldı.`);
@@ -1152,8 +1251,9 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
      * 2) JSON objeleri ({ "name": "readFile", "arguments": {...} })
      * 3) Fonksiyon çağrısı formatı (readFile(path="C:\..."))
      */
-    private extractFallbackToolCalls(content: string): ToolCall[] {
+    private extractFallbackToolCalls(content: string): { calls: ToolCall[], rawMatches: string[] } {
         const results: ToolCall[] = [];
+        const rawMatches: string[] = [];
         const knownToolNames = new Set(this.toolDefinitions.map(t => t.name));
 
         // ——— Senaryo 1: tool_code blokları ———
@@ -1161,18 +1261,20 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
         const toolCodeBlockRegex = /```tool_code\s*([\s\S]*?)```/gi;
         for (const m of content.matchAll(toolCodeBlockRegex)) {
             const innerCalls = this.parseFunctionCallsFromText(m[1], knownToolNames);
-            results.push(...innerCalls);
+            results.push(...innerCalls.calls);
+            rawMatches.push(m[0]); // match'in tamamı (koduyla beraber) metinden silinecek
         }
         // tool_code readFile(...) veya tool_code [readFile(...)]
         const toolCodeInlineRegex = /tool_code\s*\[?\s*([\s\S]*?)\s*\]?\s*(?:\n|$)/gi;
         if (results.length === 0) {
             for (const m of content.matchAll(toolCodeInlineRegex)) {
                 const innerCalls = this.parseFunctionCallsFromText(m[1], knownToolNames);
-                results.push(...innerCalls);
+                results.push(...innerCalls.calls);
+                rawMatches.push(m[0]);
             }
         }
 
-        if (results.length > 0) return results;
+        if (results.length > 0) return { calls: results, rawMatches };
 
         // ——— Senaryo 2: JSON objeleri ———
         // Tüm {...} bloklarını tara (greedy olmayan, iç içe olmayan)
@@ -1189,6 +1291,7 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                             name: toolName,
                             arguments: typeof toolArgs === 'string' ? this.safeJsonParse(toolArgs) : toolArgs,
                         });
+                        rawMatches.push(m[0]);
                     }
                 }
             } catch {
@@ -1213,6 +1316,7 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                                 name: toolName,
                                 arguments: typeof toolArgs === 'string' ? this.safeJsonParse(toolArgs) : toolArgs,
                             });
+                            rawMatches.push(m[0]);
                         }
                     }
                 } catch {
@@ -1221,10 +1325,14 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             }
         }
 
-        if (results.length > 0) return results;
+        if (results.length > 0) return { calls: results, rawMatches };
 
         // ——— Senaryo 3: Fonksiyon çağrısı formatı ———
-        return this.parseFunctionCallsFromText(content, knownToolNames);
+        const functionResult = this.parseFunctionCallsFromText(content, knownToolNames);
+        results.push(...functionResult.calls);
+        rawMatches.push(...functionResult.rawMatches);
+
+        return { calls: results, rawMatches };
     }
 
     /**
@@ -1232,8 +1340,9 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
      * Örn: readFile(path="C:\Users\Yigit\file.txt")
      * Parantez dengeleme ile iç içe parantezleri doğru ele alır.
      */
-    private parseFunctionCallsFromText(text: string, knownToolNames: Set<string>): ToolCall[] {
+    private parseFunctionCallsFromText(text: string, knownToolNames: Set<string>): { calls: ToolCall[], rawMatches: string[] } {
         const results: ToolCall[] = [];
+        const rawMatches: string[] = [];
         const toolNamePattern = Array.from(knownToolNames).join('|');
         // Araç adını ve açılan parantezi yakala; kapanışı manuel bul
         const callStartRegex = new RegExp(`(${toolNamePattern})\\s*\\(`, 'g');
@@ -1252,6 +1361,7 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             }
             if (depth !== 0) continue; // Dengesiz parantez — atla
             
+            const rawMatchString = text.substring(startMatch.index, idx);
             const argsString = text.substring(argsStartIdx, idx - 1).trim();
             const parsedArgs = this.parseFallbackArgs(toolName, argsString);
             results.push({
@@ -1259,8 +1369,9 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                 name: toolName,
                 arguments: parsedArgs,
             });
+            rawMatches.push(rawMatchString);
         }
-        return results;
+        return { calls: results, rawMatches };
     }
 
     /**

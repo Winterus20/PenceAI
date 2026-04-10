@@ -3,150 +3,149 @@ import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import { logger } from '../utils/logger.js';
+import { z } from 'zod';
 
 dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 
-export interface AppConfig {
-    port: number;
-    host: string;
-    dbPath: string;
-    projectRoot: string;
-    defaultUserName: string;
+const validLLMProviders = ['openai', 'anthropic', 'ollama', 'minimax', 'github', 'groq', 'mistral', 'nvidia'] as const;
+const validEmbeddingProviders = ['minimax', 'openai', 'voyage', 'none'] as const;
 
-    // LLM
-    defaultLLMProvider: 'openai' | 'anthropic' | 'ollama' | 'minimax' | 'github' | 'groq' | 'mistral' | 'nvidia';
-    defaultLLMModel: string;
-    openaiApiKey?: string;
-    anthropicApiKey?: string;
-    minimaxApiKey?: string;
-    githubToken?: string;
-    groqApiKey?: string;
-    mistralApiKey?: string;
-    nvidiaApiKey?: string;
-    ollamaBaseUrl: string;
-    enableOllamaTools: boolean; // Ollama server'da --enable-auto-tool-choice flag'i gerektirir
-    enableNvidiaTools: boolean; // NVIDIA NIM modellerin çoğu tool_choice:"auto" desteklemez
+const ConfigSchema = z.object({
+  port: z.coerce.number().default(3000),
+  host: z.string().default('localhost'),
+  dbPath: z.string().optional(),
+  projectRoot: z.string().optional(),
+  defaultUserName: z.string().default('Kullanıcı'),
 
-    // Embedding
-    embeddingProvider: 'minimax' | 'openai' | 'voyage' | 'none';
-    embeddingModel: string;
-    voyageApiKey?: string;
+  // LLM
+  defaultLLMProvider: z.enum(validLLMProviders).catch('openai').default('openai'),
+  defaultLLMModel: z.string().default('gpt-4o'),
+  openaiApiKey: z.string().optional(),
+  anthropicApiKey: z.string().optional(),
+  minimaxApiKey: z.string().optional(),
+  githubToken: z.string().optional(),
+  groqApiKey: z.string().optional(),
+  mistralApiKey: z.string().optional(),
+  nvidiaApiKey: z.string().optional(),
+  ollamaBaseUrl: z.string().default('http://localhost:11434'),
+  enableOllamaTools: z.coerce.boolean().default(false),
+  enableNvidiaTools: z.coerce.boolean().default(false),
 
-    // Channels
-    telegramBotToken?: string;
-    telegramAllowedUsers: string[];
-    discordBotToken?: string;
-    discordAllowedChannels: string[];
-    whatsappEnabled: boolean;
+  // Embedding
+  embeddingProvider: z.enum(validEmbeddingProviders).catch('openai').default('openai'),
+  embeddingModel: z.string().default('text-embedding-3-small'),
+  voyageApiKey: z.string().optional(),
 
-    // Security
-    allowShellExecution: boolean;
-    fsRootDir?: string;
-    dashboardPassword?: string;
-    braveSearchApiKey?: string;
-    jinaReaderApiKey?: string;
-    sensitivePaths: string[];
+  // Channels
+  telegramBotToken: z.string().optional(),
+  telegramAllowedUsers: z.preprocess(
+    (val) => (typeof val === 'string' && val ? val.split(',').map(s => s.trim()) : []),
+    z.array(z.string()).default([])
+  ),
+  discordBotToken: z.string().optional(),
+  discordAllowedChannels: z.preprocess(
+    (val) => (typeof val === 'string' && val ? val.split(',').map(s => s.trim()) : []),
+    z.array(z.string()).default([])
+  ),
+  whatsappEnabled: z.coerce.boolean().default(false),
 
-    // Advanced Settings
-      systemPrompt?: string;
-      autonomousStepLimit: number;
-      memoryDecayThreshold: number;
-      semanticSearchThreshold: number;
-      logLevel: 'debug' | 'info' | 'error';
-      // Gelişmiş Model Ayarları
-      temperature: number;
-      maxTokens: number;
-    }
+  // Security
+  allowShellExecution: z.coerce.boolean().default(false),
+  fsRootDir: z.string().optional(),
+  dashboardPassword: z.string().optional(),
+  braveSearchApiKey: z.string().optional(),
+  jinaReaderApiKey: z.string().optional(),
+  sensitivePaths: z.preprocess(
+    (val) => {
+        if (typeof val === 'string' && val) return val.split(',').map(s => s.trim()).filter(Boolean);
+        return [
+            'C:\\Windows',
+            'C:\\Program Files',
+            'C:\\Program Files (x86)',
+            path.join(os.homedir(), 'AppData'),
+            'C:\\ProgramData',
+            '/etc', '/usr', '/var', '/boot', '/root',
+        ];
+    },
+    z.array(z.string())
+  ),
+
+  // Advanced Settings
+  systemPrompt: z.string().optional(),
+  autonomousStepLimit: z.coerce.number().default(5),
+  memoryDecayThreshold: z.coerce.number().default(30),
+  semanticSearchThreshold: z.coerce.number().default(0.7),
+  logLevel: z.enum(['debug', 'info', 'error']).catch('info').default('info'),
+  temperature: z.coerce.number().min(0).max(2).catch(0.7).default(0.7),
+  maxTokens: z.coerce.number().min(256).max(128000).catch(4096).default(4096),
+});
+
+export type AppConfig = z.infer<typeof ConfigSchema> & {
+  dbPath: string;
+  projectRoot: string;
+};
 
 export function loadConfig(): AppConfig {
-    const dbPath = process.env.DB_PATH
-        ? path.resolve(PROJECT_ROOT, process.env.DB_PATH)
-        : path.join(PROJECT_ROOT, 'data', 'penceai.db');
+    const rawConfig = {
+        port: process.env.PORT,
+        host: process.env.HOST,
+        dbPath: process.env.DB_PATH,
+        defaultUserName: process.env.DEFAULT_USER_NAME,
+        defaultLLMProvider: process.env.DEFAULT_LLM_PROVIDER,
+        defaultLLMModel: process.env.DEFAULT_LLM_MODEL,
+        openaiApiKey: process.env.OPENAI_API_KEY,
+        anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+        minimaxApiKey: process.env.MINIMAX_API_KEY,
+        githubToken: process.env.GITHUB_TOKEN,
+        groqApiKey: process.env.GROQ_API_KEY,
+        mistralApiKey: process.env.MISTRAL_API_KEY,
+        nvidiaApiKey: process.env.NVIDIA_API_KEY,
+        ollamaBaseUrl: process.env.OLLAMA_BASE_URL,
+        enableOllamaTools: process.env.ENABLE_OLLAMA_TOOLS,
+        enableNvidiaTools: process.env.ENABLE_NVIDIA_TOOLS,
+        embeddingProvider: process.env.EMBEDDING_PROVIDER,
+        embeddingModel: process.env.EMBEDDING_MODEL,
+        voyageApiKey: process.env.VOYAGE_API_KEY,
+        telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
+        telegramAllowedUsers: process.env.TELEGRAM_ALLOWED_USERS,
+        discordBotToken: process.env.DISCORD_BOT_TOKEN,
+        discordAllowedChannels: process.env.DISCORD_ALLOWED_CHANNELS,
+        whatsappEnabled: process.env.WHATSAPP_ENABLED,
+        allowShellExecution: process.env.ALLOW_SHELL_EXECUTION,
+        fsRootDir: process.env.FS_ROOT_DIR,
+        dashboardPassword: process.env.DASHBOARD_PASSWORD,
+        braveSearchApiKey: process.env.BRAVE_SEARCH_API_KEY,
+        jinaReaderApiKey: process.env.JINA_READER_API_KEY,
+        sensitivePaths: process.env.SENSITIVE_PATHS,
+        systemPrompt: process.env.SYSTEM_PROMPT,
+        autonomousStepLimit: process.env.AUTONOMOUS_STEP_LIMIT,
+        memoryDecayThreshold: process.env.MEMORY_DECAY_THRESHOLD,
+        semanticSearchThreshold: process.env.SEMANTIC_SEARCH_THRESHOLD,
+        logLevel: process.env.LOG_LEVEL,
+        temperature: process.env.TEMPERATURE,
+        maxTokens: process.env.MAX_TOKENS,
+    };
+
+    const parsed = ConfigSchema.safeParse(rawConfig);
+
+    if (!parsed.success) {
+        logger.error({ errors: parsed.error.format() }, '[Config] Geçersiz ortam değişkenleri (Invalid environment variables)');
+        process.exit(1);
+    }
+
+    const validConfig = parsed.data;
 
     return {
-        port: (() => { const p = parseInt(process.env.PORT || '3000', 10); return isNaN(p) ? 3000 : p; })(),
-        host: process.env.HOST || 'localhost',
-        dbPath,
+        ...validConfig,
         projectRoot: PROJECT_ROOT,
-        defaultUserName: process.env.DEFAULT_USER_NAME || 'Kullanıcı',
-
-        defaultLLMProvider: (() => {
-            const validLLMProviders = ['openai', 'anthropic', 'ollama', 'minimax', 'github', 'groq', 'mistral', 'nvidia'] as const;
-            const raw = process.env.DEFAULT_LLM_PROVIDER;
-            if (raw && (validLLMProviders as readonly string[]).includes(raw)) {
-                return raw as AppConfig['defaultLLMProvider'];
-            }
-            if (raw) logger.warn(`[Config] Geçersiz DEFAULT_LLM_PROVIDER: "${raw}". Geçerli değerler: ${validLLMProviders.join(', ')}. Varsayılan: openai`);
-            return 'openai' as AppConfig['defaultLLMProvider'];
-        })(),
-        defaultLLMModel: process.env.DEFAULT_LLM_MODEL || 'gpt-4o',
-        openaiApiKey: process.env.OPENAI_API_KEY || undefined,
-        anthropicApiKey: process.env.ANTHROPIC_API_KEY || undefined,
-        minimaxApiKey: process.env.MINIMAX_API_KEY || undefined,
-        githubToken: process.env.GITHUB_TOKEN || undefined,
-        groqApiKey: process.env.GROQ_API_KEY || undefined,
-        mistralApiKey: process.env.MISTRAL_API_KEY || undefined,
-        nvidiaApiKey: process.env.NVIDIA_API_KEY || undefined,
-        ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-        enableOllamaTools: process.env.ENABLE_OLLAMA_TOOLS === 'true',
-        enableNvidiaTools: process.env.ENABLE_NVIDIA_TOOLS === 'true',
-
-        embeddingProvider: (() => {
-            const validEmbeddingProviders = ['minimax', 'openai', 'voyage', 'none'] as const;
-            const raw = process.env.EMBEDDING_PROVIDER;
-            if (raw && (validEmbeddingProviders as readonly string[]).includes(raw)) {
-                return raw as AppConfig['embeddingProvider'];
-            }
-            if (raw) logger.warn(`[Config] Geçersiz EMBEDDING_PROVIDER: "${raw}". Geçerli değerler: ${validEmbeddingProviders.join(', ')}. Varsayılan: openai`);
-            return 'openai' as AppConfig['embeddingProvider'];
-            })(),
-            embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
-
-        telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || undefined,
-        telegramAllowedUsers: process.env.TELEGRAM_ALLOWED_USERS
-            ? process.env.TELEGRAM_ALLOWED_USERS.split(',').map(s => s.trim())
-            : [],
-        discordBotToken: process.env.DISCORD_BOT_TOKEN || undefined,
-        discordAllowedChannels: process.env.DISCORD_ALLOWED_CHANNELS
-            ? process.env.DISCORD_ALLOWED_CHANNELS.split(',').map(s => s.trim())
-            : [],
-        whatsappEnabled: process.env.WHATSAPP_ENABLED === 'true',
-
-        allowShellExecution: process.env.ALLOW_SHELL_EXECUTION === 'true',
-        fsRootDir: process.env.FS_ROOT_DIR || undefined,
-        dashboardPassword: process.env.DASHBOARD_PASSWORD || undefined,
-        braveSearchApiKey: process.env.BRAVE_SEARCH_API_KEY || undefined,
-        jinaReaderApiKey: process.env.JINA_READER_API_KEY || undefined,
-        sensitivePaths: process.env.SENSITIVE_PATHS
-            ? process.env.SENSITIVE_PATHS.split(',').map(s => s.trim()).filter(Boolean)
-            : [
-                'C:\\Windows',
-                'C:\\Program Files',
-                'C:\\Program Files (x86)',
-                path.join(os.homedir(), 'AppData'),
-                'C:\\ProgramData',
-                '/etc', '/usr', '/var', '/boot', '/root',
-            ],
-
-        systemPrompt: process.env.SYSTEM_PROMPT || undefined,
-        autonomousStepLimit: (() => { const p = parseInt(process.env.AUTONOMOUS_STEP_LIMIT || '5', 10); return isNaN(p) ? 5 : p; })(),
-        memoryDecayThreshold: (() => { const p = parseInt(process.env.MEMORY_DECAY_THRESHOLD || '30', 10); return isNaN(p) ? 30 : p; })(),
-        semanticSearchThreshold: (() => { const p = parseFloat(process.env.SEMANTIC_SEARCH_THRESHOLD || '0.7'); return isNaN(p) ? 0.7 : p; })(),
-        logLevel: (() => {
-            const valid = ['debug', 'info', 'error'] as const;
-            const raw = process.env.LOG_LEVEL;
-            if (raw && (valid as readonly string[]).includes(raw)) return raw as AppConfig['logLevel'];
-            return 'info';
-          })(),
-          // Gelişmiş Model Ayarları
-          temperature: (() => { const p = parseFloat(process.env.TEMPERATURE || '0.7'); return isNaN(p) ? 0.7 : Math.max(0, Math.min(2, p)); })(),
-          maxTokens: (() => { const p = parseInt(process.env.MAX_TOKENS || '4096', 10); return isNaN(p) ? 4096 : Math.max(256, Math.min(128000, p)); })(),
-          voyageApiKey: process.env.VOYAGE_API_KEY || undefined,
-          };
-        }
+        dbPath: validConfig.dbPath
+            ? path.resolve(PROJECT_ROOT, validConfig.dbPath)
+            : path.join(PROJECT_ROOT, 'data', 'penceai.db'),
+    } as AppConfig;
+}
 
 // Singleton config
 let _config: AppConfig | null = null;

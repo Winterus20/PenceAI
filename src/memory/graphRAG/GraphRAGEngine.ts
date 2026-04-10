@@ -646,13 +646,14 @@ export class GraphRAGEngine {
     for (let rank = 0; rank < sortedExpanded.length; rank++) {
       const node = sortedExpanded[rank];
       const pageRankScore = scores.get(node.id) ?? 0;
-      const rrfScore = 1 / (K + rank + 1) + pageRankScore;
+      const rrfScore = 1 / (K + rank + 1);
+      const weightedScore = rrfScore * (0.5 + pageRankScore * 0.5);
 
       const existing = allNodes.get(node.id);
       if (existing) {
-        existing.rrfScore += rrfScore;
+        existing.rrfScore += weightedScore;
       } else {
-        allNodes.set(node.id, { node, rrfScore });
+        allNodes.set(node.id, { node, rrfScore: weightedScore });
       }
     }
 

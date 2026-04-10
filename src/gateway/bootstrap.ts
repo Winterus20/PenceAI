@@ -62,20 +62,21 @@ export function createDashboardAuthMiddleware(dashboardPassword?: string): Reque
 }
 
 export function resolveGatewayPublicDir(currentDir: string): string {
-  // Öncelik: React build çıktısı (dist/web/public)
+  // React build çıktısı (dist/web/public)
   const reactBuildDir = path.join(currentDir, '../../dist/web/public');
   if (fs.existsSync(reactBuildDir)) {
     return reactBuildDir;
   }
 
-  // Fallback: Eski vanilla JS panel (public_old)
-  const developmentDir = path.join(currentDir, '../../dist/web/public_old');
-  if (fs.existsSync(developmentDir)) {
-    return developmentDir;
+  // Fallback: Kaynak dizindeki React public klasörü (development mode)
+  const reactPublicDir = path.join(currentDir, '../web/react-app/public');
+  if (fs.existsSync(reactPublicDir)) {
+    return reactPublicDir;
   }
 
-  // Son fallback: Kaynak dizindeki public_old
-  return path.join(currentDir, '../web/public_old');
+  // Son çare: Boş string (static file serving devre dışı)
+  logger.warn('No public directory found, static file serving disabled');
+  return '';
 }
 
 export function registerRequestTracing(app: Application, onRequest: () => void): void {

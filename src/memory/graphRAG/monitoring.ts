@@ -41,6 +41,7 @@ export interface GraphRAGMetrics {
   avgTokenUsage: number;
   cacheHitRate: number;
   errorRate: number;
+  instanceId?: string;
 }
 
 /** Alert threshold config */
@@ -63,6 +64,7 @@ const DEFAULT_ALERT_THRESHOLDS: AlertThresholds = {
  * GraphRAG Monitor.
  */
 export class GraphRAGMonitor {
+  private static instanceId: string = 'default';
   private static totalQueries: number = 0;
   private static graphRAGQueries: number = 0;
   private static fallbackQueries: number = 0;
@@ -72,6 +74,14 @@ export class GraphRAGMonitor {
   private static tokenUsages: number[] = [];
   private static alerts: Alert[] = [];
   private static thresholds: AlertThresholds = { ...DEFAULT_ALERT_THRESHOLDS };
+
+  static setInstanceId(id: string): void {
+    this.instanceId = id;
+  }
+
+  static getInstanceId(): string {
+    return this.instanceId;
+  }
 
   /**
    * Query kaydını tut.
@@ -164,6 +174,7 @@ export class GraphRAGMonitor {
         : 0,
       cacheHitRate: this.graphRAGQueries > 0 ? this.cacheHits / this.graphRAGQueries : 0,
       errorRate: this.errorCount / total,
+      instanceId: this.instanceId,
     };
   }
 

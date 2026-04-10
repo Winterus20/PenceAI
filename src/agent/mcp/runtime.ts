@@ -22,24 +22,23 @@ let _mcpManager: MCPClientManager | null = null;
 /** Module-level MCP config watcher */
 let _mcpWatcher: MCPConfigWatcher | null = null;
 
+import type { MCPServerConfig } from './types.js';
+
 /**
  * MCP runtime başlatma fonksiyonu.
  * Uygulama başlangıcında çağrılır.
  *
- * @returns MCPClientManager instance veya null (MCP devre dışıysa)
+ * @param activeServers - Veritabanından yüklenen aktif MCP server yapılandırmaları
+ * @returns MCPClientManager instance veya null (MCP sunucu yoksa)
  */
-export async function initializeMCP(): Promise<MCPClientManager | null> {
-  if (!isMCPEnabled()) {
-    logger.info('[MCP:runtime] MCP is disabled (ENABLE_MCP=false)');
+export async function initializeMCP(activeServers: MCPServerConfig[] = []): Promise<MCPClientManager | null> {
+  if (activeServers.length === 0) {
+    logger.info('[MCP:runtime] MCP is disabled or no active servers');
     return null;
   }
 
-  const { enabled, servers, runtimeOptions } = parseMCPConfig();
+  const servers = activeServers;
 
-  if (!enabled || servers.length === 0) {
-    logger.info('[MCP:runtime] MCP enabled but no servers configured');
-    return null;
-  }
 
   logger.info(`[MCP:runtime] Initializing MCP with ${servers.length} server(s)...`);
 

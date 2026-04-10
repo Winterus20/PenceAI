@@ -115,7 +115,19 @@ export class CommunityDetector {
     }
 
     // Graph'i yükle
-    const { nodes, edges, totalWeight } = this.loadGraph();
+    let nodes: MemoryRow[];
+    let edges: WeightedEdge[];
+    let totalWeight: number;
+    try {
+      const graphData = this.loadGraph();
+      nodes = graphData.nodes;
+      edges = graphData.edges;
+      totalWeight = graphData.totalWeight;
+    } catch {
+      logger.warn('[CommunityDetector] Failed to load graph, returning empty communities');
+      return { communities: [], totalNodes: 0, totalEdges: 0, elapsedMs: Date.now() - startTime, cacheHit: false };
+    }
+
     if (nodes.length === 0) {
       logger.warn('[CommunityDetector] Empty graph, returning empty communities');
       return { communities: [], totalNodes: 0, totalEdges: 0, elapsedMs: Date.now() - startTime, cacheHit: false };
@@ -684,6 +696,18 @@ export class CommunityDetector {
   }
 
   /**
+   * Fisher-Yates shuffle — unbiased random permutation.
+   */
+  private fisherYatesShuffle<T>(array: T[]): T[] {
+    const result = [...array];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+  }
+
+  /**
    * Büyük graph'lerde random sampling yap.
    */
   private sampleNodes(nodes: MemoryRow[], maxNodes: number): MemoryRow[] {
@@ -704,7 +728,7 @@ export class CommunityDetector {
     const remaining = sorted.slice(importantCount);
 
     // Random sampling
-    const shuffled = remaining.sort(() => Math.random() - 0.5);
+    const shuffled = this.fisherYatesShuffle(remaining);
     const random = shuffled.slice(0, randomCount);
 
     return [...important, ...random];

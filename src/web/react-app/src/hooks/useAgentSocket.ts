@@ -135,11 +135,12 @@ export function useAgentSocket() {
         if (!mounted.current) return;
         if (ws.current?.readyState === WebSocket.OPEN || ws.current?.readyState === WebSocket.CONNECTING) return;
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        // Explicitly point to backend during Vite development (port 5173) to bypass proxy flakiness
-        const wsHost = window.location.port === '5173' ? 'localhost:3001' : window.location.host;
-        const wsUrl = `${protocol}//${wsHost}/ws`;
+        // Vite dev server kullanırken WebSocket proxy'sini kullan
+        // Vite config'te /ws proxy'si backend'e (3001) yönlendirilmiş
+        // Production'da aynı sunucudan servis edildiği için relative path çalışır
+        const wsUrl = `/ws`;
 
+        // WebSocket relative URL kullanırken mevcut host/port otomatik kullanılır
         const socket = new WebSocket(wsUrl);
         ws.current = socket;
 
