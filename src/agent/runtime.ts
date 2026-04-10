@@ -15,6 +15,8 @@ import { getConfig } from '../gateway/config.js';
 import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
 import { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
 import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../memory/graphRAG/config.js';
+import { startTrace, endTrace, isLangfuseInitialized } from '../observability/langfuse.js';
+import { SpanStatusCode, trace } from '@opentelemetry/api';
 
 const MAX_TOOL_ITERATIONS_DEFAULT = 5;
 
@@ -273,7 +275,41 @@ export class AgentRuntime {
     }
 
     /**
+     * Helper method to create child spans for operations.
+     * If traceSpan is provided, creates a child span; otherwise just executes the function.
+     */
+    private async _withTraceSpan<T>(
+        parentSpan: any,
+        operationName: string,
+        fn: () => Promise<T>,
+        attributes?: Record<string, string | number>
+    ): Promise<T> {
+        // Langfuse disabled ise direkt çalıştır
+        if (!parentSpan || !isLangfuseInitialized()) {
+            return fn();
+        }
+
+        const tracer = trace.getTracer('penceai');
+        const childSpan = tracer.startSpan(operationName, { attributes });
+
+        try {
+            const result = await fn();
+            childSpan.setStatus({ code: SpanStatusCode.OK });
+            childSpan.end();
+            return result;
+        } catch (error: any) {
+            childSpan.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: error.message,
+            });
+            childSpan.end();
+            throw error;
+        }
+    }
+
+    /**
      * Gelen mesajı işler ve yanıt oluşturur.
+     * Langfuse enabled ise otomatik trace eder, değilse direkt çalıştırır.
      * @param onEvent — düşünme ve araç olaylarını gerçek zamanlı göndermek için callback
      */
     async processMessage(
@@ -281,6 +317,44 @@ export class AgentRuntime {
         onEvent?: AgentEventCallback,
         confirmCallback?: ConfirmCallback,
         options?: { thinking?: boolean },
+    ): Promise<{ response: string; conversationId: string }> {
+        // Langfuse enabled değilse direkt çalıştır
+        if (!isLangfuseInitialized()) {
+            return this._processMessageInternal(message, onEvent, confirmCallback, options);
+        }
+
+        // Trace oluştur
+        const { span } = startTrace('agent.processMessage', {
+            channelId: message.channelType,
+            senderName: message.senderName || 'anonymous',
+            contentLength: message.content.length,
+        });
+
+        try {
+            const result = await this._processMessageInternal(message, onEvent, confirmCallback, options, span);
+            span.setStatus({ code: SpanStatusCode.OK });
+            endTrace(span);
+            return result;
+        } catch (error: any) {
+            span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: error.message,
+            });
+            endTrace(span, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Internal message processing logic.
+     * @param traceSpan - Optional OpenTelemetry span for tracing
+     */
+    private async _processMessageInternal(
+        message: UnifiedMessage,
+        onEvent?: AgentEventCallback,
+        confirmCallback?: ConfirmCallback,
+        options?: { thinking?: boolean },
+        traceSpan?: any,
     ): Promise<{ response: string; conversationId: string }> {
         const startTimeMs = Date.now();
         const perfTimings: Record<string, number> = {};
@@ -352,6 +426,12 @@ export class AgentRuntime {
         // Kullanıcı belleklerini akıllı şekilde al — hibrit arama (FTS + Semantik)
         // + geçmiş konuşma özetleri + review due bellekler paralel çekilir
         const retrievalStart = Date.now();
+        const contextBundle = await this._withTraceSpan(
+            traceSpan,
+            'memory.getPromptContextBundle',
+            async () => this.memory.getPromptContextBundle(message.content, conversationId),
+            { query: message.content, conversationId }
+        );
         const {
             relevantMemories,
             archivalMemories,
@@ -360,7 +440,7 @@ export class AgentRuntime {
             reviewMemories,
             followUpCandidates,
             recentMessages,
-        } = await this.memory.getPromptContextBundle(message.content, conversationId);
+        } = contextBundle;
         perfTimings.retrieval = Date.now() - retrievalStart;
         logger.info(`[Agent] ⏱️ getPromptContextBundle: ${perfTimings.retrieval}ms`);
 
@@ -799,6 +879,12 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             });
         } else {
             logger.info(`[Agent] ⏳ Hafif tarama ertelendi (${this._extractionCounter}/${AgentRuntime.EXTRACTION_INTERVAL})`);
+        }
+
+        // Add final attributes to trace span if it exists
+        if (traceSpan) {
+            traceSpan.setAttribute('agent.response_length', response.length);
+            traceSpan.setAttribute('agent.conversation_id', conversationId);
         }
 
         return { response, conversationId };

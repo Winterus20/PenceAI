@@ -116,14 +116,16 @@ export class MiniMaxProvider extends LLMProvider {
             },
         }));
 
-        const response = await this.createChatCompletionWithToolFallback({
-            model,
-            messages: openaiMessages,
-            tools: tools && tools.length > 0 ? tools : undefined,
-            temperature: options?.temperature ?? 0.7,
-            max_tokens: options?.maxTokens,
-            ...(options?.thinking ? { reasoning_split: true } : {}),
-        }) as OpenAI.Chat.ChatCompletion;
+        const response = await this.withTrace('chat', model, async () => {
+            return await this.createChatCompletionWithToolFallback({
+                model,
+                messages: openaiMessages,
+                tools: tools && tools.length > 0 ? tools : undefined,
+                temperature: options?.temperature ?? 0.7,
+                max_tokens: options?.maxTokens,
+                ...(options?.thinking ? { reasoning_split: true } : {}),
+            }) as OpenAI.Chat.ChatCompletion;
+        });
 
         const choice = response.choices[0];
 

@@ -81,6 +81,12 @@ const ConfigSchema = z.object({
   logLevel: z.enum(['debug', 'info', 'error']).catch('info').default('info'),
   temperature: z.coerce.number().min(0).max(2).catch(0.7).default(0.7),
   maxTokens: z.coerce.number().min(256).max(128000).catch(4096).default(4096),
+
+  // Observability (Langfuse)
+  langfuseEnabled: z.coerce.boolean().default(false),
+  langfuseSecretKey: z.string().optional(),
+  langfusePublicKey: z.string().optional(),
+  langfuseBaseUrl: z.string().default('https://cloud.langfuse.com'),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema> & {
@@ -127,6 +133,11 @@ export function loadConfig(): AppConfig {
         logLevel: process.env.LOG_LEVEL,
         temperature: process.env.TEMPERATURE,
         maxTokens: process.env.MAX_TOKENS,
+        // Observability (Langfuse)
+        langfuseEnabled: process.env.LANGFUSE_ENABLED === 'true',
+        langfuseSecretKey: process.env.LANGFUSE_SECRET_KEY,
+        langfusePublicKey: process.env.LANGFUSE_PUBLIC_KEY,
+        langfuseBaseUrl: process.env.LANGFUSE_BASE_URL || 'https://cloud.langfuse.com',
     };
 
     const parsed = ConfigSchema.safeParse(rawConfig);

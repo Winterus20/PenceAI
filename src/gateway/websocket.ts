@@ -37,6 +37,7 @@ interface WebSocketChatMessage {
 	newConversation?: boolean;
 	userName?: string;
 	attachments?: WebSocketAttachment[];
+	traceId?: string; // Langfuse trace ID propagation
 }
 
 interface WebSocketAttachment {
@@ -152,9 +153,11 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
             while (messageQueue.length > 0) {
                 const { data } = messageQueue.shift()!;
                 try {
+                    // Extract traceId from chat message for Langfuse propagation
+                    const traceId = (data as WebSocketChatMessage).traceId;
                     await runWithTraceId(async () => {
                         await handleChatMessage(data, ws);
-                    });
+                    }, traceId);
                 } catch (err) {
                     logger.error({ err }, '[Gateway] Kuyruk mesaj hatası');
                 }

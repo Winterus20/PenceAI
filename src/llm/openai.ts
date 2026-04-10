@@ -1,13 +1,16 @@
 import OpenAI from 'openai';
+import { observeOpenAI } from '@langfuse/openai';
 import { LLMProvider, type ChatOptions, TOOL_CALL_CLEAR_SIGNAL } from './provider.js';
 import type { LLMMessage, LLMResponse, ToolCall } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
+import { isLangfuseInitialized, startTrace, endTrace } from '../observability/langfuse.js';
 
 export class OpenAIProvider extends LLMProvider {
     readonly name: string = 'openai';
     readonly supportedModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo', 'o1', 'o1-mini'];
 
     protected client: OpenAI;
+    private wrappedClient: any; // Langfuse wrapped client
 
     private isToolRelatedError(error: unknown): boolean {
         if (!(error instanceof Error)) return false;
@@ -40,12 +43,22 @@ export class OpenAIProvider extends LLMProvider {
         if (!apiKey) {
             throw new Error(customApiKey ? 'API Key sağlanmadı (GitHub v.b)' : 'OPENAI_API_KEY ortam değişkeni ayarlanmamış');
         }
-        this.client = new OpenAI({
+        const baseClient = new OpenAI({
             apiKey,
             baseURL: customBaseUrl,
             timeout: 120000, // 2 dakika timeout - LLM yanıtları için makul süre
             maxRetries: 2,   // Network hatalarında 2 kez retry
         });
+
+        // Langfuse wrapper (eğer enabled ise)
+        if (isLangfuseInitialized()) {
+            this.wrappedClient = observeOpenAI(baseClient, {
+                generationName: 'OpenAI Chat Completion',
+            });
+            this.client = this.wrappedClient as OpenAI;
+        } else {
+            this.client = baseClient;
+        }
     }
 
     async chat(messages: LLMMessage[], options?: ChatOptions): Promise<LLMResponse> {

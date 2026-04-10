@@ -32,6 +32,7 @@ import {
     registerRequestTracing,
     resolveGatewayPublicDir,
 } from './bootstrap.js';
+import { initializeLangfuse, shutdownLangfuse } from '../observability/langfuse.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -95,6 +96,17 @@ async function main() {
     const mcpManager = await initializeMCP(activeServers);
     if (mcpManager) {
         logger.info(`[Gateway] 🔌 MCP Runtime initialized — ${mcpManager.connectedServerCount} server(s), ${mcpManager.totalToolCount} tool(s)`);
+    }
+
+    // 3.6 Observability (Langfuse) Initialization
+    const langfuseInitialized = initializeLangfuse({
+        enabled: config.langfuseEnabled,
+        secretKey: config.langfuseSecretKey || '',
+        publicKey: config.langfusePublicKey || '',
+        baseUrl: config.langfuseBaseUrl,
+    });
+    if (langfuseInitialized) {
+        logger.info(`[Gateway] 📊 Observability: Langfuse enabled (${config.langfuseBaseUrl})`);
     }
 
     // 4. Agent Runtime
@@ -290,6 +302,8 @@ async function main() {
         } catch (err) {
             logger.error({ err }, '[Gateway] Kanal kapatma hatası');
         }
+        // Observability flush
+        await shutdownLangfuse();
         // MCP shutdown
         await shutdownMCP();
         database.close();

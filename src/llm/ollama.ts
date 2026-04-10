@@ -97,10 +97,12 @@ export class OllamaProvider extends LLMProvider {
             }));
         }
 
-        const res = await fetch(`${this.baseUrl}/api/chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
+        const res = await this.withTrace('chat', model, async () => {
+            return await fetch(`${this.baseUrl}/api/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
         });
 
         if (!res.ok) {

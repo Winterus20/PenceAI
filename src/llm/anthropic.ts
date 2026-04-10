@@ -80,45 +80,47 @@ export class AnthropicProvider extends LLMProvider {
             input_schema: t.parameters as Anthropic.Tool['input_schema'],
         }));
 
-        const response = await this.client.messages.create({
-            model,
-            max_tokens: options?.maxTokens || 4096,
-            system: options?.systemPrompt,
-            messages: anthropicMessages,
-            tools: tools && tools.length > 0 ? tools : undefined,
-            temperature: options?.temperature ?? 0.7,
-        });
+        return this.withTrace('chat', model, async () => {
+            const response = await this.client.messages.create({
+                model,
+                max_tokens: options?.maxTokens || 4096,
+                system: options?.systemPrompt,
+                messages: anthropicMessages,
+                tools: tools && tools.length > 0 ? tools : undefined,
+                temperature: options?.temperature ?? 0.7,
+            });
 
-        // Yanıtı çözümle
-        let content = '';
-        const toolCalls: ToolCall[] = [];
+            // Yanıtı çözümle
+            let content = '';
+            const toolCalls: ToolCall[] = [];
 
-        for (const block of response.content) {
-            if (block.type === 'text') {
-                content += block.text;
-            } else if (block.type === 'tool_use') {
-                toolCalls.push({
-                    id: block.id,
-                    name: block.name,
-                    arguments: block.input as Record<string, unknown>,
-                });
+            for (const block of response.content) {
+                if (block.type === 'text') {
+                    content += block.text;
+                } else if (block.type === 'tool_use') {
+                    toolCalls.push({
+                        id: block.id,
+                        name: block.name,
+                        arguments: block.input as Record<string, unknown>,
+                    });
+                }
             }
-        }
 
-        let finishReason: LLMResponse['finishReason'] = 'stop';
-        if (response.stop_reason === 'tool_use') finishReason = 'tool_calls';
-        else if (response.stop_reason === 'max_tokens') finishReason = 'length';
+            let finishReason: LLMResponse['finishReason'] = 'stop';
+            if (response.stop_reason === 'tool_use') finishReason = 'tool_calls';
+            else if (response.stop_reason === 'max_tokens') finishReason = 'length';
 
-        return {
-            content,
-            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-            finishReason,
-            usage: {
-                promptTokens: response.usage.input_tokens,
-                completionTokens: response.usage.output_tokens,
-                totalTokens: response.usage.input_tokens + response.usage.output_tokens,
-            },
-        };
+            return {
+                content,
+                toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+                finishReason,
+                usage: {
+                    promptTokens: response.usage.input_tokens,
+                    completionTokens: response.usage.output_tokens,
+                    totalTokens: response.usage.input_tokens + response.usage.output_tokens,
+                },
+            };
+        });
     }
 
     async chatStream(messages: LLMMessage[], options: ChatOptions | undefined, onToken: (token: string) => void): Promise<LLMResponse> {

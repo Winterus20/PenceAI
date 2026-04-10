@@ -118,22 +118,25 @@ sequenceDiagram
     participant U as Kullanıcı
     participant W as Web UI
     participant G as Gateway
+    participant O as Observability
     participant R as Router
     participant A as Agent
     participant L as LLM
     participant M as Memory
-    
-    U->>W: Mesaj gönder
-    W->>G: WebSocket mesajı
-    G->>R: Route mesaj
+
+    U->>W: Mesaj gönder (traceId)
+    W->>G: WebSocket mesajı + traceId
+    G->>O: Trace başlat
+    O->>R: Route mesaj (trace context)
     R->>M: Bağlam getir
     M-->>R: Bellekler + Geçmiş
     R->>A: Agent çalıştır
-    A->>L: LLM isteği
-    L-->>A: Yanıt
+    A->>L: LLM isteği (auto-traced)
+    L-->>A: Yanıt (traced)
     A->>M: Bellek kaydet
-    A-->>G: Stream yanıt
-    G-->>W: WebSocket token
+    A-->>O: Trace sonlandır
+    O-->>G: Trace metadata
+    G-->>W: Stream yanıt
     W-->>U: Gerçek zamanlı görüntüle
 ```
 
@@ -759,7 +762,48 @@ class FeedbackManager {
 
 ---
 
-### 7. Web Arayüzü (`src/web/`)
+### 7. Observability Modülü (`src/observability/`)
+
+OpenTelemetry tabanlı LLM observability altyapısı. Langfuse ile trace, metric ve evaluation sağlar.
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`langfuse.ts`](src/observability/langfuse.ts) | Langfuse OpenTelemetry SDK entegrasyonu |
+| [`src/llm/observability.ts`](src/llm/observability.ts) | LLM provider trace helper'ları |
+
+#### Trace Hiyerarşisi
+
+```
+Trace: user-message-{uuid}
+ ├─ Span: agent.processMessage
+ │  ├─ Span: memory.getPromptContextBundle
+ │  ├─ Span: llm.chat (OpenAI, Anthropic, etc.)
+ │  ├─ Span: tool.execute (varsa)
+ │  └─ Span: memory.addMemory
+```
+
+#### LLM Provider Coverage: 8/8 ✅
+
+| Provider | Trace Method |
+|----------|--------------|
+| OpenAI | observeOpenAI() wrapper |
+| Anthropic | withTrace() helper |
+| Ollama | withTrace() helper |
+| MiniMax | withTrace() helper |
+| Groq, Mistral, NVIDIA, GitHub | Extends OpenAI → auto-traced |
+
+#### Feature Flag
+
+```env
+LANGFUSE_ENABLED=false          # Default: kapalı (zero overhead)
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+```
+
+---
+
+### 8. Web Arayüzü (`src/web/`)
 
 #### React Uygulaması (`src/web/react-app/`)
 

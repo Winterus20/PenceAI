@@ -227,6 +227,8 @@ npm test
 │  │     ├─ MemoryStore.ts        # Memory storage
 │  │     └─ RetrievalService.ts   # Retrieval operations
 │  ├─ router/         # Channel abstraction and message routing
+│  ├─ observability/  # Langfuse OpenTelemetry integration
+│  │  └─ langfuse.ts  # Trace initialization and helpers
 │  ├─ utils/          # Logging and utility helpers
 │  └─ web/            # Legacy public interface and React application
 │     └─ react-app/   # React frontend
@@ -258,6 +260,61 @@ This project works with memory records, conversation history, user messages, and
 - Additional review is recommended for regulated or highly sensitive data scenarios.
 
 This README intentionally avoids real secrets, sample tokens, personal data, or operationally sensitive details.
+
+## Observability
+
+PenceAI supports [Langfuse](https://langfuse.com) for end-to-end LLM observability with OpenTelemetry.
+
+### Quick Setup
+
+1. Create an account at [https://cloud.langfuse.com](https://cloud.langfuse.com)
+2. Generate API keys from the dashboard
+3. Add to your `.env` file:
+
+```env
+LANGFUSE_ENABLED=true
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+```
+
+### What's Traced
+
+When Langfuse is enabled, the following operations are automatically traced:
+
+- **LLM calls** — All 8 providers (OpenAI, Anthropic, Ollama, Groq, Mistral, NVIDIA, MiniMax, GitHub)
+- **Agent reasoning** — Full processMessage flow with child spans
+- **Memory retrieval** — hybridSearch, graphRAGSearch, getPromptContextBundle
+- **Tool executions** — Tool call duration and success/failure
+- **Latency & tokens** — Prompt tokens, completion tokens, total tokens
+- **Cost estimation** — Per-call and aggregated cost tracking
+
+### Trace Hierarchy
+
+```
+Trace: user-message-{uuid}
+ ├─ Span: agent.processMessage (total duration)
+ │  ├─ Span: memory.getPromptContextBundle
+ │  ├─ Span: llm.chat (OpenAI, Anthropic, etc.)
+ │  │  ├─ Prompt tokens
+ │  │  ├─ Completion tokens
+ │  │  └─ Cost
+ │  ├─ Span: tool.execute (if tools called)
+ │  └─ Span: memory.addMemory
+```
+
+### Zero Overhead Mode
+
+When `LANGFUSE_ENABLED=false` (default), the observability layer adds **zero performance overhead**. All trace paths are short-circuited at initialization.
+
+### Dashboard
+
+Visit [https://cloud.langfuse.com](https://cloud.langfuse.com) to view:
+- Real-time traces
+- Generation metrics
+- Token usage over time
+- Cost per user/conversation
+- Error rates and latency percentiles
 
 ## Current Status
 
