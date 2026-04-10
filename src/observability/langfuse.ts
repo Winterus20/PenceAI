@@ -14,6 +14,7 @@
 
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { LangfuseSpanProcessor } from '@langfuse/otel';
+import { startActiveObservation, startObservation } from '@langfuse/tracing';
 import { trace, context, SpanStatusCode } from '@opentelemetry/api';
 import { logger } from '../utils/logger.js';
 
@@ -176,6 +177,113 @@ export function endTrace(span: any, error?: Error): void {
   }
 
   span.end();
+}
+
+/**
+ * Langfuse-native active observation başlatır.
+ * Agent runtime gibi async operasyonlar için kullanılır.
+ * Otomatik olarak parent trace'e bağlanır.
+ */
+export async function startActiveLangfuseTrace<T>(
+  name: string,
+  options: {
+    input?: unknown;
+    metadata?: Record<string, unknown>;
+    userId?: string;
+    sessionId?: string;
+  },
+  fn: (span: any) => Promise<T>
+): Promise<T> {
+  if (!isInitialized) {
+    // Langfuse disabled, just run the function
+    return fn(null);
+  }
+
+  return startActiveObservation(name, async (span) => {
+    // Input ve metadata'yı ayarla
+    if (options.input) {
+      span.update({ input: options.input });
+    }
+    if (options.metadata) {
+      span.update({ metadata: options.metadata });
+    }
+
+    try {
+      const result = await fn(span);
+      span.update({ output: 'Success' });
+      return result;
+    } catch (error: any) {
+      span.update({ output: `Error: ${error.message}` });
+      throw error;
+    }
+  });
+}
+
+/**
+ * Langfuse-native generation observation başlatır.
+ * LLM çağrıları için kullanılır (model, input, output, usage, cost).
+ */
+export function startLangfuseGeneration(
+  name: string,
+  options: {
+    model?: string;
+    input?: unknown[];
+    modelParameters?: Record<string, unknown>;
+  }
+): any {
+  if (!isInitialized) {
+    return null;
+  }
+
+  return startObservation(name, {
+    name: options.model, // Model adını name attribute'una ekle
+    input: options.input,
+    modelParameters: options.modelParameters,
+  } as any, { asType: 'generation' });
+}
+
+/**
+ * Generation observation'ı bitirir.
+ * Output, usage ve cost bilgilerini ekler.
+ */
+export function endLangfuseGeneration(
+  generation: any,
+  options: {
+    output?: unknown;
+    usage?: {
+      promptTokens?: number;
+      completionTokens?: number;
+      totalTokens?: number;
+    };
+    cost?: number;
+    error?: Error;
+  }
+): void {
+  if (!generation) return;
+
+  try {
+    // Output ve usage'ı ayarla
+    const updateData: Record<string, unknown> = {};
+    if (options.output) {
+      updateData.output = options.output;
+    }
+    if (options.usage) {
+      updateData.usage = {
+        input: options.usage.promptTokens || 0,
+        output: options.usage.completionTokens || 0,
+        total: options.usage.totalTokens || 0,
+        unit: 'TOKENS',
+      };
+    }
+    if (options.cost !== undefined) {
+      updateData.cost = options.cost;
+    }
+
+    generation.update(updateData);
+    generation.end();
+  } catch (error: any) {
+    logger.debug({ error: error.message }, '[Observability] Generation end error');
+  }
 }
 
 /**

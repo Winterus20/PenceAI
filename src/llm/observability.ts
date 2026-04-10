@@ -1,16 +1,24 @@
 /**
  * LLM Provider Observability Helpers
- * 
+ *
  * Tüm LLM provider'ları için ortak observability utility fonksiyonları.
+ * Langfuse native generation API kullanır (input, output, model, usage, cost).
  */
 
 import { trace, SpanStatusCode } from '@opentelemetry/api';
-import { isLangfuseInitialized, startTrace, endTrace } from '../observability/langfuse.js';
+import {
+  isLangfuseInitialized,
+  startTrace,
+  endTrace,
+  startLangfuseGeneration,
+  endLangfuseGeneration,
+} from '../observability/langfuse.js';
 import type { LLMMessage, LLMResponse } from '../router/types.js';
+import { calculateCost } from '../utils/costCalculator.js';
 
 /**
- * LLM çağrısını trace eder.
- * Langfuse enabled ise otomatik span oluşturur, değilse direkt çağırır.
+ * LLM çağrısını Langfuse generation observation ile trace eder.
+ * Model, input, output, token usage ve cost bilgilerini otomatik kaydeder.
  */
 export async function traceLLMCall<T>(
   providerName: string,
@@ -22,33 +30,53 @@ export async function traceLLMCall<T>(
     return fn();
   }
 
-  const { span } = startTrace(`${providerName}.chat`, {
-    provider: providerName,
+  // Generation observation başlat
+  const generation = startLangfuseGeneration(`${providerName}.chat`, {
     model,
+    input: [], // LLM messages buraya gelecek (runtime'dan)
+    modelParameters: {
+      provider: providerName,
+    },
   });
 
   try {
     const result = await fn();
-    
-    // Response metadata ekle (eğer LLMResponse ise)
+
+    // Response metadata'ı çıkar
     if (result && typeof result === 'object' && 'usage' in result) {
-      const llmResult = result as any;
-      if (llmResult.usage) {
-        span.setAttribute('llm.prompt_tokens', llmResult.usage.prompt_tokens || 0);
-        span.setAttribute('llm.completion_tokens', llmResult.usage.completion_tokens || 0);
-        span.setAttribute('llm.total_tokens', llmResult.usage.total_tokens || 0);
-      }
+      const llmResult = result as unknown as LLMResponse;
+
+      // Usage bilgisi
+      const usage = llmResult.usage ? {
+        promptTokens: llmResult.usage.promptTokens || 0,
+        completionTokens: llmResult.usage.completionTokens || 0,
+        totalTokens: llmResult.usage.totalTokens || 0,
+      } : undefined;
+
+      // Cost hesaplama
+      const cost = usage
+        ? calculateCost(providerName, model, usage.promptTokens, usage.completionTokens)
+        : undefined;
+
+      // Generation'ı sonlandır ve bilgileri kaydet
+      endLangfuseGeneration(generation, {
+        output: llmResult.content,
+        usage,
+        cost,
+      });
+    } else {
+      // Usage yoksa sadece content'i kaydet
+      endLangfuseGeneration(generation, {
+        output: (result as any)?.content || 'No content',
+      });
     }
 
-    span.setStatus({ code: SpanStatusCode.OK });
-    endTrace(span);
     return result;
   } catch (error: any) {
-    span.setStatus({
-      code: SpanStatusCode.ERROR,
-      message: error.message,
+    // Hata durumunda generation'ı error ile sonlandır
+    endLangfuseGeneration(generation, {
+      error,
     });
-    endTrace(span, error);
     throw error;
   }
 }

@@ -15,7 +15,7 @@ import { getConfig } from '../gateway/config.js';
 import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
 import { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
 import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../memory/graphRAG/config.js';
-import { startTrace, endTrace, isLangfuseInitialized } from '../observability/langfuse.js';
+import { startTrace, endTrace, isLangfuseInitialized, startActiveLangfuseTrace } from '../observability/langfuse.js';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 
 const MAX_TOOL_ITERATIONS_DEFAULT = 5;
@@ -323,26 +323,31 @@ export class AgentRuntime {
             return this._processMessageInternal(message, onEvent, confirmCallback, options);
         }
 
-        // Trace oluştur
-        const { span } = startTrace('agent.processMessage', {
-            channelId: message.channelType,
-            senderName: message.senderName || 'anonymous',
-            contentLength: message.content.length,
-        });
-
-        try {
-            const result = await this._processMessageInternal(message, onEvent, confirmCallback, options, span);
-            span.setStatus({ code: SpanStatusCode.OK });
-            endTrace(span);
-            return result;
-        } catch (error: any) {
-            span.setStatus({
-                code: SpanStatusCode.ERROR,
-                message: error.message,
-            });
-            endTrace(span, error);
-            throw error;
-        }
+        // Langfuse-native active observation ile trace et
+        return startActiveLangfuseTrace(
+            'agent.processMessage',
+            {
+                input: {
+                    content: message.content,
+                    channelId: message.channelType,
+                    senderName: message.senderName || 'anonymous',
+                },
+                metadata: {
+                    channelId: message.channelType,
+                    senderName: message.senderName || 'anonymous',
+                },
+            },
+            async (span) => {
+                try {
+                    const result = await this._processMessageInternal(message, onEvent, confirmCallback, options, span);
+                    span.update({ output: { response: result.response.substring(0, 100) + '...', conversationId: result.conversationId } });
+                    return result;
+                } catch (error: any) {
+                    span.update({ output: `Error: ${error.message}` });
+                    throw error;
+                }
+            }
+        );
     }
 
     /**
