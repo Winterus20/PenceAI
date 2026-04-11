@@ -18,6 +18,7 @@ import { BehaviorDiscoveryShadow } from '../memory/graphRAG/BehaviorDiscoverySha
 import type { MemoryGraph, GraphNode, GraphEdge } from '../memory/types.js';
 import { createMCPController } from './controllers/mcpController.js';
 import { createMemoryController } from './controllers/memoryController.js';
+import { registerObservabilityRoutes } from './observability.js';
 
 export interface RouteDeps {
     memory: MemoryManager;
@@ -369,6 +370,9 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     });
 
     // Usage stats moved to memoryController.
+
+    // ============ Observability API ============
+    registerObservabilityRoutes(app);
 
     // API 404 handler
     app.all('/api/*', (_req, res) => {

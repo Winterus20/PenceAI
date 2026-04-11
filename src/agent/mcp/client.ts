@@ -34,6 +34,33 @@ import { createTransport, connectClient, disconnectClient } from './transport.js
 import { MCPSecurityManager } from './security.js';
 import { logger } from '../../utils/logger.js';
 
+/**
+ * JSON schema properties nesnesinden tüm description alanlarını recursive olarak kaldırır.
+ * LLM token optimizasyonu icin kullanilir.
+ */
+function stripDescriptions(schema: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!schema || typeof schema !== 'object') return {};
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === 'description') continue;
+    if (key === 'properties' && typeof value === 'object' && value !== null) {
+      const strippedProps: Record<string, unknown> = {};
+      for (const [propKey, propValue] of Object.entries(value as Record<string, unknown>)) {
+        if (typeof propValue === 'object' && propValue !== null) {
+          strippedProps[propKey] = stripDescriptions(propValue as Record<string, unknown>);
+        } else {
+          strippedProps[propKey] = propValue;
+        }
+      }
+      result[key] = strippedProps;
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 // ============================================================
 // Server Entry — Tek bir MCP server'ın runtime durumu
 // ============================================================
@@ -526,6 +553,21 @@ export class MCPClientManager {
   }
 
   /**
+   * MCP SDK input schema'sını UnifiedToolDefinition formatına normalize eder.
+   */
+  private normalizeInputSchema(schema: unknown): { type: 'object'; properties?: Record<string, unknown>; required?: string[] } {
+    if (schema && typeof schema === 'object' && 'type' in schema) {
+      const obj = schema as Record<string, unknown>;
+      return {
+        type: (obj.type === 'object' ? 'object' : 'object') as 'object',
+        properties: (obj.properties as Record<string, unknown> | undefined) ?? {},
+        required: Array.isArray(obj.required) ? (obj.required as string[]) : undefined,
+      };
+    }
+    return { type: 'object', properties: {} };
+  }
+
+  /**
    * Tüm araçları listeler (namespaced isimlerle).
    *
    * @returns UnifiedToolDefinition array'i
@@ -538,13 +580,17 @@ export class MCPClientManager {
 
       for (const tool of entry.tools) {
         const namespacedName = `mcp:${entry.config.name}:${tool.name}`;
+        const inputSchema = this.normalizeInputSchema(tool.inputSchema);
 
         tools.push({
           name: namespacedName,
           description: tool.description ?? `MCP tool from ${entry.config.name}: ${tool.name}`,
-          parameters: (tool.inputSchema as UnifiedToolDefinition['parameters']) ?? {
+          llmDescription: `${tool.name}: ${entry.config.name}`,
+          parameters: inputSchema,
+          llmParameters: {
             type: 'object',
-            properties: {},
+            properties: stripDescriptions(inputSchema.properties),
+            ...(inputSchema.required ? { required: inputSchema.required } : {}),
           },
           source: 'mcp' as const,
           mcpServerName: entry.config.name,
@@ -565,12 +611,16 @@ export class MCPClientManager {
 
     return entry.tools.map((tool) => {
       const namespacedName = `mcp:${serverName}:${tool.name}`;
+      const inputSchema = this.normalizeInputSchema(tool.inputSchema);
       return {
         name: namespacedName,
         description: tool.description ?? `MCP tool from ${serverName}: ${tool.name}`,
-        parameters: (tool.inputSchema as UnifiedToolDefinition['parameters']) ?? {
+        llmDescription: `${tool.name}: ${serverName}`,
+        parameters: inputSchema,
+        llmParameters: {
           type: 'object',
-          properties: {},
+          properties: stripDescriptions(inputSchema.properties),
+          ...(inputSchema.required ? { required: inputSchema.required } : {}),
         },
         source: 'mcp' as const,
         mcpServerName: serverName,
@@ -680,16 +730,23 @@ export class MCPClientManager {
   }
 
   /**
+   * SDK CallToolResult tipini doğrular — type-safe narrowing.
+   */
+  private isValidContent(item: unknown): item is Record<string, unknown> {
+    return typeof item === 'object' && item !== null && 'type' in item;
+  }
+
+  /**
    * MCP SDK resultunu text string'e çevirir.
    * SDK'nın CallToolResult tipi ile uyumlu çalışır.
    */
   private formatToolResultFromSDK(result: CallToolResult): string {
-    const content = result.content as Array<Record<string, unknown>> | undefined;
-    const isError = result.isError as boolean | undefined;
+    const content = Array.isArray(result.content) ? result.content : [];
+    const isError = result.isError === true;
 
-    if (!content || content.length === 0) {
+    if (content.length === 0) {
       if (isError) {
-        return `⚠️ MCP tool error: ${result.error ?? 'Bilinmeyen hata'}`;
+        return `⚠️ MCP tool error: ${typeof result.error === 'string' ? result.error : 'Bilinmeyen hata'}`;
       }
       return '(MCP tool sonuç üretmedi)';
     }
@@ -697,24 +754,27 @@ export class MCPClientManager {
     const texts: string[] = [];
 
     for (const item of content) {
-      const type = item.type as string;
+      if (!this.isValidContent(item)) continue;
+
+      const type = typeof item.type === 'string' ? item.type : 'unknown';
+
       switch (type) {
         case 'text':
-          if (item.text) {
-            texts.push(item.text as string);
+          if ('text' in item && typeof item.text === 'string') {
+            texts.push(item.text);
           }
           break;
         case 'image':
-          texts.push(`[Görsel: ${(item.mimeType as string) ?? 'unknown'}]`);
+          texts.push(`[Görsel: ${'mimeType' in item && typeof item.mimeType === 'string' ? item.mimeType : 'unknown'}]`);
           break;
         case 'audio':
-          texts.push(`[Ses: ${(item.mimeType as string) ?? 'unknown'}]`);
+          texts.push(`[Ses: ${'mimeType' in item && typeof item.mimeType === 'string' ? item.mimeType : 'unknown'}]`);
           break;
         case 'resource':
-          texts.push(`[Kaynak: ${(item.uri as string) ?? 'unknown'}]`);
+          texts.push(`[Kaynak: ${'uri' in item && typeof item.uri === 'string' ? item.uri : 'unknown'}]`);
           break;
-        case 'prompt':
-          texts.push(`[Prompt: ${JSON.stringify(item)}]`);
+        case 'resource_link':
+          texts.push(`[Kaynak bağlantısı: ${'uri' in item && typeof item.uri === 'string' ? item.uri : 'unknown'}]`);
           break;
         default:
           texts.push(`[Bilinmeyen içerik tipi: ${type}]`);

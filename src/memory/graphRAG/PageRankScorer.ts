@@ -56,7 +56,8 @@ export class PageRankScorer {
 
   /**
    * Belirli node'lar için alt graph'te PageRank hesaplar.
-   * 
+   * Önce kalıcı skorları kontrol eder, stale ise yeniden hesaplar.
+   *
    * @param nodeIds - Skorlanacak node ID'leri
    * @param options - PageRank ayarları
    * @returns nodeId -> score map
@@ -68,6 +69,18 @@ export class PageRankScorer {
       logger.warn('[PageRankScorer] Empty node list, returning empty scores');
       return new Map();
     }
+
+    // Önce kalıcı skorları kontrol et
+    const persistedScores = this.loadPersistedScores(nodeIds);
+    if (persistedScores.size === nodeIds.length) {
+      logger.debug(`[PageRankScorer] Using persisted scores for ${nodeIds.length} nodes`);
+      return persistedScores;
+    }
+
+    // Stale veya eksik skorlar - yeniden hesapla
+    logger.debug(
+      `[PageRankScorer] Persisted scores stale/missing (${persistedScores.size}/${nodeIds.length}), recomputing`,
+    );
 
     // Alt graph'i yükle
     const graph = this.loadSubgraph(nodeIds);
@@ -177,6 +190,9 @@ export class PageRankScorer {
 
     // last_scored_at kolonunu güncelle
     this.updateLastScoredAt(Array.from(graph.allNodes));
+
+    // PageRank skorlarını kalıcı olarak kaydet
+    this.savePageRankScores(scores);
 
     return scores;
   }
@@ -348,6 +364,70 @@ export class PageRankScorer {
     } catch (err) {
       logger.warn({ err }, '[PageRankScorer] updateLastScoredAt hatası:');
     }
+  }
+
+  /**
+   * PageRank skorlarını kalıcı olarak kaydeder.
+   *
+   * @param scores - nodeId -> score map
+   */
+  private savePageRankScores(scores: Map<number, number>): void {
+    if (scores.size === 0) return;
+
+    try {
+      const updateStmt = this.db.prepare(`
+        UPDATE memory_relations
+        SET page_rank_score = ?,
+            last_pagerank_update = CURRENT_TIMESTAMP
+        WHERE source_memory_id = ? OR target_memory_id = ?
+      `);
+
+      const runUpdate = this.db.transaction(() => {
+        for (const [nodeId, score] of scores) {
+          updateStmt.run(score, nodeId, nodeId);
+        }
+      });
+
+      runUpdate();
+      logger.debug(`[PageRankScorer] Saved scores for ${scores.size} nodes`);
+    } catch (err) {
+      logger.warn({ err }, '[PageRankScorer] savePageRankScores hatası:');
+    }
+  }
+
+  /**
+   * Kalıcı PageRank skorlarını yükler (son 1 saat içinde güncellenmiş).
+   *
+   * @param nodeIds - Yüklenecek node ID'leri
+   * @returns nodeId -> score map
+   */
+  private loadPersistedScores(nodeIds: number[]): Map<number, number> {
+    const scores = new Map<number, number>();
+    if (nodeIds.length === 0) return scores;
+
+    try {
+      const placeholders = nodeIds.map(() => '?').join(',');
+      const rows = this.db.prepare(`
+        SELECT DISTINCT
+          m.id,
+          COALESCE(MAX(mr.page_rank_score), 0) as score
+        FROM memories m
+        LEFT JOIN memory_relations mr ON (
+          mr.source_memory_id = m.id OR mr.target_memory_id = m.id
+        )
+        WHERE m.id IN (${placeholders})
+          AND mr.last_pagerank_update > datetime('now', '-1 hour')
+        GROUP BY m.id
+      `).all(...nodeIds) as Array<{ id: number; score: number }>;
+
+      for (const row of rows) {
+        scores.set(row.id, row.score);
+      }
+    } catch (err) {
+      logger.warn({ err }, '[PageRankScorer] loadPersistedScores hatası:');
+    }
+
+    return scores;
   }
 
   /**

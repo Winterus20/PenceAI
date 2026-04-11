@@ -26,6 +26,7 @@ Core capabilities include:
 - **Cognitive memory layer:** [`MemoryManager`](src/memory/manager/index.ts) coordinates conversation history, long-term memory, retrieval orchestration, and maintenance routines.
 - **Episodic / semantic memory separation:** Memories are treated not only by content, but also by their functional role.
 - **GraphRAG (Graph-based Retrieval Augmented Generation):** [`src/memory/graphRAG/`](src/memory/graphRAG/) provides graph-aware retrieval with PageRank scoring, community detection, community summarization, graph expansion, caching, token pruning, and shadow-mode behavior discovery.
+- **MCP (Model Context Protocol) integration:** [`src/agent/mcp/`](src/agent/mcp/) implements extensible tool ecosystem with 18+ modules including marketplace, security layer, event bus, and unified registry.
 - **Graph-assisted retrieval:** [`src/memory/graph.ts`](src/memory/graph.ts) and the retrieval orchestration layer support relationship-aware memory expansion.
 - **Dual-process routing:** The codebase includes infrastructure for routing between faster intuitive flows and more deliberate reasoning flows.
 - **Priming and spreading activation:** Retrieval quality is improved through nearby context, type cues, and neighboring memory links.
@@ -33,6 +34,9 @@ Core capabilities include:
 - **Background job queue:** Persistent workflows support memory maintenance, embedding backfill, summarization, and deeper extraction tasks.
 - **Web interface + gateway:** An HTTP/WebSocket server works together with a React-based client with React Query for data fetching and state management.
 - **Multi-provider LLM integration:** Adapters are available for OpenAI, Anthropic, Groq, Mistral, Ollama, NVIDIA, GitHub, and other providers.
+- **Observability & cost tracking:** Langfuse integration with OpenTelemetry provides end-to-end tracing, token usage tracking, and cost estimation across all 8 providers.
+- **Multi-channel support:** Telegram, Discord, and WhatsApp channel integrations for broader accessibility.
+- **Token usage analytics:** Real-time cost calculation with provider/model-specific pricing via [`costCalculator.ts`](src/utils/costCalculator.ts).
 
 ## Architecture Summary
 
@@ -68,11 +72,41 @@ In practice, the memory architecture includes:
 - **ShadowMode:** Shadow-mode testing for safe feature rollout
 - **BehaviorDiscoveryShadow:** Behavior discovery in shadow mode
 
+### 3.1. MCP (Model Context Protocol) Module
+
+[`src/agent/mcp/`](src/agent/mcp/) implements the Model Context Protocol for extensible tool integration:
+
+- **MCPClientManager:** Server lifecycle management (connect, disconnect, status tracking)
+- **ToolAdapter:** Bridges MCP tools to existing ToolExecutor interface
+- **UnifiedToolRegistry:** Centralized tool registration and execution
+- **Security Layer:** Command validation, path extraction, argument validation with defense-in-depth
+- **EventBus:** Event publishing/subscribing for MCP lifecycle and tool calls
+- **Marketplace:** Server discovery, installation, and catalog management
+- **Watcher:** Process health monitoring and auto-recovery
+
 ### 4. Gateway and Communication Layer
 
 [`src/gateway/index.ts`](src/gateway/index.ts) is the main application entry point. Configuration loading, database initialization, LLM provider startup, runtime wiring, background workers, and the web server are assembled there.
 
 [`src/gateway/bootstrap.ts`](src/gateway/bootstrap.ts) contains server helpers such as dashboard access control and the WebSocket upgrade flow.
+
+#### Controllers ([`src/gateway/controllers/`](src/gateway/controllers/))
+
+- **mcpController.ts:** MCP server management API endpoints
+- **memoryController.ts:** Memory management API controller
+
+#### Services ([`src/gateway/services/`](src/gateway/services/))
+
+- **mcpService.ts:** MCP service layer for business logic abstraction
+
+#### Jobs ([`src/gateway/jobs/`](src/gateway/jobs/))
+
+- **autonomousWorker.ts:** Autonomous task background worker
+- **systemTasks.ts:** System maintenance scheduled tasks
+
+#### Observability API ([`src/gateway/observability.ts`](src/gateway/observability.ts))
+
+Langfuse public API proxy endpoints for frontend observability features without exposing secret keys.
 
 ### 5. Router and Channel Abstraction
 
@@ -82,14 +116,62 @@ In practice, the memory architecture includes:
 
 The React-based client lives under [`src/web/react-app`](src/web/react-app). Chat UI, settings, onboarding, and memory-related interface components are implemented there. The frontend uses **React Query** for data fetching, caching, and state synchronization:
 
-- **Query hooks:** [`src/web/react-app/src/hooks/queries/`](src/web/react-app/src/hooks/queries/) for conversations, memories, settings, LLM providers, memory graph, sensitive paths, and stats
+- **Query hooks:** [`src/web/react-app/src/hooks/queries/`](src/web/react-app/src/hooks/queries/) for conversations, memories, settings, LLM providers, memory graph, sensitive paths, stats, MCP servers, observability metrics, and usage stats
 - **Mutation hooks:** [`src/web/react-app/src/hooks/mutations/`](src/web/react-app/src/hooks/mutations/) for creating, updating, and deleting memories and conversations
 - **Service layer:** [`src/web/react-app/src/services/`](src/web/react-app/src/services/) for conversation, memory, settings, and stats operations
 - **Query provider:** [`QueryProvider`](src/web/react-app/src/providers/QueryProvider.tsx) wraps the application with React Query context
 
+#### Component Structure
+
+- **Chat components:** [`src/components/chat/`](src/web/react-app/src/components/chat/) - Main chat interface, memory dialogs, observability panel
+- **MCP components:** [`src/components/mcp/`](src/web/react-app/src/components/mcp/) - MCP Marketplace UI for server discovery and management
+- **Settings components:** [`src/components/settings/`](src/web/react-app/src/components/settings/) - Usage stats cards and settings UI
+- **UI components:** [`src/components/ui/`](src/web/react-app/src/components/ui/) - Radix UI primitives, toasts, error boundaries
+
 ### 7. Test Infrastructure
 
-The [`tests`](tests) directory contains coverage for memory typing, retrieval observability, gateway WebSocket behavior, reconsolidation scenarios, and GraphRAG functionality. For example, [`tests/memory/reconsolidationPilot.test.ts`](tests/memory/reconsolidationPilot.test.ts) validates semantic/episodic separation and safe reconsolidation decisions, while [`tests/memory/graphRAG/`](tests/memory/graphRAG/) provides comprehensive GraphRAG test coverage.
+The [`tests`](tests) directory contains comprehensive coverage across multiple test layers:
+
+#### Unit & Integration Tests
+
+- **Memory tests:** [`tests/memory/`](tests/memory/) - memory typing, hybrid search, graph search, retrieval edge cases, reconsolidation pilot, retrieval observability, and integration tests
+- **GraphRAG tests:** [`tests/memory/graphRAG/`](tests/memory/graphRAG/) - comprehensive GraphRAG unit and integration tests including engine, expander, cache, worker, PageRank, community detection, summarization, token pruning, shadow mode, and spreading activation
+- **Gateway tests:** [`tests/gateway/`](tests/gateway/) - WebSocket behavior and gateway routing
+- **Agent/MCP tests:** [`tests/agent/mcp/`](tests/agent/mcp/) - MCP server connection, tool calls, and security validation
+
+#### Frontend Tests
+
+- **UI tests:** [`tests/frontend/ui/`](tests/frontend/ui/) - React component tests and responsive testing
+- **Integration tests:** [`tests/frontend/integration/`](tests/frontend/integration/) - Frontend integration scenarios
+- **Test setup:** [`tests/frontend/setup/`](tests/frontend/setup/) - Test utilities and helpers
+
+#### E2E Tests (Playwright)
+
+- **E2E specs:** [`tests/e2e/specs/`](tests/e2e/specs/) - End-to-end test scenarios
+- **Fixtures:** [`tests/e2e/fixtures/`](tests/e2e/fixtures/) - Test data and mocks
+- **Helpers:** [`tests/e2e/helpers/`](tests/e2e/helpers/) - E2E test utilities
+- **Reports:** [`tests/e2e/reports/`](tests/e2e/reports/) - Generated test reports
+- **Configuration:** [`tests/e2e/playwright.config.ts`](tests/e2e/playwright.config.ts) - Playwright setup with global setup/teardown
+
+#### Benchmark Tests
+
+- **Retrieval benchmarks:** [`tests/benchmark/`](tests/benchmark/) - Performance testing for retrieval operations
+- **GraphRAG benchmarks:** [`tests/benchmark/graphRAG/`](tests/benchmark/graphRAG/) - GraphRAG retrieval performance
+
+```bash
+# Run all tests
+npm test
+
+# Frontend tests
+npm run test:frontend
+npm run test:ui
+
+# MCP E2E tests
+npm run test:mcp:e2e
+npm run test:mcp:e2e:ui
+npm run test:mcp:e2e:headed
+npm run test:mcp:e2e:report
+```
 
 ## Technology Stack
 
@@ -97,9 +179,13 @@ The [`tests`](tests) directory contains coverage for memory typing, retrieval ob
 - **Runtime:** Node.js
 - **Server:** Express + WebSocket
 - **Database:** SQLite / `better-sqlite3`
-- **Embeddings / semantic search:** `sqlite-vec` plus provider-backed embedding layers
+- **Vectors:** `sqlite-vec` for embedding storage
+- **MCP:** `@modelcontextprotocol/sdk` for Model Context Protocol
+- **Observability:** Langfuse + OpenTelemetry for end-to-end tracing
+- **Embeddings:** `@xenova/transformers` (ONNX) + provider-backed embedding layers
 - **Frontend:** React + Vite
-- **Testing:** Jest
+- **State Management:** Zustand + React Query
+- **Testing:** Jest + Playwright + Testing Library
 - **Logging:** Pino
 
 ## Setup
@@ -160,10 +246,16 @@ Notes:
 
 Primary commands from [`package.json`](package.json):
 
-- Development server:
+- Development server (backend + frontend):
 
 ```bash
 npm run dev
+```
+
+- Backend only:
+
+```bash
+npm run dev:backend-only
 ```
 
 - Production build:
@@ -190,10 +282,24 @@ npm run cli
 npm run maintenance
 ```
 
+- GraphRAG management:
+
+```bash
+npm run graphrag:status         # Check GraphRAG status
+npm run graphrag:readiness      # Check GraphRAG readiness
+npm run graphrag:go-full        # Activate GraphRAG fully
+npm run graphrag:emergency-rollback  # Emergency rollback
+```
+
 - Test suite:
 
 ```bash
-npm test
+npm test                              # All tests
+npm run test:frontend                 # Frontend tests
+npm run test:ui                       # UI component tests
+npm run test:mcp:e2e                  # MCP E2E tests
+npm run test:mcp:e2e:ui               # MCP E2E tests with UI
+npm run test:mcp:e2e:report           # View E2E test reports
 ```
 
 ## Project Structure
@@ -202,9 +308,23 @@ npm test
 .
 ├─ src/
 │  ├─ agent/          # Agent runtime, prompts, and tool integrations
+│  │  ├─ mcp/         # Model Context Protocol integration
+│  │  │  ├─ client.ts         # MCP server manager
+│  │  │  ├─ adapter.ts        # Tool adapter
+│  │  │  ├─ runtime.ts        # MCP runtime
+│  │  │  ├─ registry.ts       # Unified tool registry
+│  │  │  ├─ security.ts       # Security layer
+│  │  │  ├─ marketplace-*.ts  # Marketplace system
+│  │  │  └─ ...
+│  │  └─ ...
 │  ├─ autonomous/     # Background thinking, queues, and autonomous workers
 │  ├─ cli/            # CLI and maintenance commands
 │  ├─ gateway/        # HTTP/WebSocket server, bootstrap, and routes
+│  │  ├─ controllers/ # API controllers (MCP, memory)
+│  │  ├─ services/    # Service layer (MCP service)
+│  │  ├─ jobs/        # Background jobs (autonomous worker, system tasks)
+│  │  ├─ observability.ts  # Observability API routes
+│  │  └─ ...
 │  ├─ llm/            # Provider adapters
 │  ├─ memory/         # Database, retrieval, graph, and memory logic
 │  │  ├─ graphRAG/    # Graph-based Retrieval Augmented Generation
@@ -222,27 +342,49 @@ npm test
 │  │  │  ├─ index.ts             # Module exports
 │  │  │  ├─ monitoring.ts        # Monitoring utilities
 │  │  │  └─ rollback.ts          # Rollback support
-│  │  └─ manager/     # Memory manager refactored modules
-│  │     ├─ ConversationManager.ts # Conversation lifecycle
-│  │     ├─ MemoryStore.ts        # Memory storage
-│  │     └─ RetrievalService.ts   # Retrieval operations
+│  │  ├─ manager/     # Memory manager refactored modules
+│  │  │  ├─ ConversationManager.ts # Conversation lifecycle
+│  │  │  ├─ MemoryStore.ts        # Memory storage
+│  │  │  └─ RetrievalService.ts   # Retrieval operations
+│  │  └─ extraction/  # Memory extraction pipeline
 │  ├─ router/         # Channel abstraction and message routing
 │  ├─ observability/  # Langfuse OpenTelemetry integration
 │  │  └─ langfuse.ts  # Trace initialization and helpers
 │  ├─ utils/          # Logging and utility helpers
+│  │  ├─ logger.ts
+│  │  └─ costCalculator.ts  # Token cost calculation
 │  └─ web/            # Legacy public interface and React application
 │     └─ react-app/   # React frontend
 │        └─ src/
+│           ├─ components/
+│           │  ├─ chat/        # Chat UI components
+│           │  ├─ mcp/         # MCP Marketplace
+│           │  ├─ settings/    # Settings components
+│           │  └─ ui/          # UI primitives
 │           ├─ hooks/
-│           │  ├─ queries/        # React Query query hooks
-│           │  └─ mutations/      # React Query mutation hooks
-│           ├─ services/          # API service layer
-│           └─ providers/         # React Query provider
+│           │  ├─ queries/     # React Query query hooks
+│           │  └─ mutations/   # React Query mutation hooks
+│           ├─ services/       # API service layer
+│           ├─ store/          # Zustand state slices
+│           └─ providers/      # React Query provider
 ├─ tests/
+│  ├─ agent/
+│  │  └─ mcp/         # MCP unit tests
 │  ├─ benchmark/      # Performance benchmarks
 │  │  └─ graphRAG/   # GraphRAG retrieval benchmarks
-│  └─ memory/
-│     └─ graphRAG/   # GraphRAG unit and integration tests
+│  ├─ e2e/            # End-to-end tests (Playwright)
+│  │  ├─ specs/
+│  │  ├─ fixtures/
+│  │  ├─ helpers/
+│  │  └─ reports/
+│  ├─ frontend/       # Frontend tests
+│  │  ├─ ui/
+│  │  ├─ integration/
+│  │  └─ setup/
+│  ├─ gateway/        # Gateway tests
+│  ├─ memory/         # Memory tests
+│  │  └─ graphRAG/   # GraphRAG unit and integration tests
+│  └─ observability/  # Observability tests
 ├─ scripts/           # Development and debugging helper scripts
 ├─ .env.example       # Safe example environment file
 ├─ package.json       # Commands and dependencies
@@ -329,9 +471,15 @@ Notable implemented areas include:
 - semantic / episodic memory experiments
 - pilot logic for reconsolidation and dual-process routing
 - **GraphRAG module** with graph-based retrieval, PageRank scoring, community detection, and shadow-mode testing
+- **MCP integration** with 18+ modules, marketplace system, security layer, and unified tool registry
 - **React Query integration** for frontend data fetching, caching, and state management
 - **Memory Manager refactoring** with modular ConversationManager, MemoryStore, and RetrievalService
 - **UI improvements** including scrollbar styling, markdown rendering, and message area enhancements
+- **Observability dashboard** with Langfuse trace viewing, provider statistics, and error analytics
+- **Token usage tracking** with real-time cost calculation across all 8 LLM providers
+- **Multi-channel support** infrastructure for Telegram, Discord, and WhatsApp
+- **Comprehensive test infrastructure** with unit, integration, E2E (Playwright), and benchmark tests
+- **Cost calculator** with provider/model-specific pricing for accurate billing estimates
 
 ## Roadmap
 
@@ -346,6 +494,12 @@ Reasonable short- and mid-term directions include:
 - **GraphRAG monitoring dashboard:** adding real-time graph visualization and retrieval quality metrics to the web interface
 - moving graph activation from shadow-mode behavior toward more controlled active usage
 - improving memory visibility and debug panels in the React interface
+- **MCP production hardening:** expanding marketplace catalog, adding more official MCP servers
+- **MCP security audits:** implementing stricter command validation and sandboxing
+- **Test coverage expansion:** adding more E2E scenarios, frontend component tests, and MCP integration tests
+- **Multi-channel deployment:** production-ready Telegram, Discord, and WhatsApp integrations
+- **Observability enhancements:** adding custom dashboards, alerting, and advanced analytics
+- **Performance optimization:** reducing latency in retrieval orchestration and GraphRAG pipeline
 - adding stronger authentication, rate limiting, and operational observability for production deployment
 - extending documentation with API references, architecture decision records, and a contribution guide
 

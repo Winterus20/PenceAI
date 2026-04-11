@@ -648,6 +648,18 @@ export class PenceDatabase {
       }
     }
 
+    // GraphRAG Faz 2: PageRank persistence kolonları
+    if (relTableInfo.length > 0 && !relTableInfo.some((col: any) => col.name === 'page_rank_score')) {
+      logger.info('[Database] 🚀 GraphRAG Faz 2 Migration: Adding page_rank_score column to memory_relations');
+      try {
+        this.db.exec("ALTER TABLE memory_relations ADD COLUMN page_rank_score REAL DEFAULT 0");
+        this.db.exec("ALTER TABLE memory_relations ADD COLUMN last_pagerank_update DATETIME");
+        logger.info('[Database] ✅ PageRank persistence kolonları eklendi');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ GraphRAG migration failed (pagerank columns):');
+      }
+    }
+
     // GraphRAG: graph_traversal_cache tablosu
     const traversalCacheTable = this.db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='graph_traversal_cache'"

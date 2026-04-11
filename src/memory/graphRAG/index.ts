@@ -21,7 +21,7 @@ export { GraphRAGConfigManager, DEFAULT_GRAPH_RAG_CONFIG } from './config.js';
 
 // Faz 4 (FULL) exports
 export { GraphRAGRollbackManager, RollbackReason } from './rollback.js';
-export { GraphRAGMonitor, AlertSeverity } from './monitoring.js';
+export { GraphRAGMonitor, AlertSeverity, defaultMonitor } from './monitoring.js';
 
 // Types
 export type {
@@ -59,6 +59,7 @@ export type {
   TokenBudget,
   PruningOptions,
   PruningResult,
+  MemoryPriorityWeights,
 } from './TokenPruner.js';
 
 export type {

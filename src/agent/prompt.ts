@@ -135,6 +135,7 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         {
             name: 'readFile',
             description: 'Belirtilen dosyayı okur ve içeriğini döndürür.',
+            llmDescription: 'Dosya oku',
             parameters: {
                 type: 'object',
                 properties: {
@@ -145,10 +146,18 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                 },
                 required: ['path'],
             },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    path: { type: 'string' },
+                },
+                required: ['path'],
+            },
         },
         {
             name: 'writeFile',
             description: 'Belirtilen dosyaya içerik yazar. Dosya yoksa oluşturur.',
+            llmDescription: 'Dosya yaz veya oluştur',
             parameters: {
                 type: 'object',
                 properties: {
@@ -163,10 +172,19 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                 },
                 required: ['path', 'content'],
             },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    path: { type: 'string' },
+                    content: { type: 'string' },
+                },
+                required: ['path', 'content'],
+            },
         },
         {
             name: 'listDirectory',
-            description: 'Belirtilen dizindeki dosya ve klasörleri listeler. Bir projeyi anlamak veya bir dosyayı bulmak için ilk adım olarak bu aracı kullan.',
+            description: 'Belirtilen dizindeki dosya ve klasörleri listeler.',
+            llmDescription: 'Dizin listele',
             parameters: {
                 type: 'object',
                 properties: {
@@ -177,10 +195,18 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                 },
                 required: ['path'],
             },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    path: { type: 'string' },
+                },
+                required: ['path'],
+            },
         },
         {
             name: 'searchMemory',
-            description: 'Uzun vadeli bellekte arama yapar. Sonuçlarda her kaydın ID, kategori, önem ve erişim sayısı gösterilir.',
+            description: 'Uzun vadeli bellekte arama yapar.',
+            llmDescription: 'Bellekte ara',
             parameters: {
                 type: 'object',
                 properties: {
@@ -191,10 +217,18 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                 },
                 required: ['query'],
             },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string' },
+                },
+                required: ['query'],
+            },
         },
         {
             name: 'deleteMemory',
-            description: 'Bellekten bir kaydı ID ile siler. Yanlış veya güncelliğini yitirmiş bellekleri temizlemek için kullan.',
+            description: 'Bellekten bir kaydı ID ile siler.',
+            llmDescription: 'Bellekten sil (ID ile)',
             parameters: {
                 type: 'object',
                 properties: {
@@ -205,10 +239,18 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                 },
                 required: ['id'],
             },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    id: { type: 'integer' },
+                },
+                required: ['id'],
+            },
         },
         {
             name: 'saveMemory',
-            description: '[DENEYSEL - İleride kaldırılabilir] OTO-KAYIT DISINDA kullanıcının hemen o an hatırlanmasını istediği kuralları, tercihleri veya bağlamları anında uzun vadeli belleğe kaydeder. Kullanıcı "bana şöyle hitap et", "şunu unutma", "ben bir yazılımcıyım" dediğinde İLK İŞ bu aracı kullan.',
+            description: '[DENEYSEL] Kullanıcının açıkça istediği bilgileri uzun vadeli belleğe kaydeder.',
+            llmDescription: 'Belleğe kaydet (kullanıcı açıkça istediğinde)',
             parameters: {
                 type: 'object',
                 properties: {
@@ -228,10 +270,23 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                 },
                 required: ['content'],
             },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    content: { type: 'string' },
+                    category: {
+                        type: 'string',
+                        enum: ['preference', 'fact', 'habit', 'project', 'event', 'other'],
+                    },
+                    importance: { type: 'integer' },
+                },
+                required: ['content'],
+            },
         },
         {
             name: 'searchConversation',
-            description: `Geçmiş konuşmalarda belirli bir konuyu veya mesajı arar. SADECE kullanıcı açıkça geçmişteki bir konuşmayı referans ederse çağır ("daha önce ne demiştik", "geçen sefer bahsettiğim", "bunu konuşmuştuk" gibi ifadeler ZORUNLU). Bu aracı gereksiz çağırmak YASAKTIR. Selamlama, günlük sohbet, yeni konular, ilk mesaj, anlamsız/kısa mesajlar, genel sorular veya greeting mesajları için KESİNLİKLE çağırma. Şüpheliysen çağırma.`,
+            description: 'Geçmiş konuşmalarda belirli bir konuyu veya mesajı arar.',
+            llmDescription: 'Geçmiş konuşmada ara (sadece kullanıcı geçmişe referans verirse)',
             parameters: {
                 type: 'object',
                 properties: {
@@ -242,10 +297,18 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                 },
                 required: ['query'],
             },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string' },
+                },
+                required: ['query'],
+            },
         },
         {
             name: 'webTool',
-            description: 'Bir web sayfasının içeriğini okur ve metne dönüştürür. Çoğu site için "quick" modunu kullan (daha hızlı ve ücretsizdir). Ancak JS render gerektiren boş dönen modern sitelerde "deep" modunu kullanarak Jina Reader API üzerinden sayfayı okutabilirsin.',
+            description: 'Bir web sayfasının içeriğini okur ve metne dönüştürür.',
+            llmDescription: 'Web sayfası oku',
             parameters: {
                 type: 'object',
                 properties: {
@@ -261,6 +324,14 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                 },
                 required: ['url', 'mode'],
             },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    url: { type: 'string' },
+                    mode: { type: 'string', enum: ['quick', 'deep'] },
+                },
+                required: ['url', 'mode'],
+            },
         },
     ];
 
@@ -268,7 +339,8 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
     if (config.allowShellExecution) {
         tools.push({
             name: 'executeShell',
-            description: 'Bir kabuk (PowerShell/CMD) komutu çalıştırır. Dosya oluşturma, uygulama başlatma, bağımlılık yükleme veya sistem bilgilerini alma gibi her türlü teknik işlem için bu aracı KULLAN. Windows ortamında (dir, type, npm run vb.) komutlar çalıştırabilirsin.',
+            description: 'Bir kabuk (PowerShell/CMD) komutu çalıştırır.',
+            llmDescription: 'Shell komutu çalıştır',
             parameters: {
                 type: 'object',
                 properties: {
@@ -283,6 +355,14 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                 },
                 required: ['command'],
             },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    command: { type: 'string' },
+                    cwd: { type: 'string' },
+                },
+                required: ['command'],
+            },
         });
     }
 
@@ -290,7 +370,8 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
     if (config.braveSearchApiKey) {
         tools.push({
             name: 'webSearch',
-            description: 'Web\'de arama yapar ve sonuçları döndürür. Güncel bilgiler, haberler, teknik konular ve her türlü web araması için kullan.',
+            description: 'Web\'de arama yapar ve sonuçları döndürür.',
+            llmDescription: 'Web\'de ara',
             parameters: {
                 type: 'object',
                 properties: {
@@ -307,6 +388,15 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                         description: 'Zaman filtresi: pd (son 24 saat), pw (son 1 hafta), pm (son 1 ay), py (son 1 yıl)',
                         enum: ['pd', 'pw', 'pm', 'py'],
                     },
+                },
+                required: ['query'],
+            },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string' },
+                    count: { type: 'integer' },
+                    freshness: { type: 'string', enum: ['pd', 'pw', 'pm', 'py'] },
                 },
                 required: ['query'],
             },

@@ -34,6 +34,17 @@ import {
 } from './bootstrap.js';
 import { initializeLangfuse, shutdownLangfuse } from '../observability/langfuse.js';
 
+// GraphRAG imports
+import { GraphCache } from '../memory/graphRAG/GraphCache.js';
+import { GraphExpander } from '../memory/graphRAG/GraphExpander.js';
+import { PageRankScorer } from '../memory/graphRAG/PageRankScorer.js';
+import { CommunityDetector } from '../memory/graphRAG/CommunityDetector.js';
+import { CommunitySummarizer } from '../memory/graphRAG/CommunitySummarizer.js';
+import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
+import { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
+import { GraphWorker } from '../memory/graphRAG/GraphWorker.js';
+import { GraphRAGConfigManager, DEFAULT_GRAPH_RAG_CONFIG } from '../memory/graphRAG/config.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
@@ -112,6 +123,78 @@ async function main() {
     // 4. Agent Runtime
     const agent = new AgentRuntime(llm, memory);
     logger.info(`[Gateway] 🧠 Agent Runtime hazır`);
+
+    // 4.1 GraphRAG Initialization
+    const graphRAGConfig = GraphRAGConfigManager.getConfig();
+    logger.info(`[Gateway] 🕸️ GraphRAG initializing: enabled=${graphRAGConfig.enabled}, phase=${GraphRAGConfigManager.getCurrentPhase()}`);
+
+    const db = database.getDb();
+    const graphCache = new GraphCache(db);
+    const graphExpander = new GraphExpander(db, graphCache);
+    const pageRankScorer = new PageRankScorer(db);
+    const communityDetector = new CommunityDetector(db);
+    const communitySummarizer = new CommunitySummarizer(db, llm);
+
+    // Hybrid search function for GraphRAG (defined before engine and shadow mode)
+    const hybridSearchFn = async (query: string, limit: number) => {
+        try {
+            const results = await memory.hybridSearch(query, limit);
+            // hybridSearch already returns MemoryRow[] directly
+            return results;
+        } catch (err) {
+            logger.warn({ err }, '[Gateway] GraphRAG hybrid search failed:');
+            return [];
+        }
+    };
+
+    const graphRAGEngine = new GraphRAGEngine(
+        db,
+        graphExpander,
+        pageRankScorer,
+        communityDetector,
+        communitySummarizer,
+        graphCache,
+        hybridSearchFn,
+        {
+            maxHops: graphRAGConfig.maxHops,
+            maxExpandedNodes: graphRAGConfig.sampleRate === 1.0 ? 100 : 50,
+            minConfidence: 0.3,
+            usePageRank: graphRAGConfig.usePageRank,
+            useCommunities: graphRAGConfig.useCommunities,
+            useCache: true,
+            tokenBudget: graphRAGConfig.tokenBudget,
+            communitySummaryBudget: Math.floor(graphRAGConfig.tokenBudget * 0.25),
+            timeoutMs: graphRAGConfig.timeoutMs,
+            fallbackToStandardSearch: graphRAGConfig.fallbackEnabled,
+            rrfKConstant: graphRAGConfig.rrfKConstant,
+            memoryImportanceWeight: graphRAGConfig.memoryImportanceWeight,
+            memoryAccessCountWeight: graphRAGConfig.memoryAccessCountWeight,
+            memoryConfidenceWeight: graphRAGConfig.memoryConfidenceWeight,
+        },
+    );
+
+    const shadowMode = new ShadowMode(
+        graphRAGEngine,
+        hybridSearchFn,
+    );
+
+    // Wire GraphRAG to agent and memory
+    agent.setGraphRAGComponents(graphRAGEngine, shadowMode);
+    memory.setGraphRAGEngine(graphRAGEngine);
+
+    // Initialize GraphWorker for background tasks (PageRank, Community Detection, etc.)
+    const graphWorker = new GraphWorker(
+        db,
+        pageRankScorer,
+        communityDetector,
+        communitySummarizer,
+        graphCache,
+    );
+    graphWorker.start();
+    logger.info(`[Gateway] ✅ GraphRAG Background Worker started`);
+
+    // Store references for graceful shutdown
+    const graphRAGComponents = { engine: graphRAGEngine, worker: graphWorker, shadow: shadowMode };
 
     // 4.5 Autonomous Sub-system Managers
     const feedbackManager = new FeedbackManager(database.getDb());
@@ -296,6 +379,15 @@ async function main() {
         logger.info('\n[Gateway] 🛑 Kapatılıyor...');
         if (statsDebounceTimer) clearTimeout(statsDebounceTimer);
         clearInterval(decayTimer);
+        
+        // Stop GraphRAG worker
+        try {
+            graphWorker.stop();
+            logger.info('[Gateway] 🕸️ GraphRAG Worker stopped');
+        } catch (err) {
+            logger.warn({ err }, '[Gateway] GraphRAG Worker shutdown error:');
+        }
+        
         autonomousWorker.stop();
         try {
             await router.disconnectAll();

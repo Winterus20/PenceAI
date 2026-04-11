@@ -24,6 +24,20 @@ export function createMCPToolAdapter(
   return {
     name: fullyQualifiedName,
     async execute(args: Record<string, unknown>): Promise<string> {
+      // Defense in depth: Basic args validation (manager zaten validate ediyor, bu ekstra koruma)
+      if (args && typeof args === 'object') {
+        const jsonSize = JSON.stringify(args).length;
+        if (jsonSize > 65536) {
+          return `Hata: MCP araç argüman boyutu çok büyük (${jsonSize} bytes, max 65536)`;
+        }
+        // Circular reference check
+        try {
+          JSON.stringify(args);
+        } catch {
+          return 'Hata: MCP araç argümanlarında circular reference tespit edildi';
+        }
+      }
+
       try {
         logger.info(`[MCP:adapter] Calling ${fullyQualifiedName}(${JSON.stringify(args).substring(0, 100)})`);
         return await mcpManager.callTool(fullyQualifiedName, args);

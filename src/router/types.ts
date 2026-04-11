@@ -101,8 +101,10 @@ export interface LLMMessage {
 
 export interface LLMToolDefinition {
     name: string;
-    description: string;
-    parameters: Record<string, unknown>; // JSON Schema
+    description: string;           // İnsan okuması için (dialog, UI vb.)
+    llmDescription?: string;       // LLM için sıkıştırılmış description
+    parameters: Record<string, unknown>; // JSON Schema (tam)
+    llmParameters?: Record<string, unknown>; // LLM için minimal JSON schema
 }
 
 export interface LLMResponse {

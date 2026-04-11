@@ -29,10 +29,18 @@ export interface TokenBudget {
   graphContext: number;    // %25 → 8000
 }
 
+/** Memory önceliklendirme ağırlıkları */
+export interface MemoryPriorityWeights {
+  importance: number;      // Default: 0.5 (önem skoru ağırlığı)
+  accessCount: number;     // Default: 0.3 (erişim sayısı ağırlığı)
+  confidence: number;      // Default: 0.2 (güven skoru ağırlığı)
+}
+
 /** Pruning seçenekleri */
 export interface PruningOptions {
   budget: TokenBudget;
   memoryPriorityFn?: (item: MemoryRow) => number;
+  memoryWeights?: MemoryPriorityWeights;
   summaryPriorityFn?: (item: CommunitySummary) => number;
   tokenizer?: (text: string) => number;
 }
@@ -55,6 +63,13 @@ const DEFAULT_TOKEN_BUDGET: TokenBudget = {
   graphContext: 8000,
 };
 
+/** Default memory priority weights */
+const DEFAULT_MEMORY_WEIGHTS: MemoryPriorityWeights = {
+  importance: 0.5,
+  accessCount: 0.3,
+  confidence: 0.2,
+};
+
 /** Graph context için sabit token sayısı */
 const GRAPH_CONTEXT_TOKENS = 300;
 
@@ -69,16 +84,18 @@ function defaultTokenizer(text: string): number {
 }
 
 /**
- * Priority fonksiyonu: Memory için PageRank score veya importance kullanır.
+ * Priority fonksiyonu: Memory için configurable weights kullanır.
  */
-function memoryPriorityFn(memory: MemoryRow): number {
-  // Importance (0-10) ve access_count kombinasyonu
-  const importance = memory.importance ?? 5;
-  const accessCount = memory.access_count ?? 0;
-  const confidence = memory.confidence ?? 0.5;
-  
-  // Normalize edilmiş priority: 0-1 arası
-  return (importance / 10) * 0.5 + Math.min(accessCount / 100, 1) * 0.3 + confidence * 0.2;
+function createMemoryPriorityFn(weights: MemoryPriorityWeights): (memory: MemoryRow) => number {
+  return (memory: MemoryRow): number => {
+    const importance = memory.importance ?? 5;
+    const accessCount = memory.access_count ?? 0;
+    const confidence = memory.confidence ?? 0.5;
+
+    return (importance / 10) * weights.importance +
+      Math.min(accessCount / 100, 1) * weights.accessCount +
+      confidence * weights.confidence;
+  };
 }
 
 /**
@@ -104,9 +121,18 @@ export class TokenPruner {
 
   constructor(options?: Partial<PruningOptions>) {
     this.budget = options?.budget ?? DEFAULT_TOKEN_BUDGET;
-    this.memoryPriorityFn = options?.memoryPriorityFn ?? memoryPriorityFn;
-    this.summaryPriorityFn = options?.summaryPriorityFn ?? summaryPriorityFn;
     this.tokenizer = options?.tokenizer ?? defaultTokenizer;
+    this.summaryPriorityFn = options?.summaryPriorityFn ?? summaryPriorityFn;
+
+    // Configurable weights veya custom priority function
+    if (options?.memoryPriorityFn) {
+      // Eğer custom priority function verilmişse onu kullan
+      this.memoryPriorityFn = options.memoryPriorityFn;
+    } else {
+      // Yoksa configurable weights ile oluştur
+      const weights = options?.memoryWeights ?? DEFAULT_MEMORY_WEIGHTS;
+      this.memoryPriorityFn = createMemoryPriorityFn(weights);
+    }
   }
 
   /**

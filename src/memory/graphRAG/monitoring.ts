@@ -1,5 +1,5 @@
 /**
- * GraphRAG Monitoring & Alerting — FULL Phase Metrics.
+ * GraphRAG Monitor — Instance-based class with backward compatibility.
  *
  * GraphRAG'ın production performansını izler ve anormallik durumunda
  * alert üretir.
@@ -9,6 +9,15 @@
  * - p95Latency > 3000ms → WARNING
  * - cacheHitRate < 50% → WARNING
  * - avgTokenUsage > 40000 → WARNING
+ *
+ * Usage:
+ *   // Preferred: instance-based
+ *   const monitor = new GraphRAGMonitor('my-instance');
+ *   monitor.recordQuery(...);
+ *
+ *   // Backward compatible: default singleton
+ *   import { defaultMonitor } from '...';
+ *   defaultMonitor.recordQuery(...);
  */
 
 import { logger } from '../../utils/logger.js';
@@ -61,26 +70,25 @@ const DEFAULT_ALERT_THRESHOLDS: AlertThresholds = {
 };
 
 /**
- * GraphRAG Monitor.
+ * GraphRAG Monitor — instance-based class.
  */
 export class GraphRAGMonitor {
-  private static instanceId: string = 'default';
-  private static totalQueries: number = 0;
-  private static graphRAGQueries: number = 0;
-  private static fallbackQueries: number = 0;
-  private static errorCount: number = 0;
-  private static cacheHits: number = 0;
-  private static latencies: number[] = [];
-  private static tokenUsages: number[] = [];
-  private static alerts: Alert[] = [];
-  private static thresholds: AlertThresholds = { ...DEFAULT_ALERT_THRESHOLDS };
+  private totalQueries: number = 0;
+  private graphRAGQueries: number = 0;
+  private fallbackQueries: number = 0;
+  private errorCount: number = 0;
+  private cacheHits: number = 0;
+  private latencies: number[] = [];
+  private tokenUsages: number[] = [];
+  private alerts: Alert[] = [];
+  private thresholds: AlertThresholds = { ...DEFAULT_ALERT_THRESHOLDS };
+  private instanceId: string;
 
-  static setInstanceId(id: string): void {
-    this.instanceId = id;
-  }
-
-  static getInstanceId(): string {
-    return this.instanceId;
+  constructor(instanceId: string = 'default', thresholds?: Partial<AlertThresholds>) {
+    this.instanceId = instanceId;
+    if (thresholds) {
+      this.thresholds = { ...DEFAULT_ALERT_THRESHOLDS, ...thresholds };
+    }
   }
 
   /**
@@ -92,7 +100,7 @@ export class GraphRAGMonitor {
    * @param cacheHit - Cache hit mi?
    * @param usedGraphRAG - GraphRAG kullanıldı mı?
    */
-  static recordQuery(
+  recordQuery(
     latency: number,
     tokens: number,
     success: boolean,
@@ -128,7 +136,7 @@ export class GraphRAGMonitor {
   /**
    * Fallback query kaydını tut.
    */
-  static recordFallback(): void {
+  recordFallback(): void {
     this.fallbackQueries++;
   }
 
@@ -137,7 +145,7 @@ export class GraphRAGMonitor {
    *
    * @param error - Hata mesajı
    */
-  static recordError(error: string): void {
+  recordError(error: string): void {
     this.errorCount++;
     logger.error({ msg: 'GraphRAG error recorded', error });
   }
@@ -145,14 +153,14 @@ export class GraphRAGMonitor {
   /**
    * Cache hit kaydını tut.
    */
-  static recordCacheHit(): void {
+  recordCacheHit(): void {
     this.cacheHits++;
   }
 
   /**
    * Mevcut metrikleri getir.
    */
-  static getMetrics(): GraphRAGMetrics {
+  getMetrics(): GraphRAGMetrics {
     const total = this.totalQueries || 1; // Division by zero önleme
 
     // Latency percentiles
@@ -181,7 +189,7 @@ export class GraphRAGMonitor {
   /**
    * Alert kontrolü yap.
    */
-  static checkAlerts(): Alert[] {
+  checkAlerts(): Alert[] {
     const metrics = this.getMetrics();
     const newAlerts: Alert[] = [];
     const now = new Date();
@@ -258,28 +266,28 @@ export class GraphRAGMonitor {
    *
    * @param count - Kaç alert getirileceği (default: 10)
    */
-  static getRecentAlerts(count: number = 10): Alert[] {
+  getRecentAlerts(count: number = 10): Alert[] {
     return this.alerts.slice(-count);
   }
 
   /**
    * Tüm alert'leri getir.
    */
-  static getAllAlerts(): Alert[] {
+  getAllAlerts(): Alert[] {
     return [...this.alerts];
   }
 
   /**
    * Alert'leri temizle.
    */
-  static clearAlerts(): void {
+  clearAlerts(): void {
     this.alerts = [];
   }
 
   /**
    * Metrikleri sıfırla.
    */
-  static resetMetrics(): void {
+  resetMetrics(): void {
     this.totalQueries = 0;
     this.graphRAGQueries = 0;
     this.fallbackQueries = 0;
@@ -294,7 +302,7 @@ export class GraphRAGMonitor {
   /**
    * Alert threshold'larını getir.
    */
-  static getThresholds(): AlertThresholds {
+  getThresholds(): AlertThresholds {
     return { ...this.thresholds };
   }
 
@@ -303,8 +311,24 @@ export class GraphRAGMonitor {
    *
    * @param thresholds - Yeni threshold değerleri
    */
-  static setThresholds(thresholds: Partial<AlertThresholds>): void {
+  setThresholds(thresholds: Partial<AlertThresholds>): void {
     this.thresholds = { ...this.thresholds, ...thresholds };
     logger.info({ msg: 'GraphRAG alert thresholds updated', thresholds: this.thresholds });
   }
+
+  /**
+   * Instance ID'yi getir.
+   */
+  getInstanceId(): string {
+    return this.instanceId;
+  }
 }
+
+/**
+ * Backward compatibility: default singleton instance.
+ *
+ * Existing code that relied on static methods can continue using:
+ *   import { defaultMonitor } from '...';
+ *   defaultMonitor.recordQuery(...);
+ */
+export const defaultMonitor = new GraphRAGMonitor();

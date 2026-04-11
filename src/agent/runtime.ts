@@ -44,6 +44,17 @@ export class AgentRuntime {
     private _mcpEnabled = false;
     private _mcpToolsRegistered = false;
 
+    // Tool cache — hash-based, tekrar eden çağrılarda aynı tool listesi döner
+    private _lastToolHash: string | null = null;
+    private _lastToolPayload: LLMToolDefinition[] | null = null;
+
+    // MCP server listesi cache (sistem prompt'undaki MCP listesi)
+    private _lastMcpListHash: string | null = null;
+    private _lastMcpListPrompt: string | null = null;
+
+    // Category fallback threshold
+    private static readonly MAX_TOOLS_IN_CONTEXT = 20;
+
     // GraphRAG integration
     private graphRAGEngine?: GraphRAGEngine;
     private shadowMode?: ShadowMode;
@@ -135,7 +146,13 @@ export class AgentRuntime {
             const allTools = registry.getAllToolDefinitions();
             this.toolDefinitions = allTools;
             this._mcpToolsRegistered = true;
-            
+
+            // Cache'i temizle — yeni tool listesi
+            this._lastToolHash = null;
+            this._lastToolPayload = null;
+            this._lastMcpListHash = null;
+            this._lastMcpListPrompt = null;
+
             const mcpToolCount = allTools.length - getBuiltinToolDefinitions().length;
             logger.info(`[Agent] 🔌 MCP tools registered — ${allTools.length} total tools (${mcpToolCount} MCP tools)`);
         } catch (error) {
@@ -145,18 +162,35 @@ export class AgentRuntime {
 
     /**
      * Etkin tool definitions'ı döndürür (built-in + MCP).
-     * Her çağrıda registry'den güncel listeyi alır — böylece dinamik olarak
-     * yüklenen MCP server'ların araçları da anında görünür olur.
+     * Hash-based cache — tool listesi değişmediyse cache'ten döndürür.
      */
     private _getEffectiveToolDefinitions(): LLMToolDefinition[] {
         if (this._mcpEnabled) {
             try {
                 const registry = getUnifiedToolRegistry();
                 const allTools = registry.getAllToolDefinitions();
-                // Yerel cache'i güncelle
-                this.toolDefinitions = allTools;
+                
+                // Hash ile değişim kontrolü
+                const currentHash = this._computeToolHash(allTools);
+                
+                if (currentHash === this._lastToolHash && this._lastToolPayload) {
+                    // Cache hit — aynı tool listesi, işlem yapma
+                    return this._lastToolPayload;
+                }
+                
+                // Cache miss — sıkıştır ve cache'le
+                const compressed = this._compressToolDefinitions(allTools);
+                
+                // Category fallback — tool sayısı çok fazlaysa prune et
+                const pruned = this._pruneExcessTools(compressed);
+                
+                this._lastToolHash = currentHash;
+                this._lastToolPayload = pruned;
+                this.toolDefinitions = pruned;
                 this._mcpToolsRegistered = true;
-                return allTools;
+                
+                logger.info(`[Agent] 🔌 Tool cache miss — ${pruned.length} tools (${this._lastToolHash})`);
+                return pruned;
             } catch (error) {
                 logger.warn({ error }, '[Agent] Failed to get MCP tools, falling back to built-in tools');
             }
@@ -461,16 +495,25 @@ export class AgentRuntime {
             perfTimings.graphRAGShadow = Date.now() - shadowStart;
             logger.info(`[Agent] ⏱️ GraphRAG shadow query: ${perfTimings.graphRAGShadow}ms`);
         } else if (graphRAGConfig.enabled && this.graphRAGEngine) {
-            // Sample rate kontrolü (partial rollout)
+            // FULL mode: %100 GraphRAG kullan
             if (Math.random() < graphRAGConfig.sampleRate) {
                 const graphRAGStart = Date.now();
                 try {
                     const result = await this.graphRAGEngine.retrieve(message.content, {
                         maxHops: graphRAGConfig.maxHops,
+                        maxExpandedNodes: graphRAGConfig.sampleRate === 1.0 ? 100 : 50,
+                        minConfidence: 0.3,
                         usePageRank: graphRAGConfig.usePageRank,
                         useCommunities: graphRAGConfig.useCommunities,
+                        useCache: true,
                         tokenBudget: graphRAGConfig.tokenBudget,
+                        communitySummaryBudget: Math.floor(graphRAGConfig.tokenBudget * 0.25),
                         timeoutMs: graphRAGConfig.timeoutMs,
+                        fallbackToStandardSearch: graphRAGConfig.fallbackEnabled,
+                        rrfKConstant: graphRAGConfig.rrfKConstant,
+                        memoryImportanceWeight: graphRAGConfig.memoryImportanceWeight,
+                        memoryAccessCountWeight: graphRAGConfig.memoryAccessCountWeight,
+                        memoryConfidenceWeight: graphRAGConfig.memoryConfidenceWeight,
                     });
                     perfTimings.graphRAG = Date.now() - graphRAGStart;
 
@@ -525,8 +568,8 @@ export class AgentRuntime {
         // Archival bellekleri prompt için hazırla (aktif belleklerden ayrı)
         const archivalMemoryStrings = archivalMemories.map(m => m.content);
 
-        // Context bütçesi: toplam bellek metni ~1500 token'i aşmasın
-        const MAX_MEMORY_TOKENS = 1500;
+        // Context bütçesi: FULL mode'da GraphRAG zenginleştirilmiş context için daha fazla alan
+        const MAX_MEMORY_TOKENS = graphRAGConfig.sampleRate === 1.0 ? 2500 : 1500;
         const trimmedMemories: string[] = [];
         let memoryTokensUsed = 0;
 
@@ -571,21 +614,34 @@ export class AgentRuntime {
         const isStrictModel = currentModel.includes('gemma') || currentModel.includes('llama') || currentModel.includes('mistral');
 
         // MCP araç listesini sistem prompt'una ekle — LLM araçları görebilsin
+        // Cache: Sadece MCP server listesi değiştiğinde güncelle
         const allTools = this._getEffectiveToolDefinitions();
         const mcpTools = allTools.filter((t: LLMToolDefinition) => t.name.startsWith('mcp:'));
+        
         if (mcpTools.length > 0) {
-            // Server bazında grupla
-            const serverMap = new Map<string, string[]>();
-            for (const tool of mcpTools) {
-                const parts = tool.name.split(':');
-                const serverName = parts[1];
-                if (!serverMap.has(serverName)) serverMap.set(serverName, []);
-                serverMap.get(serverName)!.push(tool.name);
+            const currentMcpHash = this._computeMcpListHash(mcpTools);
+            
+            if (currentMcpHash === this._lastMcpListHash && this._lastMcpListPrompt) {
+                // Cache hit — MCP listesi değişmemiş
+                systemPrompt += this._lastMcpListPrompt;
+            } else {
+                // Cache miss — yeni MCP listesi oluştur
+                const serverMap = new Map<string, string[]>();
+                for (const tool of mcpTools) {
+                    const parts = tool.name.split(':');
+                    const serverName = parts[1];
+                    if (!serverMap.has(serverName)) serverMap.set(serverName, []);
+                    serverMap.get(serverName)!.push(tool.name);
+                }
+                const mcpList = Array.from(serverMap.entries())
+                    .map(([server, tools]) => `  - **${server}**: ${tools.length} araç (${tools.map(t => `\`${t}\``).join(', ')})`)
+                    .join('\n');
+                const mcpPrompt = `\n\n## Aktif MCP Sunucuları\nŞu anda bağlı MCP sunucuları ve araçları:\n${mcpList}\n\nKullanıcı "hangi MCP sunucuları var?" diye sorarsa, yukarıdaki listeyi aynen kullanıcıya ilet.`;
+                
+                this._lastMcpListHash = currentMcpHash;
+                this._lastMcpListPrompt = mcpPrompt;
+                systemPrompt += mcpPrompt;
             }
-            const mcpList = Array.from(serverMap.entries())
-                .map(([server, tools]) => `  - **${server}**: ${tools.length} araç (${tools.map(t => `\`${t}\``).join(', ')})`)
-                .join('\n');
-            systemPrompt += `\n\n## Aktif MCP Sunucuları\nŞu anda bağlı MCP sunucuları ve araçları:\n${mcpList}\n\nKullanıcı "hangi MCP sunucuları var?" diye sorarsa, yukarıdaki listeyi aynen kullanıcıya ilet.`;
         }
 
         let finalSystemPrompt = systemPrompt;
@@ -1652,6 +1708,71 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
     private estimateTokens(text: string): number {
         if (!text) return 0;
         return Math.ceil(text.length / 4);
+    }
+
+    /**
+     * Tool listesinin hash'ini hesaplar — cache validasyonu için.
+     */
+    private _computeToolHash(tools: LLMToolDefinition[]): string {
+        const sig = tools.map(t => `${t.name}|${t.description ?? ''}|${t.llmDescription ?? ''}`).join(';');
+        let hash = 0;
+        for (let i = 0; i < sig.length; i++) {
+            hash = ((hash << 5) - hash) + sig.charCodeAt(i);
+            hash |= 0;
+        }
+        return hash.toString(36);
+    }
+
+    /**
+     * MCP server listesinin hash'ini hesaplar.
+     */
+    private _computeMcpListHash(mcpTools: LLMToolDefinition[]): string {
+        const sig = mcpTools.map(t => t.name).join(',');
+        let hash = 0;
+        for (let i = 0; i < sig.length; i++) {
+            hash = ((hash << 5) - hash) + sig.charCodeAt(i);
+            hash |= 0;
+        }
+        return hash.toString(36);
+    }
+
+    /**
+     * Tool tanımlarını LLM için sıkıştırır.
+     * llmDescription ve llmParameters varsa onları kullanır, yoksa orijinalini kullanır.
+     */
+    private _compressToolDefinitions(tools: LLMToolDefinition[]): LLMToolDefinition[] {
+        return tools.map(tool => {
+            const compressed: LLMToolDefinition = {
+                name: tool.name,
+                description: tool.llmDescription ?? tool.description,
+                parameters: tool.llmParameters ?? tool.parameters,
+            };
+            return compressed;
+        });
+    }
+
+    /**
+     * Tool sayısı çok fazlaysa en az gerekli MCP tools'ları çıkar.
+     * Built-in tools her zaman korunur.
+     */
+    private _pruneExcessTools(tools: LLMToolDefinition[]): LLMToolDefinition[] {
+        const maxTools = AgentRuntime.MAX_TOOLS_IN_CONTEXT;
+        if (tools.length <= maxTools) return tools;
+        
+        // Built-in tools her zaman kalsın
+        const builtin = tools.filter(t => !t.name.startsWith('mcp:'));
+        const mcp = tools.filter(t => t.name.startsWith('mcp:'));
+        
+        // MCP tools'tan en son eklenenleri çıkar (ilk eklenenler daha önemli)
+        const keepCount = Math.max(0, maxTools - builtin.length);
+        const prunedMcp = mcp.slice(0, keepCount);
+        
+        if (mcp.length > keepCount) {
+            const removed = mcp.slice(keepCount).map(t => t.name);
+            logger.warn(`[Agent] ⚠️ Tool count (${tools.length}) exceeds limit (${maxTools}), pruning: ${removed.join(', ')}`);
+        }
+        
+        return [...builtin, ...prunedMcp];
     }
 
     /**

@@ -24,6 +24,14 @@ export interface GraphRAGFeatureFlag {
   tokenBudget: number;
   timeoutMs: number;
   fallbackEnabled: boolean;
+  
+  // RRF Fusion sabitleri
+  rrfKConstant: number;              // Default: 60 (Reciprocal Rank Fusion constant)
+  
+  // Memory önceliklendirme ağırlıkları (TokenPruner)
+  memoryImportanceWeight: number;    // Default: 0.5 (önem skoru ağırlığı)
+  memoryAccessCountWeight: number;   // Default: 0.3 (erişim sayısı ağırlığı)
+  memoryConfidenceWeight: number;    // Default: 0.2 (güven skoru ağırlığı)
 }
 
 /** Rollout phase enum */
@@ -45,7 +53,11 @@ export const ROLLOUT_PHASE_CONFIG: Record<GraphRAGRolloutPhase, GraphRAGFeatureF
     useCommunities: true,
     tokenBudget: 32000,
     timeoutMs: 5000,
-    fallbackEnabled: true
+    fallbackEnabled: true,
+    rrfKConstant: 60,
+    memoryImportanceWeight: 0.5,
+    memoryAccessCountWeight: 0.3,
+    memoryConfidenceWeight: 0.2
   },
   [GraphRAGRolloutPhase.SHADOW]: {
     enabled: true,
@@ -56,7 +68,11 @@ export const ROLLOUT_PHASE_CONFIG: Record<GraphRAGRolloutPhase, GraphRAGFeatureF
     useCommunities: true,
     tokenBudget: 32000,
     timeoutMs: 5000,
-    fallbackEnabled: true
+    fallbackEnabled: true,
+    rrfKConstant: 60,
+    memoryImportanceWeight: 0.5,
+    memoryAccessCountWeight: 0.3,
+    memoryConfidenceWeight: 0.2
   },
   [GraphRAGRolloutPhase.PARTIAL]: {
     enabled: true,
@@ -67,7 +83,11 @@ export const ROLLOUT_PHASE_CONFIG: Record<GraphRAGRolloutPhase, GraphRAGFeatureF
     useCommunities: true,
     tokenBudget: 32000,
     timeoutMs: 5000,
-    fallbackEnabled: true
+    fallbackEnabled: true,
+    rrfKConstant: 60,
+    memoryImportanceWeight: 0.5,
+    memoryAccessCountWeight: 0.3,
+    memoryConfidenceWeight: 0.2
   },
   [GraphRAGRolloutPhase.FULL]: {
     enabled: true,
@@ -78,7 +98,11 @@ export const ROLLOUT_PHASE_CONFIG: Record<GraphRAGRolloutPhase, GraphRAGFeatureF
     useCommunities: true,
     tokenBudget: 48000, // Daha yüksek token budget
     timeoutMs: 8000,    // Daha uzun timeout
-    fallbackEnabled: true
+    fallbackEnabled: true,
+    rrfKConstant: 60,
+    memoryImportanceWeight: 0.5,
+    memoryAccessCountWeight: 0.3,
+    memoryConfidenceWeight: 0.2
   }
 };
 

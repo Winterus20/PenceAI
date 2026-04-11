@@ -650,7 +650,7 @@ export class CommunityDetector {
         FROM memory_relations mr
         WHERE mr.confidence >= 0.1
           AND (mr.source_memory_id IN (${placeholders}) OR mr.target_memory_id IN (${placeholders}))
-      `).all(...currentLayer, ...currentLayer, ...currentLayer) as Array<{ neighbor_id: number }>;
+      `).all(...currentLayer, ...currentLayer) as Array<{ neighbor_id: number }>;
 
       const nextLayer: number[] = [];
       for (const n of neighbors) {

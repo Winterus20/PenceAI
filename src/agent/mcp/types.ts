@@ -198,15 +198,21 @@ export interface UnifiedToolDefinition {
   /** Araç adı (unique) */
   name: string;
 
-  /** Araç açıklaması */
+  /** Araç açıklaması (insan okuması için) */
   description: string;
 
-  /** JSON Schema parametreleri */
+  /** LLM için sıkıştırılmış açıklama */
+  llmDescription?: string;
+
+  /** JSON Schema parametreleri (tam) */
   parameters: {
     type: 'object';
     properties?: Record<string, unknown>;
     required?: string[];
   };
+
+  /** LLM için minimal JSON schema (açıklamalar kaldırılmış) */
+  llmParameters?: Record<string, unknown>;
 
   /** Araç kaynağı */
   source: 'builtin' | 'mcp';

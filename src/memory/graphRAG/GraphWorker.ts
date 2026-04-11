@@ -267,6 +267,12 @@ export class GraphWorker {
   private async checkAndRun(): Promise<void> {
     if (!this.isRunning) return;
 
+    // Abort signal kontrolü
+    if (this.abortController?.signal.aborted) {
+      logger.debug('[GraphWorker] Aborted, stopping check loop');
+      return;
+    }
+
     // Idle kontrolü
     const timeSinceActivity = Date.now() - this.lastActivityAt;
     if (timeSinceActivity < this.idleThresholdMs) {
@@ -331,6 +337,12 @@ export class GraphWorker {
       return;
     }
 
+    // Abort signal kontrolü
+    if (this.abortController?.signal.aborted) {
+      logger.debug(`[GraphWorker] Aborted, skipping task: ${name}`);
+      return;
+    }
+
     task.status = 'running';
     const startTime = Date.now();
 
@@ -382,8 +394,12 @@ export class GraphWorker {
    */
   private interrupt(reason: string): void {
     logger.debug(`[GraphWorker] Interrupt: ${reason}`);
-    // Mevcut görevler interrupt edilemez (abort signal ile kontrol edilebilir)
-    // Sadece yeni görev başlatmayı engelle
+    // Abort signal'i gönder - task'lar signal.aborted kontrolü yapacak
+    if (this.abortController && !this.abortController.signal.aborted) {
+      this.abortController.abort(reason);
+      // Yeni bir abort controller oluştur (gelecekteki start için)
+      this.abortController = new AbortController();
+    }
   }
 
   /**

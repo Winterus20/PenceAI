@@ -6,8 +6,8 @@ import { createEmbeddingProvider } from '../memory/embeddings.js';
 import { getConfig } from '../gateway/config.js';
 import { logger } from '../utils/logger.js';
 import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../memory/graphRAG/config.js';
-import { GraphRAGRollbackManager, RollbackReason } from '../memory/graphRAG/rollback.js';
-import { GraphRAGMonitor, AlertSeverity } from '../memory/graphRAG/monitoring.js';
+import { defaultRollbackManager, RollbackReason } from '../memory/graphRAG/rollback.js';
+import { defaultMonitor, AlertSeverity } from '../memory/graphRAG/monitoring.js';
 
 async function runMaintenance() {
     console.log('--- PençeAI Memory Graph Maintenance ---');
@@ -83,8 +83,8 @@ async function graphRAGSetPhase(phase: number) {
 async function graphRAGReadiness() {
     const config = GraphRAGConfigManager.getConfig();
     const phase = GraphRAGConfigManager.getCurrentPhase();
-    const metrics = GraphRAGMonitor.getMetrics();
-    const lastRollback = GraphRAGRollbackManager.getLastRollbackTime();
+    const metrics = defaultMonitor.getMetrics();
+    const lastRollback = defaultRollbackManager.getLastRollbackTime();
 
     console.log('\n🔍 GraphRAG FULL Phase Readiness Check:');
     console.log('=========================================');
@@ -185,7 +185,7 @@ async function graphRAGEmergencyRollback() {
     const currentPhase = GraphRAGConfigManager.getCurrentPhase();
     console.log(`   Current Phase: ${GraphRAGRolloutPhase[currentPhase]}`);
 
-    await GraphRAGRollbackManager.emergencyRollback(
+    await defaultRollbackManager.emergencyRollback(
         RollbackReason.MANUAL_TRIGGER,
         'cli',
     );
@@ -193,15 +193,15 @@ async function graphRAGEmergencyRollback() {
     const newPhase = GraphRAGConfigManager.getCurrentPhase();
     console.log(`\n✅ Rollback completed: ${GraphRAGRolloutPhase[newPhase]}`);
 
-    const lastRollback = GraphRAGRollbackManager.getLastRollbackTime();
+    const lastRollback = defaultRollbackManager.getLastRollbackTime();
     if (lastRollback) {
         console.log(`   Rollback Time: ${lastRollback.toISOString()}`);
     }
 }
 
 async function graphRAGMetrics() {
-    const metrics = GraphRAGMonitor.getMetrics();
-    const alerts = GraphRAGMonitor.getRecentAlerts(10);
+    const metrics = defaultMonitor.getMetrics();
+    const alerts = defaultMonitor.getRecentAlerts(10);
 
     console.log('\n📊 GraphRAG Metrics Report:');
     console.log('===========================');

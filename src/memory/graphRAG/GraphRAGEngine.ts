@@ -29,7 +29,9 @@ import type { PageRankScorer } from './PageRankScorer.js';
 import type { CommunityDetector } from './CommunityDetector.js';
 import type { CommunitySummarizer, CommunitySummary } from './CommunitySummarizer.js';
 import type { GraphCache } from './GraphCache.js';
+import type { GraphRAGFeatureFlag } from './config.js';
 import { TokenPruner, type TokenBudget, type PruningResult } from './TokenPruner.js';
+import { defaultMonitor } from './monitoring.js';
 
 /** GraphRAG konfigürasyonu */
 export interface GraphRAGConfig {
@@ -43,6 +45,12 @@ export interface GraphRAGConfig {
   communitySummaryBudget: number; // Default: 8000
   timeoutMs: number;            // Default: 5000
   fallbackToStandardSearch: boolean; // Default: true
+  
+  // Configurable constants
+  rrfKConstant: number;         // Default: 60 (RRF fusion constant)
+  memoryImportanceWeight: number; // Default: 0.5
+  memoryAccessCountWeight: number; // Default: 0.3
+  memoryConfidenceWeight: number; // Default: 0.2
 }
 
 /** Graph context bilgisi */
@@ -119,6 +127,10 @@ const DEFAULT_CONFIG: GraphRAGConfig = {
   communitySummaryBudget: 8000,
   timeoutMs: 5000,
   fallbackToStandardSearch: true,
+  rrfKConstant: 60,
+  memoryImportanceWeight: 0.5,
+  memoryAccessCountWeight: 0.3,
+  memoryConfidenceWeight: 0.2,
 };
 
 /** Feature flag */
@@ -159,6 +171,11 @@ export class GraphRAGEngine {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.tokenPruner = new TokenPruner({
       budget: computeTokenBudget(this.config),
+      memoryWeights: {
+        importance: this.config.memoryImportanceWeight,
+        accessCount: this.config.memoryAccessCountWeight,
+        confidence: this.config.memoryConfidenceWeight,
+      },
     });
   }
 
@@ -263,10 +280,29 @@ export class GraphRAGEngine {
       const totalDuration = Date.now() - startTime;
       logger.info(`[GraphRAGEngine] ⏱️ TOTAL GraphRAG retrieval: ${totalDuration}ms | Breakdown: ${JSON.stringify(phaseTimings)}`);
 
+      // ✅ Monitoring kaydı
+      defaultMonitor.recordQuery(
+        totalDuration,
+        fusionResult.searchMetadata.tokenUsage,
+        true, // success
+        fusionResult.searchMetadata.cacheHit,
+        true, // usedGraphRAG
+      );
+
       return fusionResult;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       logger.error({ err }, '[GraphRAGEngine] Retrieval failed:');
+
+      // ✅ Error monitoring kaydı
+      defaultMonitor.recordQuery(
+        Date.now() - startTime,
+        0,
+        false, // success
+        false, // cacheHit
+        true, // usedGraphRAG
+      );
+      defaultMonitor.recordError(errorMessage);
 
       if (config.fallbackToStandardSearch) {
         return this.fallbackToStandard(query, config, startTime, false);
@@ -548,12 +584,21 @@ export class GraphRAGEngine {
       await this.checkTimeout(startTime, config.timeoutMs, 'summary');
 
       const summaries: CommunitySummary[] = [];
-      
+
       // İlk 3 community için summary getir/oluştur
       for (const comm of community.communities.slice(0, 3)) {
-        const existingSummary = this.communitySummarizer.getSummary(comm.id);
-        if (existingSummary) {
-          summaries.push(existingSummary);
+        let summary = this.communitySummarizer.getSummary(comm.id);
+
+        // On-demand generation: Cache'de yoksa oluştur
+        if (!summary) {
+          logger.debug(
+            `[GraphRAGEngine] Summary not cached for community ${comm.id}, generating on-demand`,
+          );
+          summary = await this.communitySummarizer.summarizeCommunity(comm.id);
+        }
+
+        if (summary) {
+          summaries.push(summary);
         }
       }
 
@@ -586,12 +631,13 @@ export class GraphRAGEngine {
       results.summary.summaries,
     );
 
-    // RRF fusion ile final ranking
+    // RRF fusion ile final ranking (configurable K constant)
     const finalMemories = this.rrfFusion(
       results.initialResults,
       pruningResult.prunedMemories,
       results.scoring.scores,
       config.maxExpandedNodes,
+      config.rrfKConstant,
     );
 
     const elapsed = Date.now() - startTime;
@@ -625,8 +671,9 @@ export class GraphRAGEngine {
     expandedNodes: MemoryRow[],
     scores: Map<number, number>,
     maxResults: number,
+    rrfK: number = 60, // Configurable RRF constant
   ): MemoryRow[] {
-    const K = 60; // RRF constant
+    const K = rrfK; // RRF constant (default: 60)
     const allNodes = new Map<number, { node: MemoryRow; rrfScore: number }>();
 
     // Initial results için RRF score

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Save, Settings2 } from 'lucide-react';
+import { Activity, Save, Settings2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,7 @@ import { LLMSettings } from './LLMSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { MemorySettings } from './MemorySettings';
 import { UsageStatsCard } from '@/components/settings/UsageStatsCard';
+import { ObservabilityDialog } from './ObservabilityDialog';
 import { metaBadgeClassName } from '@/styles/dialog';
 import { SkeletonSettingsDialog } from '@/components/ui/skeleton';
 import { useSettings } from '@/hooks/queries/useSettings';
@@ -77,6 +78,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
   const [form, setForm] = useState<SettingsForm>(emptyForm);
   const [statusText, setStatusText] = useState<string>('');
   const [newSensitivePath, setNewSensitivePath] = useState<string>('');
+  const [observabilityOpen, setObservabilityOpen] = useState(false);
 
   // Query hooks
   const { data: settings, isLoading: settingsLoading } = useSettings();
@@ -209,6 +211,15 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
             <span className={metaBadgeClassName}>{form.defaultLLMProvider || 'Sağlayıcı yok'}</span>
             <span className={metaBadgeClassName}>{form.defaultLLMModel || 'Model yok'}</span>
             <span className={metaBadgeClassName}>{providers.length} sağlayıcı</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setObservabilityOpen(true)}
+              className="h-6 gap-1.5 rounded-full bg-blue-500/15 px-3 text-xs text-blue-400 hover:bg-blue-500/25 hover:text-blue-300"
+            >
+              <Activity className="h-3.5 w-3.5" />
+              Observability
+            </Button>
           </div>
         </div>
       </div>
@@ -265,14 +276,17 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="glass-panel flex max-h-[calc(100dvh-1.5rem)] w-[min(96vw,84rem)] max-w-[95vw] md:max-w-2xl flex-col overflow-hidden p-0 text-foreground">
-        <VisuallyHidden.Root>
-          <DialogTitle>Ayarlar</DialogTitle>
-          <DialogDescription>Model seçimi, servis anahtarları ve çalışma davranışlarını düzenleyin.</DialogDescription>
-        </VisuallyHidden.Root>
-        {content}
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="glass-panel flex max-h-[calc(100dvh-1.5rem)] w-[min(96vw,84rem)] max-w-[95vw] md:max-w-2xl flex-col overflow-hidden p-0 text-foreground">
+          <VisuallyHidden.Root>
+            <DialogTitle>Ayarlar</DialogTitle>
+            <DialogDescription>Model seçimi, servis anahtarları ve çalışma davranışlarını düzenleyin.</DialogDescription>
+          </VisuallyHidden.Root>
+          {content}
+        </DialogContent>
+      </Dialog>
+      <ObservabilityDialog open={observabilityOpen} onOpenChange={setObservabilityOpen} />
+    </>
   );
 };

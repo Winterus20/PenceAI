@@ -64,10 +64,7 @@ const SENSITIVE_ENV_PATTERNS = [
  */
 const SAFE_ENV_PREFIXES = [
   'NODE_',
-  'PATH',
   'HOME',
-  'USER',
-  'SHELL',
   'LANG',
   'LC_',
   'TERM',
@@ -122,8 +119,21 @@ const EnvValueSchema = z.string()
     'Env value contains shell meta characters'
   );
 
+const BLOCKED_ENV_KEYS = [
+  'PATH', 'PATHS',
+  'USER', 'USERNAME', 'USERPROFILE',
+  'SHELL', 'BASH', 'ZSH_NAME',
+  'HOME', 'HOMEDRIVE', 'HOMEPATH',
+  'SYSTEMROOT', 'WINDIR', 'SYSTEMDRIVE',
+];
+
 function validateConfigEnv(env: Record<string, string>): void {
   for (const [key, value] of Object.entries(env)) {
+    // Kritik sistem değişkenlerini engelle
+    const upperKey = key.toUpperCase();
+    if (BLOCKED_ENV_KEYS.some(blocked => upperKey === blocked || upperKey.startsWith(blocked))) {
+      throw new Error(`Environment variable '${key}' is blocked for security reasons`);
+    }
     EnvValueSchema.parse(value);
   }
 }

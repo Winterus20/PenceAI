@@ -1,7 +1,7 @@
 # PenceAI Proje Haritası
 
-> **Son Güncelleme:** 4 Nisan 2026
-> **Versiyon:** 1.4.0
+> **Son Güncelleme:** 11 Nisan 2026
+> **Versiyon:** 1.5.0
 > **Lisans:** MIT
 
 ---
@@ -36,6 +36,10 @@
 - 🧩 **Reconsolidation Pilot**: Bellek birleştirme ve güncelleme güvenlik mekanizması
 - 📊 **Retrieval Orchestration**: Dual-process (System1/System2) bellek getirme mimarisi
 - 🕸️ **GraphRAG**: Graph-aware retrieval, PageRank skorlama, topluluk tespiti ve gölge mod test altyapısı
+- 🔌 **MCP Marketplace**: Model Context Protocol entegrasyonu, 18+ modül ile genişletilebilir araç ekosistemi
+- 📈 **Token Usage & Cost Tracking**: Provider bazlı token tüketimi ve maliyet hesaplama
+- 📊 **Observability UI**: Langfuse trace'leri, real-time metrikler ve hata analizi arayüzü
+- 📡 **Multi-Channel Support**: Telegram, Discord ve WhatsApp kanal entegrasyonları
 - 🎨 **Modern UI/UX**: Markdown render sistemi, syntax highlighting, avatar sistemi ve akıcı animasyonlar
 - ⚡ **Frontend Optimizasyonu**: Component decomposition, React.memo ile render performansı ve sanallaştırılmış mesaj akışı
 - 🔌 **Stabil WebSocket**: Stale closure korumalı, buffer optimizasyonlu gerçek zamanlı iletişim katmanı
@@ -221,6 +225,87 @@ interface HistoryPruneResult {
   prunedChunkCount: number;
   repairedAssistantCount: number;
   skippedToolCount: number;
+}
+```
+
+---
+
+### 2.1. MCP (Model Context Protocol) Modülü (`src/agent/mcp/`)
+
+Harici araç sunucularını standart Model Context Protocol üzerinden entegre eden genişletilebilir araç ekosistemi.
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`index.ts`](src/agent/mcp/index.ts) | MCP modülü public API - tüm export'ları tek noktadan sağlar |
+| [`client.ts`](src/agent/mcp/client.ts) | MCP sunucu yöneticisi - başlatma, durum takibi, araç çağrıları |
+| [`adapter.ts`](src/agent/mcp/adapter.ts) | MCP araçlarını ToolExecutor interface'ine adapte eder |
+| [`runtime.ts`](src/agent/mcp/runtime.ts) | MCP runtime - agent ile MCP entegrasyonunu yönetir |
+| [`registry.ts`](src/agent/mcp/registry.ts) | Unified tool registry - tüm araçları tek noktada toplar |
+| [`transport.ts`](src/agent/mcp/transport.ts) | MCP transport layer - stdio/HTTP iletişim |
+| [`security.ts`](src/agent/mcp/security.ts) | Güvenlik katmanı - araç validasyonu ve erişim kontrolü |
+| [`config.ts`](src/agent/mcp/config.ts) | MCP yapılandırma yönetimi |
+| [`contracts.ts`](src/agent/mcp/contracts.ts) | Interface contract'ları - Manager, Registry, Transport |
+| [`eventBus.ts`](src/agent/mcp/eventBus.ts) | Olay bus sistemi - MCP event yayınlama ve dinleme |
+| [`watcher.ts`](src/agent/mcp/watcher.ts) | Dosya/süreç izleyici - MCP sunucu sağlık kontrolü |
+| [`command-validator.ts`](src/agent/mcp/command-validator.ts) | Komut doğrulama - güvenli komut çalıştırma |
+| [`result.ts`](src/agent/mcp/result.ts) | Sonuç tipleri - tip güvenli hata yönetimi |
+| [`types.ts`](src/agent/mcp/types.ts) | MCP tip tanımları - EventType, ToolDefinition, ServerConfig |
+| [`marketplace-types.ts`](src/agent/mcp/marketplace-types.ts) | Marketplace tip tanımları |
+| [`marketplace-service.ts`](src/agent/mcp/marketplace-service.ts) | Marketplace servisi - server keşif ve yükleme |
+| [`marketplace-catalog.json`](src/agent/mcp/marketplace-catalog.json) | Marketplace kataloğu - mevcut MCP sunucuları |
+| [`marketplace-catalog.schema.json`](src/agent/mcp/marketplace-catalog.schema.json) | Katalog JSON şeması |
+
+#### MCP Mimarisi
+
+```typescript
+// MCP Server Yönetimi
+class MCPClientManager {
+  async connect(serverName: string, config: MCPServerConfig): Promise<void>;
+  async disconnect(serverName: string): Promise<void>;
+  async callTool(fullyQualifiedName: string, args?: Record<string, unknown>): Promise<string>;
+  getServerStatus(serverName: string): MCPServerStatusInfo;
+  listServers(): MCPServerStatus[];
+}
+
+// Tool Registry
+class UnifiedToolRegistry {
+  registerTool(tool: UnifiedToolDefinition): void;
+  async executeTool(name: string, args: Record<string, unknown>): Promise<string>;
+  listTools(): UnifiedToolDefinition[];
+}
+
+// Event System
+enum MCPEventType {
+  ServerConnected = 'server:connected',
+  ServerDisconnected = 'server:disconnected',
+  ServerError = 'server:error',
+  ToolCalled = 'tool:called',
+  ToolResult = 'tool:result',
+}
+```
+
+#### Güvenlik Katmanları
+
+1. **Command Validation**: Çalıştırılacak komutlar whitelist ile sınırlandırılır
+2. **Path Extraction**: Dosya yolları doğrulanır ve sanitize edilir
+3. **Argument Validation**: JSON boyut limiti (65KB) ve circular reference kontrolü
+4. **Defense in Depth**: Manager seviyesinde ek validasyon katmanları
+
+#### Marketplace Sistemi
+
+```json
+// marketplace-catalog.json yapısı
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "description": "Dosya sistemi erişimi",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+      "toolCount": 5,
+      "source": "official"
+    }
+  ]
 }
 ```
 
@@ -583,6 +668,27 @@ HTTP/WebSocket sunucusu ve uygulama başlatma.
 | [`bootstrap.ts`](src/gateway/bootstrap.ts) | Başlatma yardımcıları |
 | [`envUtils.ts`](src/gateway/envUtils.ts) | .env dosyası işlemleri |
 | [`userName.ts`](src/gateway/userName.ts) | Kullanıcı adı çözümleme |
+| [`observability.ts`](src/gateway/observability.ts) | Observability API routes - Langfuse proxy |
+
+#### Controllers (`src/gateway/controllers/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`mcpController.ts`](src/gateway/controllers/mcpController.ts) | MCP sunucu yönetimi API endpoint'leri |
+| [`memoryController.ts`](src/gateway/controllers/memoryController.ts) | Bellek yönetimi API controller |
+
+#### Services (`src/gateway/services/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`mcpService.ts`](src/gateway/services/mcpService.ts) | MCP servis katmanı - iş mantığı soyutlama |
+
+#### Jobs (`src/gateway/jobs/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`autonomousWorker.ts`](src/gateway/jobs/autonomousWorker.ts) | Otonom görev arka plan çalıştırıcısı |
+| [`systemTasks.ts`](src/gateway/jobs/systemTasks.ts) | Sistem bakım görevleri |
 
 #### Konfigürasyon (`config.ts`)
 
@@ -609,8 +715,16 @@ interface AppConfig {
   enableNvidiaTools: boolean;
   
   // Embedding
-  embeddingProvider: 'minimax' | 'openai' | 'none';
+  embeddingProvider: 'minimax' | 'openai' | 'voyage' | 'none';
   embeddingModel: string;
+  voyageApiKey?: string;
+  
+  // Channels
+  telegramBotToken?: string;
+  telegramAllowedUsers: string[];
+  discordBotToken?: string;
+  discordAllowedChannels: string[];
+  whatsappEnabled: boolean;
   
   // Security
   allowShellExecution: boolean;
@@ -827,8 +941,8 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com
 |---------|----------|
 | [`ChatWindow.tsx`](src/web/react-app/src/components/chat/ChatWindow.tsx) | Ana sohbet arayüzü ve layout yönetimi |
 | [`MessageStream.tsx`](src/web/react-app/src/components/chat/MessageStream.tsx) | Mesaj akışı (Virtuoso, empty state redesign, quick actions) |
-| [`MessageBubble.tsx`](src/web/react-app/src/components/chat/MessageBubble.tsx) | [NEW] Tekil mesaj bileşeni (Memoize edilmiş, avatar ve animasyon desteği) |
-| [`CodeBlock.tsx`](src/web/react-app/src/components/chat/CodeBlock.tsx) | [NEW] Syntax highlighting (Prism) ve kopyalama desteği sunan kod bloğu |
+| [`MessageBubble.tsx`](src/web/react-app/src/components/chat/MessageBubble.tsx) | Tekil mesaj bileşeni (Memoize edilmiş, avatar ve animasyon desteği) |
+| [`CodeBlock.tsx`](src/web/react-app/src/components/chat/CodeBlock.tsx) | Syntax highlighting (Prism) ve kopyalama desteği sunan kod bloğu |
 | [`MessagePanel.tsx`](src/web/react-app/src/components/chat/MessagePanel.tsx) | Mesaj paneli (scroll container) |
 | [`ConversationListItem.tsx`](src/web/react-app/src/components/chat/ConversationListItem.tsx) | Konuşma listesi öğesi (Relative time desteği) |
 | [`ConversationPanel.tsx`](src/web/react-app/src/components/chat/ConversationPanel.tsx) | Konuşma paneli ve tarih bazlı gruplama |
@@ -847,6 +961,20 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com
 | [`ExportDialog.tsx`](src/web/react-app/src/components/chat/ExportDialog.tsx) | Dışa aktarma dialogu |
 | [`ImageLightbox.tsx`](src/web/react-app/src/components/chat/ImageLightbox.tsx) | Resim görüntüleyici |
 | [`OnboardingDialog.tsx`](src/web/react-app/src/components/chat/OnboardingDialog.tsx) | İlk kurulum |
+| [`ObservabilityDialog.tsx`](src/web/react-app/src/components/chat/ObservabilityDialog.tsx) | Observability paneli - Langfuse trace'leri |
+| [`SidebarMenu.tsx`](src/web/react-app/src/components/chat/SidebarMenu.tsx) | Yan menü bileşeni |
+
+##### MCP Bileşenleri (`src/components/mcp/`)
+
+| Bileşen | Açıklama |
+|---------|----------|
+| [`MCPMarketplace/`](src/web/react-app/src/components/mcp/MCPMarketplace) | MCP Marketplace UI - sunucu keşif, yükleme ve yönetim |
+
+##### Ayarlar Bileşenleri (`src/components/settings/`)
+
+| Bileşen | Açıklama |
+|---------|----------|
+| [`UsageStatsCard.tsx`](src/web/react-app/src/components/settings/UsageStatsCard.tsx) | Kullanım istatistikleri kartı - token ve maliyet |
 
 ##### UI Bileşenleri (`src/components/ui/`)
 
@@ -872,6 +1000,10 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com
 | [`useMemoryGraph.ts`](src/web/react-app/src/hooks/queries/useMemoryGraph.ts) | Bellek grafiği query |
 | [`useSensitivePaths.ts`](src/web/react-app/src/hooks/queries/useSensitivePaths.ts) | Hassas dizinler query |
 | [`useStats.ts`](src/web/react-app/src/hooks/queries/useStats.ts) | İstatistikler query |
+| [`useMCPServers.ts`](src/web/react-app/src/hooks/queries/useMCPServers.ts) | MCP sunucu listesi query |
+| [`useObservability.ts`](src/web/react-app/src/hooks/queries/useObservability.ts) | Observability metrikleri query |
+| [`useUsageStats.ts`](src/web/react-app/src/hooks/queries/useUsageStats.ts) | Kullanım istatistikleri query |
+| [`index.ts`](src/web/react-app/src/hooks/queries/index.ts) | Query hooks barrel export |
 
 ##### Mutation Hooks (`src/hooks/mutations/`)
 
@@ -885,6 +1017,7 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com
 | [`useUpdateSettings.ts`](src/web/react-app/src/hooks/mutations/useUpdateSettings.ts) | Ayarlar güncelleme |
 | [`useAddSensitivePath.ts`](src/web/react-app/src/hooks/mutations/useAddSensitivePath.ts) | Hassas dizin ekleme |
 | [`useRemoveSensitivePath.ts`](src/web/react-app/src/hooks/mutations/useRemoveSensitivePath.ts) | Hassas dizin silme |
+| [`index.ts`](src/web/react-app/src/hooks/mutations/index.ts) | Mutation hooks barrel export |
 
 ##### Servis Katmanı (`src/services/`)
 
@@ -921,6 +1054,32 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com
 |-------|----------|
 | [`datetime.ts`](src/utils/datetime.ts) | Tarih/saat yardımcıları |
 | [`logger.ts`](src/utils/logger.ts) | Yapılandırılmış loglama |
+| [`costCalculator.ts`](src/utils/costCalculator.ts) | Token maliyet hesaplama - provider/model bazlı fiyatlandırma |
+
+#### `costCalculator.ts` - Maliyet Hesaplama
+
+```typescript
+// Provider bazlı fiyatlandırma ($/1K tokens)
+const PRICING_MAP = {
+  openai: {
+    'gpt-4o': { promptPer1K: 0.0025, completionPer1K: 0.01 },
+    'gpt-4o-mini': { promptPer1K: 0.00015, completionPer1K: 0.0006 },
+    // ...diğer modeller
+  },
+  anthropic: {
+    'claude-sonnet-4-20250514': { promptPer1K: 0.003, completionPer1K: 0.015 },
+    // ...diğer modeller
+  },
+  // ...diğer provider'lar
+};
+
+export function calculateCost(
+  provider: string,
+  model: string,
+  promptTokens: number,
+  completionTokens: number,
+): number;
+```
 
 #### `logger.ts` - Loglama Sistemi
 
@@ -950,6 +1109,7 @@ runWithTraceId(traceId, () => {
 | Dosya | Açıklama |
 |-------|----------|
 | [`maintenance.ts`](src/cli/maintenance.ts) | Bellek grafiği bakım aracı |
+| [`index.ts`](src/cli/index.ts) | CLI giriş noktası |
 
 ```bash
 # Kullanım
@@ -958,6 +1118,15 @@ npx tsx src/cli/maintenance.ts
 # İşlevler
 # 1. Missing graph relations backfill
 # 2. Relationship decay (Ebbinghaus)
+
+# GraphRAG CLI Komutları
+npm run graphrag:status         # GraphRAG durum kontrolü
+npm run graphrag:advance        # GraphRAG faz ilerletme
+npm run graphrag:set-phase      # GraphRAG faz ayarlama
+npm run graphrag:readiness      # GraphRAG hazırlık kontrolü
+npm run graphrag:go-full        # GraphRAG tam aktif moda geçme
+npm run graphrag:emergency-rollback  # Acil geri alma
+npm run graphrag:metrics        # GraphRAG metrikleri
 ```
 
 ---
@@ -973,10 +1142,50 @@ npx tsx src/cli/maintenance.ts
 | [`memory/retrievalEdgeCases.test.ts`](tests/memory/retrievalEdgeCases.test.ts) | Retrieval edge case testleri |
 | [`memory/reconsolidationPilot.test.ts`](tests/memory/reconsolidationPilot.test.ts) | Reconsolidation pilot testleri |
 | [`memory/retrievalOrchestrator.observability.test.ts`](tests/memory/retrievalOrchestrator.observability.test.ts) | Gözlemlenebilirlik testleri |
+| [`memory/retrievalIntegration.test.ts`](tests/memory/retrievalIntegration.test.ts) | Retrieval entegrasyon testleri |
 | [`benchmark/retrievalBenchmark.test.ts`](tests/benchmark/retrievalBenchmark.test.ts) | Retrieval benchmark testleri |
 | [`benchmark/fixtures/benchmarkDataset.ts`](tests/benchmark/fixtures/benchmarkDataset.ts) | Benchmark veri seti |
 | [`benchmark/utils/metrics.ts`](tests/benchmark/utils/metrics.ts) | Metrik hesaplama |
 | [`benchmark/utils/baselines.ts`](tests/benchmark/utils/baselines.ts) | Baseline karşılaştırmaları |
+
+#### Agent/MCP Testleri (`tests/agent/mcp/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| MCP modül testleri | MCP sunucu bağlantı, araç çağrısı ve güvenlik testleri |
+
+#### Frontend Testleri (`tests/frontend/`)
+
+| Klasör | Açıklama |
+|--------|----------|
+| [`ui/`](tests/frontend/ui) | UI bileşen testleri - components ve responsive |
+| [`integration/`](tests/frontend/integration) | Entegrasyon testleri |
+| [`setup/`](tests/frontend/setup) | Test setup yardımcıları |
+
+#### E2E Testleri (`tests/e2e/`)
+
+| Dosya/Klasör | Açıklama |
+|--------------|----------|
+| [`playwright.config.ts`](tests/e2e/playwright.config.ts) | Playwright konfigürasyonu |
+| [`specs/`](tests/e2e/specs) | E2E test senaryoları |
+| [`fixtures/`](tests/e2e/fixtures) | Test fixture'ları |
+| [`helpers/`](tests/e2e/helpers) | Test yardımcıları |
+| [`reports/`](tests/e2e/reports) | Test raporları |
+| [`globalSetup.ts`](tests/e2e/globalSetup.ts) | Global test setup |
+| [`globalTeardown.ts`](tests/e2e/globalTeardown.ts) | Global test teardown |
+
+```bash
+# Test komutları
+npm test                                    # Tüm testler
+npm run test:frontend                       # Frontend testleri
+npm run test:ui                             # UI bileşen testleri
+npm run test:integration                    # Entegrasyon testleri
+npm run test:mcp:e2e                        # MCP E2E testleri (Playwright)
+npm run test:mcp:e2e:ui                     # MCP E2E testleri UI modu
+npm run test:mcp:e2e:headed                 # MCP E2E headed browser
+npm run test:mcp:e2e:report                 # MCP E2E rapor görüntüleme
+npm run test:mcp:e2e:debug                  # MCP E2E debug modu
+```
 
 #### GraphRAG Testleri (`tests/memory/graphRAG/`)
 
@@ -1115,7 +1324,66 @@ erDiagram
         text value
         datetime updated_at
     }
-    
+
+    MCP_SERVERS {
+        string name PK
+        string description
+        string command
+        text args
+        text env
+        string cwd
+        int timeout
+        string status
+        string version
+        string source
+        string source_url
+        datetime installed_at
+        datetime last_activated
+        text last_error
+        int tool_count
+        text metadata
+    }
+
+    TOKEN_USAGE {
+        int id PK
+        string provider
+        string model
+        int prompt_tokens
+        int completion_tokens
+        int total_tokens
+        float estimated_cost_usd
+        datetime created_at
+    }
+
+    GRAPH_TRAVERSAL_CACHE {
+        string key PK
+        text result
+        int expires_at
+    }
+
+    GRAPH_COMMUNITIES {
+        int id PK
+        string name
+        text description
+        int node_count
+        float modularity
+        datetime detected_at
+    }
+
+    GRAPH_COMMUNITY_MEMBERS {
+        int community_id FK
+        int node_id
+        datetime created_at
+    }
+
+    GRAPH_COMMUNITY_SUMMARIES {
+        int community_id PK
+        text summary
+        string summary_model
+        int tokens_used
+        datetime generated_at
+    }
+
     CONVERSATIONS ||--o{ MESSAGES : contains
     CONVERSATIONS ||--o{ MEMORIES : has
     MEMORIES ||--o{ MEMORY_EMBEDDINGS : embedded_as
@@ -1141,8 +1409,13 @@ erDiagram
 | Vectors | sqlite-vec | 0.1.7+ | Vektör depolama |
 | AI SDK | @anthropic-ai/sdk | 0.39+ | Anthropic API |
 | AI SDK | openai | 4.77+ | OpenAI API |
-| AI SDK | openai | 4.77+ | OpenAI API |
 | AI Inference | @azure-rest/ai-inference | 1.0+ | Azure AI Inference |
+| MCP SDK | @modelcontextprotocol/sdk | 1.29+ | Model Context Protocol |
+| Observability | @langfuse/openai | 5.1+ | Langfuse OpenAI integration |
+| Observability | @langfuse/otel | 5.1+ | Langfuse OpenTelemetry |
+| Observability | @langfuse/tracing | 5.1+ | Langfuse tracing |
+| Observability | @opentelemetry/api | 1.9+ | OpenTelemetry API |
+| Observability | @opentelemetry/sdk-node | 0.214+ | OpenTelemetry SDK |
 | Embedding | @xenova/transformers | 2.17+ | ONNX embedding |
 | NLP | chrono-node | 2.9+ | Tarih ayrıştırma |
 | Validation | zod | 3.25+ | Runtime validation |
@@ -1155,6 +1428,7 @@ erDiagram
 | Utility | uuid | 11.1+ | UUID oluşturma |
 | Utility | validator | 13.15+ | String validation |
 | Config | dotenv | 16.4+ | Ortam değişkenleri |
+| CORS | cors | 2.8+ | Cross-origin resource sharing |
 
 ### Frontend
 
@@ -1173,6 +1447,23 @@ erDiagram
 | Animation | framer-motion | 12.x | UI animasyonları |
 | Virtualization | react-virtuoso | 4.x | Sanal liste render |
 | Visualization | d3 | 7.x | Bellek grafiği görselleştirme |
+
+### Test & Development
+
+| Kategori | Teknoloji | Versiyon | Amaç |
+|----------|-----------|----------|------|
+| Testing Framework | Jest | 29.7+ | Unit ve integration testler |
+| E2E Testing | Playwright | 1.59+ | End-to-end testler |
+| React Testing | @testing-library/react | 16.3+ | React bileşen testleri |
+| User Events | @testing-library/user-event | 14.6+ | Kullanıcı etkileşim simülasyonu |
+| Mocking | msw | 2.12+ | API mocking |
+| DOM | jsdom | 29+ | Headless browser environment |
+| Puppeteer | puppeteer | 24.40+ | Browser automation |
+| TypeScript | ts-jest | 29.2+ | Jest TypeScript integration |
+| Dev Server | concurrently | 8.2+ | Parallel process yönetimi |
+| Env | cross-env | 10.1+ | Cross-platform env variables |
+| File Ops | shx | 0.3+ | Shell file operations |
+| Wait | wait-on | 9.0+ | Server readiness check |
 
 ---
 
@@ -1205,6 +1496,23 @@ erDiagram
 | `/api/feedback` | POST | Kullanıcı geri bildirimi kaydet |
 | `/api/feedback/:conversationId` | GET | Konuşma geri bildirimlerini getir |
 | `/api/onboarding/process` | POST | Onboarding biyografi işleme |
+| `/api/mcp/servers` | GET | MCP sunucu listesi |
+| `/api/mcp/servers` | POST | Yeni MCP sunucu ekle |
+| `/api/mcp/servers/:name` | GET | MCP sunucu detayı |
+| `/api/mcp/servers/:name` | PUT | MCP sunucu güncelle |
+| `/api/mcp/servers/:name` | DELETE | MCP sunucu sil |
+| `/api/mcp/servers/:name/activate` | POST | MCP sunucu aktifleştir |
+| `/api/mcp/servers/:name/deactivate` | POST | MCP sunucu devre dışı bırak |
+| `/api/mcp/tools` | GET | Tüm MCP araçları listele |
+| `/api/mcp/marketplace` | GET | Marketplace kataloğu |
+| `/api/mcp/marketplace/:name/install` | POST | Marketplace'den sunucu yükle |
+| `/api/observability/summary` | GET | Observability özet metrikleri |
+| `/api/observability/traces` | GET | Recent trace'ler |
+| `/api/observability/traces/:traceId` | GET | Trace detayı |
+| `/api/observability/providers` | GET | Provider bazlı istatistikler |
+| `/api/observability/errors` | GET | Hata istatistikleri |
+| `/api/usage/stats` | GET | Token usage istatistikleri |
+| `/api/usage/daily` | GET | Günlük kullanım raporu |
 
 ---
 
@@ -1259,6 +1567,50 @@ npm install
 
 # Geliştirme sunucusu (backend + frontend)
 npm run dev
+
+# Sadece backend
+npm run dev:backend-only
+
+# Production build
+npm run build
+
+# Production start
+npm run start
+```
+
+### GraphRAG Yönetimi
+
+```bash
+# GraphRAG durum kontrolü
+npm run graphrag:status
+
+# GraphRAG hazırlık kontrolü
+npm run graphrag:readiness
+
+# GraphRAG tam aktif moda geçme
+npm run graphrag:go-full
+
+# Acil geri alma
+npm run graphrag:emergency-rollback
+```
+
+### Test Komutları
+
+```bash
+# Tüm testler
+npm test
+
+# Frontend testleri
+npm run test:frontend
+
+# UI bileşen testleri
+npm run test:ui
+
+# MCP E2E testleri
+npm run test:mcp:e2e
+
+# MCP E2E UI modu
+npm run test:mcp:e2e:ui
 ```
 
 ### Mimari Kararlar
@@ -1267,7 +1619,13 @@ npm run dev
 2. **Worker Thread Isolation**: Embedding işlemleri ana thread'i bloklamaz.
 3. **Dual-Process Retrieval**: System1 (hızlı) ve System2 (derin) bellek getirme modları.
 4. **GraphRAG Integration**: Graph-aware retrieval ile bellek getirme iyileştirildi.
+5. **MCP Protocol**: Standart Model Context Protocol ile genişletilebilir araç ekosistemi.
+6. **Observability First**: OpenTelemetry tabanlı trace, metric ve cost tracking.
+7. **Multi-Channel Architecture**: Telegram, Discord, WhatsApp kanal desteği.
+8. **Cost Calculator**: Provider/model bazlı gerçek zamanlı maliyet hesaplama.
+9. **Voyage AI Embeddings**: Yeni embedding provider desteği.
+10. **Barrel Exports**: Modüler export yapısı ile daha iyi developer experience.
 
 ---
 
-> Bu doküman PenceAI projesinin tamamını anlamak için tek bir referans noktası olarak hazırlanmıştır. Son güncelleme: Nisan 2026.
+> Bu doküman PenceAI projesinin tamamını anlamak için tek bir referans noktası olarak hazırlanmıştır. Son güncelleme: 11 Nisan 2026.

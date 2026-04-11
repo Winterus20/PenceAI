@@ -37,10 +37,15 @@ export interface RollbackEvent {
  * GraphRAG Rollback Manager.
  */
 export class GraphRAGRollbackManager {
-  private static rollbackHistory: RollbackEvent[] = [];
-  private static lastRollbackTime: Date | null = null;
-  private static cooldownMs: number = 30 * 60 * 1000; // 30 dakika cooldown
-  private static cooldownUntilTimestamp: number = 0;
+  private rollbackHistory: RollbackEvent[] = [];
+  private lastRollbackTime: Date | null = null;
+  private cooldownMs: number = 30 * 60 * 1000; // 30 dakika cooldown
+  private cooldownUntilTimestamp: number = 0;
+  private configManager: typeof GraphRAGConfigManager;
+
+  constructor(configManager?: typeof GraphRAGConfigManager) {
+    this.configManager = configManager ?? GraphRAGConfigManager;
+  }
 
   /**
    * Acil geri alma — FULL → PARTIAL.
@@ -48,11 +53,11 @@ export class GraphRAGRollbackManager {
    * @param reason - Rollback nedeni
    * @param triggeredBy - Kimin tetiklediği
    */
-  static async emergencyRollback(
+  async emergencyRollback(
     reason: RollbackReason = RollbackReason.UNKNOWN,
     triggeredBy: string = 'system',
   ): Promise<void> {
-    const currentPhase = GraphRAGConfigManager.getCurrentPhase();
+    const currentPhase = this.configManager.getCurrentPhase();
 
     if (currentPhase === GraphRAGRolloutPhase.OFF) {
       logger.warn('[GraphRAGRollback] Already at OFF phase, no rollback needed');
@@ -71,7 +76,7 @@ export class GraphRAGRollbackManager {
     this.recordRollbackEvent(currentPhase, targetPhase, reason, triggeredBy);
 
     // Phase'i değiştir
-    GraphRAGConfigManager.setRolloutPhase(targetPhase);
+    this.configManager.setRolloutPhase(targetPhase);
 
     // Cooldown başlat
     this.startCooldown();
@@ -92,12 +97,12 @@ export class GraphRAGRollbackManager {
    * @param reason - Rollback nedeni
    * @param triggeredBy - Kimin tetiklediği
    */
-  static async gradualRollback(
+  async gradualRollback(
     steps: number = 1,
     reason: RollbackReason = RollbackReason.UNKNOWN,
     triggeredBy: string = 'system',
   ): Promise<void> {
-    const current = GraphRAGConfigManager.getCurrentPhase();
+    const current = this.configManager.getCurrentPhase();
     const target = Math.max(GraphRAGRolloutPhase.OFF, current - steps) as GraphRAGRolloutPhase;
 
     if (target === current) {
@@ -115,7 +120,7 @@ export class GraphRAGRollbackManager {
     this.recordRollbackEvent(current, target, reason, triggeredBy);
 
     // Phase'i değiştir
-    GraphRAGConfigManager.setRolloutPhase(target);
+    this.configManager.setRolloutPhase(target);
 
     // Cooldown başlat
     this.startCooldown();
@@ -137,12 +142,12 @@ export class GraphRAGRollbackManager {
    * @param reason - Rollback nedeni
    * @param triggeredBy - Kimin tetiklediği
    */
-  static async rollbackToPhase(
+  async rollbackToPhase(
     targetPhase: GraphRAGRolloutPhase,
     reason: RollbackReason = RollbackReason.UNKNOWN,
     triggeredBy: string = 'system',
   ): Promise<void> {
-    const current = GraphRAGConfigManager.getCurrentPhase();
+    const current = this.configManager.getCurrentPhase();
 
     if (targetPhase === current) {
       logger.warn('[GraphRAGRollback] Already at target phase, no rollback needed');
@@ -164,7 +169,7 @@ export class GraphRAGRollbackManager {
     this.recordRollbackEvent(current, targetPhase, reason, triggeredBy);
 
     // Phase'i değiştir
-    GraphRAGConfigManager.setRolloutPhase(targetPhase);
+    this.configManager.setRolloutPhase(targetPhase);
 
     // Cooldown başlat
     this.startCooldown();
@@ -181,28 +186,28 @@ export class GraphRAGRollbackManager {
   /**
    * Son rollback zamanını getir.
    */
-  static getLastRollbackTime(): Date | null {
+  getLastRollbackTime(): Date | null {
     return this.lastRollbackTime;
   }
 
   /**
    * Rollback geçmişini getir.
    */
-  static getRollbackHistory(): RollbackEvent[] {
+  getRollbackHistory(): RollbackEvent[] {
     return [...this.rollbackHistory];
   }
 
   /**
    * Cooldown durumunu getir.
    */
-  static isOnCooldown(): boolean {
+  isOnCooldown(): boolean {
     return Date.now() < this.cooldownUntilTimestamp;
   }
 
   /**
    * Cooldown'u sıfırla (manuel override için).
    */
-  static resetCooldown(): void {
+  resetCooldown(): void {
     this.cooldownUntilTimestamp = 0;
     logger.info('[GraphRAGRollback] Cooldown reset');
   }
@@ -210,7 +215,7 @@ export class GraphRAGRollbackManager {
   /**
    * Rollback event'ini kaydet.
    */
-  private static recordRollbackEvent(
+  private recordRollbackEvent(
     fromPhase: GraphRAGRolloutPhase,
     toPhase: GraphRAGRolloutPhase,
     reason: RollbackReason,
@@ -236,7 +241,7 @@ export class GraphRAGRollbackManager {
   /**
    * Cooldown'u başlat.
    */
-  private static startCooldown(): void {
+  private startCooldown(): void {
     this.cooldownUntilTimestamp = Date.now() + this.cooldownMs;
     logger.debug(`[GraphRAGRollback] Cooldown started for ${this.cooldownMs / 1000}s`);
   }
@@ -244,14 +249,20 @@ export class GraphRAGRollbackManager {
   /**
    * Cooldown süresini getir (ms).
    */
-  static getCooldownMs(): number {
+  getCooldownMs(): number {
     return this.cooldownMs;
   }
 
   /**
    * Cooldown süresini ayarla (ms).
    */
-  static setCooldownMs(ms: number): void {
+  setCooldownMs(ms: number): void {
     this.cooldownMs = ms;
   }
 }
+
+/**
+ * Backward compatibility: Default instance.
+ * Kullanım: `import { defaultRollbackManager } from './rollback.js';`
+ */
+export const defaultRollbackManager = new GraphRAGRollbackManager();

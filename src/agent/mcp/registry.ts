@@ -20,6 +20,33 @@ import type { UnifiedToolDefinition, UnifiedToolExecutor } from './types.js';
 import { logger } from '../../utils/logger.js';
 
 /**
+ * JSON schema properties nesnesinden tüm description alanlarını recursive olarak kaldırır.
+ * LLM token optimizasyonu icin kullanilir.
+ */
+function stripDescriptions(schema: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!schema || typeof schema !== 'object') return {};
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === 'description') continue;
+    if (key === 'properties' && typeof value === 'object' && value !== null) {
+      const strippedProps: Record<string, unknown> = {};
+      for (const [propKey, propValue] of Object.entries(value as Record<string, unknown>)) {
+        if (typeof propValue === 'object' && propValue !== null) {
+          strippedProps[propKey] = stripDescriptions(propValue as Record<string, unknown>);
+        } else {
+          strippedProps[propKey] = propValue;
+        }
+      }
+      result[key] = strippedProps;
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
  * UnifiedToolRegistry — Built-in ve MCP araçlarını tek registry'de birleştirir.
  */
 export class UnifiedToolRegistry {
@@ -90,7 +117,9 @@ export class UnifiedToolRegistry {
         definitions.push({
           name: tool.name,
           description: tool.description,
+          llmDescription: tool.llmDescription,
           parameters: tool.parameters,
+          llmParameters: tool.llmParameters,
         });
       }
     }
