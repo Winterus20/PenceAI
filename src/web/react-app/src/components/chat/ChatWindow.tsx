@@ -35,10 +35,18 @@ export const ChatWindow = () => {
     sendFeedback,
     hideToast,
     updateConversationTitle,
+    setMessageMetrics,
+    messageMetrics,
   } = useAgentStore();
 
   // WebSocket
-  const { sendMessage, regenerateLastResponse, setThinkingEnabled, respondToConfirmation } = useAgentSocket();
+  const { sendMessage, regenerateLastResponse, setThinkingEnabled, respondToConfirmation } = useAgentSocket((metrics) => {
+    console.log('[Metrics] Received metrics event:', JSON.stringify(metrics, null, 2).substring(0, 500));
+    if (activeConversationId) {
+      setMessageMetrics({ conversationId: activeConversationId, metrics });
+      console.log('[Metrics] Stored metrics for conversation:', activeConversationId);
+    }
+  });
 
   // Custom Hooks
   const {
@@ -332,6 +340,7 @@ export const ChatWindow = () => {
               onQuickAction={handleQuickAction}
               onEditMessage={handleEditMessage}
               onSendFeedback={(messageId, type) => sendFeedback(messageId, activeConversationId || '', type)}
+              messageMetrics={messageMetrics}
             />
 
             <div

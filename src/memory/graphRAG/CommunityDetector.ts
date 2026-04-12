@@ -641,6 +641,10 @@ export class CommunityDetector {
       if (currentLayer.length === 0) break;
 
       const placeholders = currentLayer.map(() => '?').join(',');
+      if (!placeholders) {
+        currentLayer = [];
+        break;
+      }
       const neighbors = this.db.prepare(`
         SELECT DISTINCT
           CASE

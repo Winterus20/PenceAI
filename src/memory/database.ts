@@ -272,6 +272,21 @@ export class PenceDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_token_usage_created_at ON token_usage(created_at);
       CREATE INDEX IF NOT EXISTS idx_token_usage_provider ON token_usage(provider);
+
+      -- Metrics tablosu (yerel observability)
+      CREATE TABLE IF NOT EXISTS metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT NOT NULL,
+        message_id TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        performance_json TEXT NOT NULL,
+        cost_json TEXT NOT NULL,
+        context_json TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_metrics_conversation ON metrics(conversation_id);
+      CREATE INDEX IF NOT EXISTS idx_metrics_timestamp ON metrics(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_metrics_message ON metrics(message_id);
     `);
 
     this.migrate();
@@ -522,6 +537,50 @@ export class PenceDatabase {
       }
     }
 
+    // Embedding Cache tablosu — embedding_cache (yoksa oluştur)
+    const embeddingCacheTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='embedding_cache'"
+    ).get();
+    if (!embeddingCacheTable) {
+      logger.info('[Database] 🚀 Migrating: Creating embedding_cache table');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS embedding_cache (
+            query_hash TEXT PRIMARY KEY,
+            embedding BLOB NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+        logger.info('[Database] ✅ Embedding cache table created');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (embedding_cache):');
+      }
+    }
+
+    // Performance Index'leri
+    logger.info('[Database] 🚀 Migrating: Creating performance indexes');
+    try {
+      this.db.exec(`
+        -- memory_relations için composite index'ler
+        CREATE INDEX IF NOT EXISTS idx_relations_source_confidence
+        ON memory_relations(source_memory_id, confidence DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_relations_target_confidence
+        ON memory_relations(target_memory_id, confidence DESC);
+
+        -- messages için composite index
+        CREATE INDEX IF NOT EXISTS idx_messages_conversation_time
+        ON messages(conversation_id, created_at DESC);
+
+        -- memories için composite index
+        CREATE INDEX IF NOT EXISTS idx_memories_archived_category
+        ON memories(is_archived, category, updated_at DESC);
+      `);
+      logger.info('[Database] ✅ Performance indexes created');
+    } catch (err) {
+      logger.error({ err: err }, '[Database] ❌ Migration failed (indexes):');
+    }
+
     // messages tablosuna attachments kolonu ekle (yoksa)
     if (msgTableInfo.length > 0 && !msgTableInfo.some((col: any) => col.name === 'attachments')) {
       logger.info('[Database] 🚀 Migrating: Adding attachments column to messages table');
@@ -770,8 +829,7 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ GraphRAG Faz 2 migration failed (graph_community_summaries):');
       }
     }
-
-    }
+  }
 
   /**
    * Embedding boyut tutarlılığını doğrular.

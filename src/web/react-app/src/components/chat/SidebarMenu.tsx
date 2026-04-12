@@ -13,9 +13,9 @@ interface SidebarMenuProps {
 const MENU_ITEMS = [
   { id: 'settings', label: 'Ayarlar', icon: Settings, color: 'text-purple-400', bg: 'bg-purple-500/10 hover:bg-purple-500/20' },
   { id: 'memory', label: 'Bellek', icon: BookOpen, color: 'text-blue-400', bg: 'bg-blue-500/10 hover:bg-blue-500/20' },
+  { id: 'metrics', label: 'Metrics', icon: BarChart3, color: 'text-cyan-400', bg: 'bg-cyan-500/10 hover:bg-cyan-500/20' },
   { id: 'marketplace', label: 'Marketplace', icon: Store, color: 'text-green-400', bg: 'bg-green-500/10 hover:bg-green-500/20' },
   { id: 'channels', label: 'Kanallar', icon: Radio, color: 'text-orange-400', bg: 'bg-orange-500/10 hover:bg-orange-500/20' },
-  { id: 'usage', label: 'Kullanım', icon: BarChart3, color: 'text-pink-400', bg: 'bg-pink-500/10 hover:bg-pink-500/20' },
 ] as const;
 
 export function SidebarMenu({ setActiveView }: SidebarMenuProps) {
@@ -30,6 +30,10 @@ export function SidebarMenu({ setActiveView }: SidebarMenuProps) {
     }
     if (id === 'marketplace') {
       setActiveView('mcp-marketplace');
+      return;
+    }
+    if (id === 'metrics') {
+      setActiveView('metrics');
       return;
     }
     setActiveDialog(id);

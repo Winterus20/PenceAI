@@ -23,6 +23,7 @@ import { logger } from '../../utils/logger.js';
 import type { TaskQueue } from '../../autonomous/queue.js';
 import { MemoryGraphManager } from '../graph.js';
 import { MemoryRetrievalOrchestrator } from '../retrievalOrchestrator.js';
+import type { LLMProvider } from '../../llm/provider.js';
 import { GraphRAGEngine } from '../graphRAG/GraphRAGEngine.js';
 import {
   type MemoryRow,
@@ -166,6 +167,16 @@ export class MemoryManager {
   setGraphRAGEngine(engine: GraphRAGEngine): void {
     this.graphRAGEngine = engine;
     logger.info('[Memory] GraphRAG engine connected');
+  }
+
+  /**
+   * Confidence threshold'ı yapılandır (Agent runtime tarafından çağrılır).
+   */
+  setConfidenceThreshold(threshold?: number): void {
+    const config = getConfig();
+    const finalThreshold = threshold ?? config.agenticRAGDecisionConfidence ?? 0.6;
+    this.retrievalOrchestrator.setConfidenceThreshold(finalThreshold);
+    logger.info(`[Memory] Confidence threshold configured (${finalThreshold})`);
   }
 
   /**
@@ -486,6 +497,35 @@ export class MemoryManager {
   private recordRetrievalDebug(flow: 'hybridSearch' | 'hybridSearchMessages' | 'graphAwareSearch' | 'promptContextBundle', payload: unknown): void {
     // RetrievalService'e delege edilecek - burada sadece orchestrator için kullanılıyor
     logger.debug({ flow, payload }, '[Memory] Retrieval debug recorded');
+
+    // Agentic RAG özetini info seviyesinde logla (gözle görülebilir olsun)
+    if (flow === 'promptContextBundle' && typeof payload === 'object' && payload !== null) {
+      const p = payload as Record<string, unknown>;
+      const agentic = p.agenticRAG as Record<string, unknown> | undefined;
+      if (agentic) {
+        const decision = agentic.decision as Record<string, unknown> | null;
+        const critique = agentic.critique as Record<string, unknown> | null;
+        const multiHop = agentic.multiHop as Record<string, unknown> | null;
+        const timings = agentic.timings as Record<string, number> | undefined;
+
+        const parts: string[] = [`[Agentic RAG] enabled=${agentic.enabled}`];
+        if (decision) {
+          parts.push(`decision=${decision.needsRetrieval ? 'RETRIEVE' : 'NO_RETRIEVE'} (conf=${Number(decision.confidence).toFixed(2)})`);
+        }
+        if (critique) {
+          parts.push(`critique=kept:${critique.keptCount}/filtered:${critique.filteredCount} (completeness=${Number(critique.overallCompleteness).toFixed(2)})`);
+        }
+        if (multiHop) {
+          parts.push(`multiHop=${multiHop.hops ? (multiHop.hops as unknown[]).length : 0} hops, total=${multiHop.totalMemories} memories, calls=${multiHop.totalRetrievalCalls}`);
+        }
+        if (timings && Object.keys(timings).length > 0) {
+          const timingStr = Object.entries(timings).map(([k, v]) => `${k}=${v}ms`).join(', ');
+          parts.push(`⏱️ ${timingStr}`);
+        }
+
+        logger.info({ msg: parts.join(' | ') });
+      }
+    }
   }
 
   private prioritizeConversationMemories(

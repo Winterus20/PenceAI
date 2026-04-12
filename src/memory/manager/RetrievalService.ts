@@ -11,6 +11,7 @@
  */
 
 import type Database from 'better-sqlite3';
+import crypto from 'crypto';
 import { getConfig } from '../../gateway/config.js';
 import { logger } from '../../utils/logger.js';
 import { computeReviewPriority } from '../contextUtils.js';
@@ -100,9 +101,33 @@ export class RetrievalService {
     if (!this.deps.embeddingProvider) return [];
 
     try {
-      // Sorguyu embed et
-      const [queryEmbedding] = await this.deps.embeddingProvider.embed([query]);
-      const queryArrayBuffer = Buffer.from(new Float32Array(queryEmbedding).buffer);
+      // Embedding cache kontrolü
+      const queryHash = crypto.createHash('md5').update(query).digest('hex');
+      let queryEmbedding: number[] | null = null;
+      
+      const cached = this.deps.db.prepare(
+        'SELECT embedding FROM embedding_cache WHERE query_hash = ? AND created_at > datetime(\'now\', \'-1 hour\')'
+      ).get(queryHash) as { embedding: Buffer } | undefined;
+      
+      if (cached) {
+        // Cache hit - embedding'i cache'den al
+        queryEmbedding = Array.from(new Float32Array(cached.embedding.buffer.slice(cached.embedding.byteOffset, cached.embedding.byteOffset + cached.embedding.byteLength)));
+      } else {
+        // Cache miss - embed et
+        [queryEmbedding] = await this.deps.embeddingProvider.embed([query]);
+        
+        // Cache'e kaydet
+        try {
+          this.deps.db.prepare(
+            'INSERT OR REPLACE INTO embedding_cache (query_hash, embedding) VALUES (?, ?)'
+          ).run(queryHash, Buffer.from(new Float32Array(queryEmbedding).buffer));
+        } catch (err) {
+          // Cache hatası logla ama devam et
+          logger.warn({ msg: '[EmbeddingCache] Failed to save to cache', err });
+        }
+      }
+      
+      const queryArrayBuffer = Buffer.from(new Float32Array(queryEmbedding!).buffer);
 
       const threshold = getConfig().semanticSearchThreshold;
       const results = this.deps.db.prepare(`
@@ -293,7 +318,7 @@ export class RetrievalService {
    * Stability Reinforcement: Context'e giren tüm aktif bellekler için
    * updateStabilityOnAccess çağrılır — Ebbinghaus spaced repetition.
    */
-  async graphAwareSearch(query: string, limit: number = 10, maxDepth: number = 2): Promise<GraphAwareSearchResult> {
+  async graphAwareSearch(query: string, limit: number = 10, maxDepth: number = 1): Promise<GraphAwareSearchResult> {
     const QUALITY_MIN_RESULTS = 3;
     const ARCHIVAL_LIMIT = 5;
 
@@ -315,7 +340,7 @@ export class RetrievalService {
     const neighborMemories: MemoryRow[] = [];
     const expandedMemoryIds = new Set<number>();
 
-    let currentWave = directResults.slice(0, 5);
+    let currentWave = directResults.slice(0, 3); // 5 → 3 (context patlamasını önle)
     for (let depth = 0; depth < maxDepth; depth++) {
       const nextWave: MemoryRow[] = [];
       // OPT F-01: Batch komşu sorgusu — N+1 yerine tek sorgu
@@ -332,7 +357,7 @@ export class RetrievalService {
           }
         }
       }
-      currentWave = nextWave.slice(0, 5); // Context patlamasını önle
+      currentWave = nextWave.slice(0, 3); // Context patlamasını önle
     }
 
     // 3. İlişki güçlendirme artık Ebbinghaus worker'a bırakılıyor (adım 5).

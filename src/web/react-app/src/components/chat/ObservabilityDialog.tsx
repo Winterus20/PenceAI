@@ -1,7 +1,7 @@
 /**
  * Observability Dialog
  *
- * Langfuse observability metriklerini ve trace'lerini gösterir.
+ * Yerel observability metriklerini ve trace'lerini gösterir.
  * İki tab: Özet ve Detay
  */
 
@@ -146,7 +146,7 @@ const SummaryTab = () => {
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Activity className="mb-4 h-12 w-12 text-surface-subtle" />
         <p className="text-sm text-surface-subtle">
-          Observability verileri yüklenemedi. Langfuse ayarlarını kontrol edin.
+          Henüz veri yok.
         </p>
       </div>
     );
@@ -272,17 +272,17 @@ const DetailTab = () => {
           </h3>
           <div className="grid grid-cols-3 gap-4">
             <div className="text-center">
-              <p className="text-2xl font-semibold text-foreground">{errorStats.errorStats.totalTraces}</p>
+              <p className="text-2xl font-semibold text-foreground">{errorStats.totalTraces}</p>
               <p className="text-xs text-surface-subtle">Toplam</p>
             </div>
             <div className="text-center">
               <p className="text-2xl font-semibold text-green-400">
-                {((1 - errorStats.errorStats.errorRate / 100) * 100).toFixed(1)}%
+                {((1 - errorStats.errorRate / 100) * 100).toFixed(1)}%
               </p>
               <p className="text-xs text-surface-subtle">Başarı Oranı</p>
             </div>
             <div className="text-center">
-              <p className="text-2xl font-semibold text-red-400">{errorStats.errorStats.errorTraces}</p>
+              <p className="text-2xl font-semibold text-red-400">{errorStats.errorTraces}</p>
               <p className="text-xs text-surface-subtle">Hata</p>
             </div>
           </div>

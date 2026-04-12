@@ -169,6 +169,15 @@ export interface RetrievalOrchestratorDeps {
     graphRAGEngine?: import('../graphRAG/index.js').GraphRAGEngine | (() => import('../graphRAG/index.js').GraphRAGEngine | undefined);
     // BehaviorDiscoveryShadow (optional, for shadow comparison)
     behaviorDiscoveryShadow?: import('../graphRAG/index.js').BehaviorDiscoveryShadow;
+
+    // Agentic RAG components (optional — if not provided, classic pipeline runs)
+    agenticRAGEnabled?: boolean;
+    agenticRAGLLMProvider?: import('../../llm/provider.js').LLMProvider;
+    agenticRAGMaxHops?: number;
+    agenticRAGDecisionConfidence?: number;
+    agenticRAGCritiqueRelevanceFloor?: number;
+    agenticRAGCritiqueCompletenessFloor?: number;
+    agenticRAGMaxRegenerations?: number;
 }
 
 export interface RetrievalIntentSignals {
@@ -180,6 +189,8 @@ export interface RetrievalIntentSignals {
     hasRecentContext: boolean;
     hasAnalyticalCue: boolean;
     hasExploratoryCue: boolean;
+    hasPersonalReference: boolean;      // YENİ: Kişisel referans tespiti
+    hasContextualQuestion: boolean;     // YENİ: Bağlamsal soru tespiti
     queryLength: number;
     clauseCount: number;
 }

@@ -79,16 +79,7 @@ export abstract class LLMProvider {
     abstract healthCheck(): Promise<boolean>;
 
     /**
-     * LLM çağrısını otomatik trace eder.
-     * Langfuse enabled ise span oluşturur, değilse direkt çalıştırır.
-     * 
-     * Kullanım:
-     * ```typescript
-     * return this.withTrace('chat', model, async () => {
-     *   // ... actual LLM call ...
-     *   return response;
-     * });
-     * ```
+     * LLM çağrısını çalıştırır.
      */
     protected async withTrace<T>(
       operation: string,
@@ -99,7 +90,7 @@ export abstract class LLMProvider {
     }
 
     /**
-     * Streaming LLM çağrısını otomatik trace eder.
+     * Streaming LLM çağrısını çalıştırır.
      */
     protected async withTraceStream<T>(
       operation: string,

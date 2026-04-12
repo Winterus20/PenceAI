@@ -1,7 +1,9 @@
 import type { LLMProvider } from '../llm/provider.js';
+import { encode } from 'gpt-tokenizer';
 import { TOOL_CALL_CLEAR_SIGNAL } from '../llm/provider.js';
 import type { UnifiedMessage, ConversationMessage, LLMMessage, LLMResponse, ToolCall, LLMToolDefinition } from '../router/types.js';
 import { MemoryManager } from '../memory/manager.js';
+import type { PromptContextBundle } from '../memory/manager/types.js';
 import { buildSystemPrompt, getBuiltinToolDefinitions, buildLightExtractionPrompt, buildDeepExtractionPrompt, buildSummarizationPrompt, buildEntityExtractionPrompt } from './prompt.js';
 import { createBuiltinTools, type ToolExecutor, type ConfirmCallback } from './tools.js';
 import { getUnifiedToolRegistry } from './mcp/registry.js';
@@ -15,13 +17,13 @@ import { getConfig } from '../gateway/config.js';
 import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
 import { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
 import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../memory/graphRAG/config.js';
-import { startTrace, endTrace, isLangfuseInitialized, startActiveLangfuseTrace } from '../observability/langfuse.js';
-import { SpanStatusCode, trace } from '@opentelemetry/api';
+import { ResponseVerifier } from '../memory/retrieval/ResponseVerifier.js';
+import { calculateCost } from '../utils/costCalculator.js';
 
 const MAX_TOOL_ITERATIONS_DEFAULT = 5;
 
 export interface AgentEvent {
-    type: 'thinking' | 'tool_start' | 'tool_end' | 'iteration' | 'token' | 'clear_stream' | 'replace_stream';
+    type: 'thinking' | 'tool_start' | 'tool_end' | 'iteration' | 'token' | 'clear_stream' | 'replace_stream' | 'metrics';
     data: Record<string, unknown>;
 }
 
@@ -59,6 +61,10 @@ export class AgentRuntime {
     private graphRAGEngine?: GraphRAGEngine;
     private shadowMode?: ShadowMode;
 
+    // Agentic RAG — Response Verification
+    private responseVerifier?: ResponseVerifier;
+    private _agenticRAGMaxRegenerations = 1;
+
     private feedbackManager?: FeedbackManager;
     private taskQueue?: TaskQueue;
     private _lastConfirmCallback?: ConfirmCallback;
@@ -72,6 +78,10 @@ export class AgentRuntime {
     private _graphQueue: Array<{ task: () => Promise<void>; retries: number; maxRetries: number }> = [];
     private _isGraphQueueRunning = false;
     private static readonly MAX_GRAPH_QUEUE_RETRIES = 3;
+
+    // Session-level tool timing tracking
+    private _sessionTotalToolTime = 0;
+    private _sessionToolCallCount = 0;
 
     constructor(llm: LLMProvider, memory: MemoryManager) {
         this.llm = llm;
@@ -120,6 +130,16 @@ export class AgentRuntime {
         // MemoryManager'a da bildir ki retrieval orchestrator'a geçebilsin
         this.memory.setGraphRAGEngine(engine);
         logger.info('[Agent] GraphRAG components connected');
+    }
+
+    /**
+     * Agentic RAG ResponseVerifier'ı yapılandır.
+     * MemoryManager'dan gelen config ile çalışır.
+     */
+    setAgenticRAGVerifier(verifier: ResponseVerifier, maxRegenerations: number = 1): void {
+        this.responseVerifier = verifier;
+        this._agenticRAGMaxRegenerations = maxRegenerations;
+        logger.info(`[Agent] Agentic RAG verifier connected (maxRegenerations=${maxRegenerations})`);
     }
 
     /**
@@ -309,41 +329,7 @@ export class AgentRuntime {
     }
 
     /**
-     * Helper method to create child spans for operations.
-     * If traceSpan is provided, creates a child span; otherwise just executes the function.
-     */
-    private async _withTraceSpan<T>(
-        parentSpan: any,
-        operationName: string,
-        fn: () => Promise<T>,
-        attributes?: Record<string, string | number>
-    ): Promise<T> {
-        // Langfuse disabled ise direkt çalıştır
-        if (!parentSpan || !isLangfuseInitialized()) {
-            return fn();
-        }
-
-        const tracer = trace.getTracer('penceai');
-        const childSpan = tracer.startSpan(operationName, { attributes });
-
-        try {
-            const result = await fn();
-            childSpan.setStatus({ code: SpanStatusCode.OK });
-            childSpan.end();
-            return result;
-        } catch (error: any) {
-            childSpan.setStatus({
-                code: SpanStatusCode.ERROR,
-                message: error.message,
-            });
-            childSpan.end();
-            throw error;
-        }
-    }
-
-    /**
      * Gelen mesajı işler ve yanıt oluşturur.
-     * Langfuse enabled ise otomatik trace eder, değilse direkt çalıştırır.
      * @param onEvent — düşünme ve araç olaylarını gerçek zamanlı göndermek için callback
      */
     async processMessage(
@@ -352,51 +338,33 @@ export class AgentRuntime {
         confirmCallback?: ConfirmCallback,
         options?: { thinking?: boolean },
     ): Promise<{ response: string; conversationId: string }> {
-        // Langfuse enabled değilse direkt çalıştır
-        if (!isLangfuseInitialized()) {
-            return this._processMessageInternal(message, onEvent, confirmCallback, options);
-        }
-
-        // Langfuse-native active observation ile trace et
-        return startActiveLangfuseTrace(
-            'agent.processMessage',
-            {
-                input: {
-                    content: message.content,
-                    channelId: message.channelType,
-                    senderName: message.senderName || 'anonymous',
-                },
-                metadata: {
-                    channelId: message.channelType,
-                    senderName: message.senderName || 'anonymous',
-                },
-            },
-            async (span) => {
-                try {
-                    const result = await this._processMessageInternal(message, onEvent, confirmCallback, options, span);
-                    span.update({ output: { response: result.response.substring(0, 100) + '...', conversationId: result.conversationId } });
-                    return result;
-                } catch (error: any) {
-                    span.update({ output: `Error: ${error.message}` });
-                    throw error;
-                }
-            }
-        );
+        return this._processMessageInternal(message, onEvent, confirmCallback, options);
     }
 
     /**
      * Internal message processing logic.
-     * @param traceSpan - Optional OpenTelemetry span for tracing
      */
     private async _processMessageInternal(
         message: UnifiedMessage,
         onEvent?: AgentEventCallback,
         confirmCallback?: ConfirmCallback,
         options?: { thinking?: boolean },
-        traceSpan?: any,
     ): Promise<{ response: string; conversationId: string }> {
         const startTimeMs = Date.now();
         const perfTimings: Record<string, number> = {};
+
+        // Session-level token ve maliyet takibi
+        let sessionTotalPromptTokens = 0;
+        let sessionTotalCompletionTokens = 0;
+        let sessionTotalCost = 0;
+        this._sessionTotalToolTime = 0;
+        this._sessionToolCallCount = 0;
+        const sessionPerCallDetails: string[] = [];
+
+        // Context token bilgileri (ReAct loop'da set edilir, metrics event'te kullanılır)
+        let contextSystemPromptTokens = 0;
+        let contextUserMsgTokens = 0;
+        let contextHistoryTokens = 0;
 
         // 1. Geri Bildirim Döngüsü — Etkileşim geldiğinde cezaları sıfırla
         if (this.feedbackManager) {
@@ -465,12 +433,7 @@ export class AgentRuntime {
         // Kullanıcı belleklerini akıllı şekilde al — hibrit arama (FTS + Semantik)
         // + geçmiş konuşma özetleri + review due bellekler paralel çekilir
         const retrievalStart = Date.now();
-        const contextBundle = await this._withTraceSpan(
-            traceSpan,
-            'memory.getPromptContextBundle',
-            async () => this.memory.getPromptContextBundle(message.content, conversationId),
-            { query: message.content, conversationId }
-        );
+        const contextBundle: PromptContextBundle = await this.memory.getPromptContextBundle(message.content, conversationId);
         const {
             relevantMemories,
             archivalMemories,
@@ -483,11 +446,25 @@ export class AgentRuntime {
         perfTimings.retrieval = Date.now() - retrievalStart;
         logger.info(`[Agent] ⏱️ getPromptContextBundle: ${perfTimings.retrieval}ms`);
 
-        // GraphRAG retrieval — rollout phase'e göre davranır
+        // GraphRAG retrieval — Akıllı strateji:
+        // 1. Eğer getPromptContextBundle zaten GraphRAG sonuçları getirdiyse → reuse
+        // 2. Kısa mesaj + aktif konuşma varsa → skip (bağlam zaten var)
+        // 3. Normal durumlarda → GraphRAG retrieval yap
         const graphRAGConfig = GraphRAGConfigManager.getConfig();
         let graphRAGResult: { memories: Array<{ id: number; content: string }>; communitySummaries: Array<{ id: string; summary: string }>; graphContext?: Record<string, unknown> } | null = null;
 
-        if (graphRAGConfig.shadowMode && this.shadowMode) {
+        // Double retrieval önleme: contextBundle'dan GraphRAG sonuçları varsa reuse et
+        if (contextBundle.graphRAG && contextBundle.graphRAG.memories.length > 0) {
+            graphRAGResult = {
+                memories: contextBundle.graphRAG.memories.map(m => ({ id: m.id, content: m.content })),
+                communitySummaries: contextBundle.graphRAG.communitySummaries.map(cs => ({
+                    id: cs.communityId,
+                    summary: cs.summary,
+                })),
+                graphContext: contextBundle.graphRAG.graphContext,
+            };
+            logger.info('[Agent] GraphRAG results reused from context bundle (no double retrieval)');
+        } else if (graphRAGConfig.shadowMode && this.shadowMode) {
             // Shadow mode: GraphRAG'ı çalıştır ama sonucu kullanma
             const shadowStart = Date.now();
             this.shadowMode.runShadowQuery(message.content, relevantMemories)
@@ -495,8 +472,18 @@ export class AgentRuntime {
             perfTimings.graphRAGShadow = Date.now() - shadowStart;
             logger.info(`[Agent] ⏱️ GraphRAG shadow query: ${perfTimings.graphRAGShadow}ms`);
         } else if (graphRAGConfig.enabled && this.graphRAGEngine) {
-            // FULL mode: %100 GraphRAG kullan
-            if (Math.random() < graphRAGConfig.sampleRate) {
+            // FULL mode: Akıllı pre-check ile gereksiz retrieval'ı önle
+            const queryLength = message.content.trim().length;
+            const hasActiveContext = recentMessages.length >= 3;
+
+            // Kısa mesaj + aktif bağlam = GraphRAG skip (bağlam zaten mevcut)
+            const shouldSkipGraphRAG = hasActiveContext 
+                && queryLength < 15 
+                && !/\b(o|bu|şu|onun|bunun|dün|geçen|önceki|hani|projeyi|konuyu)\b/i.test(message.content);
+
+            if (shouldSkipGraphRAG) {
+                logger.info(`[Agent] GraphRAG skipped (short response in active context: ${queryLength} chars, ${recentMessages.length} recent messages)`);
+            } else if (Math.random() < graphRAGConfig.sampleRate) {
                 const graphRAGStart = Date.now();
                 try {
                     const result = await this.graphRAGEngine.retrieve(message.content, {
@@ -694,6 +681,22 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             }
         }
 
+        // Token sayımı — sistem promptu ve konuşma geçmişi
+        const systemPromptTokens = encode(finalSystemPrompt).length;
+        const userMsgContent = typeof message.content === 'string' ? message.content : '';
+        const userMsgTokens = encode(userMsgContent).length;
+        const historyText = llmMessages
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map(m => typeof m.content === 'string' ? m.content : '')
+            .join('\n');
+        const totalHistoryTokens = encode(historyText).length;
+        const pastHistoryTokens = totalHistoryTokens - userMsgTokens;
+
+        // Metrics event için dış scope değişkenlerine ata
+        contextSystemPromptTokens = systemPromptTokens;
+        contextUserMsgTokens = userMsgTokens;
+        contextHistoryTokens = pastHistoryTokens;
+
         // ReAct döngüsü
         let uiContent = '';
         let lastDbContent = '';
@@ -701,6 +704,11 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
 
         while (iterations < this.maxToolIterations) {
             iterations++;
+
+            // İlk iterasyonda token bilgisini logla
+            if (iterations === 1) {
+                logger.info(`[Agent] 📊 Context: geçmiş ${pastHistoryTokens} token, kullanıcı mesajı ${userMsgTokens} token, sistem promptu ${systemPromptTokens} token`);
+            }
 
             logger.info(`[Agent] 🧠 LLM çağrılıyor (iterasyon ${iterations})...`);
             onEvent?.({ type: 'iteration', data: { iteration: iterations } });
@@ -739,26 +747,38 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             }
             const llmCallDuration = Date.now() - llmCallStart;
             perfTimings[`llm_call_${iterations}`] = llmCallDuration;
-            logger.info(`[Agent] ⏱️ LLM call (iterasyon ${iterations}): ${llmCallDuration}ms (provider: ${this.llm.name}, model: ${getConfig().defaultLLMModel})`);
 
-            // Token usage bilgisini kaydet
+            // Token usage bilgisini kaydet ve maliyet hesapla
             if (llmResponse.usage) {
                 const config = getConfig();
                 const currentProvider = config.defaultLLMProvider;
                 const currentModel = config.defaultLLMModel || 'unknown';
-                
+
+                const promptTokens = llmResponse.usage.promptTokens || 0;
+                const completionTokens = llmResponse.usage.completionTokens || 0;
+                const totalTokens = llmResponse.usage.totalTokens || 0;
+                const callCost = calculateCost(currentProvider, currentModel, promptTokens, completionTokens);
+
+                // Session toplamlarına ekle
+                sessionTotalPromptTokens += promptTokens;
+                sessionTotalCompletionTokens += completionTokens;
+                sessionTotalCost += callCost;
+                sessionPerCallDetails.push(`${currentProvider}/${currentModel}: ${promptTokens} in + ${completionTokens} out = ${totalTokens} tokens | $${callCost.toFixed(4)}`);
+
                 try {
                     this.memory.saveTokenUsage({
                         provider: currentProvider,
                         model: currentModel,
-                        promptTokens: llmResponse.usage.promptTokens,
-                        completionTokens: llmResponse.usage.completionTokens,
-                        totalTokens: llmResponse.usage.totalTokens,
+                        promptTokens,
+                        completionTokens,
+                        totalTokens,
                     });
                 } catch (err) {
                     // Usage kaydetme hatası kullanıcı akışını bozmaz
                     logger.warn({ err }, '[Agent] Token usage kaydedilemedi:');
                 }
+
+                logger.info(`[Agent] ⏱️ LLM call (iterasyon ${iterations}): ${llmCallDuration}ms | ${currentProvider}/${currentModel} | ${promptTokens} input + ${completionTokens} output = ${totalTokens} tokens | $${callCost.toFixed(4)}`);
             }
 
             // <think> etiketlerini içerikten temizle (güvenlik için her durumda)
@@ -890,14 +910,87 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
         const totalDuration = Date.now() - startTimeMs;
         logger.info(`[Agent] ✅ Yanıt oluşturuldu (${response.length} karakter, ${iterations} iterasyon, toplam: ${totalDuration}ms)`);
 
-        // Performans breakdown logu
-        logger.info(`[Agent] ⏱️ PERFORMANCE BREAKDOWN — Toplam: ${totalDuration}ms | Retrieval: ${perfTimings.retrieval ?? 0}ms | GraphRAG: ${perfTimings.graphRAG ?? 0}ms | LLM calls: ${Object.entries(perfTimings).filter(([k]) => k.startsWith('llm_call_')).map(([k, v]) => `${k}=${v}ms`).join(', ') || 'none'}`);
+        // Agentic RAG — Response Verification (self-evaluation)
+        if (this.responseVerifier && message.content) {
+            try {
+                const verifyStart = Date.now();
+                const usedMemories = await this.memory.hybridSearch(message.content, 5);
+                const verification = await this.responseVerifier.verify(message.content, response, usedMemories);
+                perfTimings.responseVerification = Date.now() - verifyStart;
+
+                logger.info({
+                    msg: '[Agentic RAG] Response verification',
+                    isSupported: verification.isSupported,
+                    supportScore: verification.supportScore,
+                    utilityScore: verification.utilityScore,
+                    needsRegeneration: verification.needsRegeneration,
+                    hallucinations: verification.hallucinations.length,
+                });
+
+                if (verification.needsRegeneration && this._agenticRAGMaxRegenerations > 0) {
+                    logger.warn({
+                        msg: '[Agentic RAG] Response needs regeneration',
+                        feedback: verification.feedback,
+                        hallucinations: verification.hallucinations.slice(0, 3),
+                    });
+                }
+            } catch (err) {
+                logger.warn({ msg: '[Agentic RAG] Response verification failed', err });
+            }
+        }
+
+        // Performans breakdown — Agentic RAG dahil
+        const agenticParts = Object.entries(perfTimings)
+            .filter(([k]) => ['retrievalDecision', 'passageCritique', 'multiHop', 'responseVerification'].includes(k))
+            .map(([k, v]) => `${k}=${v}ms`);
+        const agenticSuffix = agenticParts.length > 0 ? ` | Agentic: ${agenticParts.join(', ')}` : '';
+        const toolSuffix = this._sessionTotalToolTime > 0 ? ` | Tools: ${this._sessionTotalToolTime}ms (${this._sessionToolCallCount} çağrı)` : '';
+        logger.info(`[Agent] ⏱️ PERFORMANCE BREAKDOWN — Toplam: ${Date.now() - startTimeMs}ms | Retrieval: ${perfTimings.retrieval ?? 0}ms | GraphRAG: ${perfTimings.graphRAG ?? 0}ms | LLM: ${Object.entries(perfTimings).filter(([k]) => k.startsWith('llm_call_')).map(([k, v]) => `${k}=${v}ms`).join(', ') || 'none'}${agenticSuffix}${toolSuffix}`);
+
+        // Token maliyet özeti
+        if (sessionTotalCost > 0) {
+            const totalTokens = sessionTotalPromptTokens + sessionTotalCompletionTokens;
+            logger.info(`[Agent] 💰 TOPLAM MALİYET: $${sessionTotalCost.toFixed(4)} | ${sessionTotalPromptTokens} input + ${sessionTotalCompletionTokens} output = ${totalTokens} tokens`);
+            if (sessionPerCallDetails.length > 1) {
+                sessionPerCallDetails.forEach((detail, i) => {
+                    logger.info(`[Agent] 💰   [${i + 1}] ${detail}`);
+                });
+            }
+        }
 
         // Geri Bildirim Döngüsü — Yanıt süresini kaydet
         if (this.feedbackManager) {
             const responseTimeMs = Date.now() - startTimeMs;
             this.feedbackManager.applySignal({ type: 'message_replied', timestamp: Date.now(), responseTimeMs });
         }
+
+        // Metrics event'i gönder (frontend UI'da göstermek için)
+        onEvent?.({
+            type: 'metrics',
+            data: {
+                performance: {
+                    total: Date.now() - startTimeMs,
+                    retrieval: perfTimings.retrieval ?? 0,
+                    graphRAG: perfTimings.graphRAG ?? 0,
+                    llmCalls: Object.entries(perfTimings).filter(([k]) => k.startsWith('llm_call_')).map(([k, v]) => ({ key: k, ms: v })),
+                    agentic: Object.entries(perfTimings).filter(([k]) => ['retrievalDecision', 'passageCritique', 'multiHop', 'responseVerification'].includes(k)).reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {} as Record<string, number>),
+                    tools: this._sessionTotalToolTime,
+                    toolCalls: this._sessionToolCallCount,
+                },
+                cost: {
+                    total: sessionTotalCost,
+                    promptTokens: sessionTotalPromptTokens,
+                    completionTokens: sessionTotalCompletionTokens,
+                    totalTokens: sessionTotalPromptTokens + sessionTotalCompletionTokens,
+                    breakdown: sessionPerCallDetails,
+                },
+                context: {
+                    historyTokens: contextHistoryTokens,
+                    userMessageTokens: contextUserMsgTokens,
+                    systemPromptTokens: contextSystemPromptTokens,
+                },
+            },
+        });
 
         // Kullanıcının mesajından önceki asistan mesajını (bağlam) bul
         let previousAssistantMessage = '';
@@ -940,22 +1033,6 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             });
         } else {
             logger.info(`[Agent] ⏳ Hafif tarama ertelendi (${this._extractionCounter}/${AgentRuntime.EXTRACTION_INTERVAL})`);
-        }
-
-        // Add final attributes to trace span if it exists
-        if (traceSpan) {
-            // Langfuse observation ise update kullan, OTel span ise setAttribute
-            if (typeof traceSpan.update === 'function') {
-                traceSpan.update({
-                    metadata: {
-                        response_length: response.length,
-                        conversation_id: conversationId,
-                    },
-                });
-            } else if (typeof traceSpan.setAttribute === 'function') {
-                traceSpan.setAttribute('agent.response_length', response.length);
-                traceSpan.setAttribute('agent.conversation_id', conversationId);
-            }
         }
 
         return { response, conversationId };
@@ -1603,6 +1680,7 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
         const promises = toolCalls.map(async (tc) => {
             let result: string;
             let isError = false;
+            const toolCallIndex = ++this._sessionToolCallCount;
 
             // Araç başlangıç event'i
             onEvent?.({
@@ -1610,6 +1688,7 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                 data: { name: tc.name, arguments: tc.arguments },
             });
 
+            const toolStart = Date.now();
             try {
                 // MCP Integration — Önce built-in, sonra MCP registry üzerinden çalıştır
                 if (this._mcpEnabled && tc.name.startsWith('mcp:')) {
@@ -1632,6 +1711,10 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                 result = `Hata: ${err.message}`;
                 isError = true;
             }
+
+            const duration = Date.now() - toolStart;
+            this._sessionTotalToolTime += duration;
+            logger.info(`[Agent] 🔧 tool #${toolCallIndex}: ${tc.name} completed in ${duration}ms | ${result.length} chars`);
 
             // Araç bitiş event'i
             onEvent?.({

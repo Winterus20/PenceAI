@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { useAgentStore } from '../store/agentStore';
-import type { ToolCallItem, AttachmentItem } from '../store/agentStore';
+import type { ToolCallItem, AttachmentItem, MessageMetrics } from '../store/agentStore';
 import { useStats } from './useStats';
 import { stripThinkTags } from '@/lib/utils';
 
@@ -55,7 +55,12 @@ interface WsToolUseMessage {
 	type: 'tool_use';
 }
 
-type WsMessage = WsTokenMessage | WsResponseMessage | WsAgentEventMessage | WsClearStreamMessage | WsReplaceStreamMessage | WsErrorMessage | WsStatsMessage | WsConfirmRequestMessage | WsToolUseMessage;
+interface WsMetricsMessage {
+	type: 'metrics';
+	data: MessageMetrics;
+}
+
+type WsMessage = WsTokenMessage | WsResponseMessage | WsAgentEventMessage | WsClearStreamMessage | WsReplaceStreamMessage | WsErrorMessage | WsStatsMessage | WsConfirmRequestMessage | WsToolUseMessage | WsMetricsMessage;
 
 // Agent event data tipleri
 interface ThinkingEventData {
@@ -73,12 +78,16 @@ interface ToolEndEventData {
 	isError?: boolean;
 }
 
-export function useAgentSocket() {
+export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
     const ws = useRef<WebSocket | null>(null);
     const currentAssistantMessageId = useRef<string | null>(null);
     const pendingToolCalls = useRef<ToolCallItem[]>([]);
     const pendingThinking = useRef<string[]>([]);
     const thinkingEnabledRef = useRef(false);
+    const onMetricsRef = useRef(onMetrics);
+
+    // Keep onMetrics ref up-to-date
+    onMetricsRef.current = onMetrics;
     
     // Use getState() pattern to avoid stale closures in WebSocket handlers
     const getStore = () => useAgentStore.getState();
@@ -285,6 +294,10 @@ export function useAgentSocket() {
 
             case 'confirm_request':
                 getStore().setConfirmRequest(data);
+                break;
+
+            case 'metrics':
+                onMetricsRef.current?.(data.data);
                 break;
         }
     };

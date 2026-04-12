@@ -17,7 +17,13 @@
       "Bash(git commit *)",
       "Bash(git push)",
       "Bash(npm install *)",
-      "Bash(mkdir *)"
+      "Bash(mkdir *)",
+      "Bash(select-string *)",
+      "Bash(cmd *)",
+      "Bash(wc *)",
+      "Bash(@type *)",
+      "WebSearch",
+      "WebFetch(github.com)"
     ]
   },
   "$version": 3

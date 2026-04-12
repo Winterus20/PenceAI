@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { MessageStream } from './MessageStream';
-import type { Message, FeedbackState } from '../../store/agentStore';
+import type { Message, FeedbackState, MessageMetrics } from '../../store/agentStore';
 
 export interface MessagePanelProps {
   messages: Message[];
@@ -13,6 +13,7 @@ export interface MessagePanelProps {
   onQuickAction: (content: string) => void;
   onEditMessage: (content: string) => void;
   onSendFeedback: (messageId: string, type: 'positive' | 'negative') => void;
+  messageMetrics: Record<string, MessageMetrics | null>;
 }
 
 export const MessagePanel: React.FC<MessagePanelProps> = ({
@@ -26,6 +27,7 @@ export const MessagePanel: React.FC<MessagePanelProps> = ({
   onQuickAction,
   onEditMessage,
   onSendFeedback,
+  messageMetrics,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +50,7 @@ export const MessagePanel: React.FC<MessagePanelProps> = ({
         onEditMessage={onEditMessage}
         onSendFeedback={(messageId, type) => onSendFeedback(messageId, type)}
         feedbacks={feedbacks}
+        messageMetrics={messageMetrics}
       />
     </div>
   );

@@ -49,7 +49,7 @@ export interface ConfirmRequest {
   description?: string;
 }
 
-export type ActiveView = 'chat' | 'channels' | 'memory' | 'settings' | 'mcp-marketplace';
+export type ActiveView = 'chat' | 'channels' | 'memory' | 'settings' | 'mcp-marketplace' | 'metrics';
 export type Theme = 'light' | 'dark';
 
 export interface Channel {
@@ -89,6 +89,30 @@ export interface ToastState {
   isVisible: boolean;
 }
 
+export interface MessageMetrics {
+  performance: {
+    total: number;
+    retrieval: number;
+    graphRAG: number;
+    llmCalls: Array<{ key: string; ms: number }>;
+    agentic: Record<string, number>;
+    tools: number;
+    toolCalls: number;
+  };
+  cost: {
+    total: number;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    breakdown: string[];
+  };
+  context: {
+    historyTokens: number;
+    userMessageTokens: number;
+    systemPromptTokens: number;
+  };
+}
+
 export interface ChatSlice {
   isConnected: boolean;
   isReceiving: boolean;
@@ -99,6 +123,7 @@ export interface ChatSlice {
   conversations: ConversationItem[];
   activeConversationId: string | null;
   stats: StatsState;
+  messageMetrics: Record<string, MessageMetrics | null>;
   selectedConversationIds: string[];
   bulkDeleteConfirm: BulkDeleteConfirmState | null;
   editingMessage: EditingMessageState;
@@ -118,6 +143,7 @@ export interface ChatSlice {
   updateConversationTitle: (id: string, title: string) => void;
   setActiveConversationId: (id: string | null) => void;
   setStats: (stats: Partial<StatsState>) => void;
+  setMessageMetrics: (payload: { conversationId: string; metrics: MessageMetrics }) => void;
   clearMessages: () => void;
   appendThinking: (text: string) => void;
   toggleConversationSelection: (id: string) => void;

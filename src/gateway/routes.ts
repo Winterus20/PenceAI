@@ -18,7 +18,7 @@ import { BehaviorDiscoveryShadow } from '../memory/graphRAG/BehaviorDiscoverySha
 import type { MemoryGraph, GraphNode, GraphEdge } from '../memory/types.js';
 import { createMCPController } from './controllers/mcpController.js';
 import { createMemoryController } from './controllers/memoryController.js';
-import { registerObservabilityRoutes } from './observability.js';
+import { metricsCollector } from '../observability/metricsCollector.js';
 
 export interface RouteDeps {
     memory: MemoryManager;
@@ -369,10 +369,67 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       res.json({ success: true });
     });
 
-    // Usage stats moved to memoryController.
+    // ============ Metrics API ============
 
-    // ============ Observability API ============
-    registerObservabilityRoutes(app);
+    // GET /api/metrics/all — Tüm metrics'leri getir (limit ile)
+    app.get('/api/metrics/all', (req, res) => {
+      try {
+        const limit = parseInt(req.query.limit as string) || 100;
+        const metrics = metricsCollector.getAllMetrics(limit);
+        res.json({ success: true, metrics });
+      } catch (error: unknown) {
+        const err = error as Error;
+        res.status(500).json({ success: false, error: err.message });
+      }
+    });
+
+    // GET /api/metrics/:conversationId — Belirli conversation'ın metrics'leri
+    app.get('/api/metrics/:conversationId', (req, res) => {
+      try {
+        const metrics = metricsCollector.getConversationMetrics(req.params.conversationId);
+        res.json({ success: true, metrics });
+      } catch (error: unknown) {
+        const err = error as Error;
+        res.status(500).json({ success: false, error: err.message });
+      }
+    });
+
+    // GET /api/metrics/summary — Aggrege metrics özeti
+    app.get('/api/metrics/summary', (req, res) => {
+      try {
+        const days = parseInt(req.query.days as string) || 1;
+        const summary = metricsCollector.getAggregatedMetrics(days);
+        res.json({ success: true, ...summary });
+      } catch (error: unknown) {
+        const err = error as Error;
+        res.status(500).json({ success: false, error: err.message });
+      }
+    });
+
+    // GET /api/metrics/provider-stats — Provider bazlı istatistikler
+    app.get('/api/metrics/provider-stats', (req, res) => {
+      try {
+        const days = parseInt(req.query.days as string) || 7;
+        const stats = metricsCollector.getProviderStats(days);
+        res.json({ success: true, providerStats: stats });
+      } catch (error: unknown) {
+        const err = error as Error;
+        res.status(500).json({ success: false, error: err.message });
+      }
+    });
+
+    // GET /api/metrics/error-stats — Hata istatistikleri
+    app.get('/api/metrics/error-stats', (req, res) => {
+      try {
+        const stats = metricsCollector.getErrorStats();
+        res.json({ success: true, ...stats });
+      } catch (error: unknown) {
+        const err = error as Error;
+        res.status(500).json({ success: false, error: err.message });
+      }
+    });
+
+    // Usage stats moved to memoryController.
 
     // API 404 handler
     app.all('/api/*', (_req, res) => {

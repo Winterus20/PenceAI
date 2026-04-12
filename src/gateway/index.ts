@@ -16,6 +16,7 @@ import { AgentRuntime } from '../agent/runtime.js';
 import { createEmbeddingProvider } from '../memory/embeddings.js';
 import { initializeMCP, shutdownMCP } from '../agent/mcp/runtime.js';
 import { initMCPPersistence } from './services/mcpService.js';
+import { metricsCollector } from '../observability/metricsCollector.js';
 
 import { TaskQueue, BackgroundWorker, TaskPriority } from '../autonomous/index.js';
 import { FeedbackManager } from '../autonomous/urgeFilter.js';
@@ -32,7 +33,6 @@ import {
     registerRequestTracing,
     resolveGatewayPublicDir,
 } from './bootstrap.js';
-import { initializeLangfuse, shutdownLangfuse } from '../observability/langfuse.js';
 
 // GraphRAG imports
 import { GraphCache } from '../memory/graphRAG/GraphCache.js';
@@ -65,6 +65,9 @@ async function main() {
     const database = new PenceDatabase(config.dbPath, embeddingDimensions);
     const memory = new MemoryManager(database);
     logger.info(`[Gateway] 💾 Veritabanı hazır: ${config.dbPath} (embedding dim=${embeddingDimensions})`);
+
+    // Metrics Collector'ı veritabanına bağla
+    metricsCollector.setDatabase(database.getDb());
 
     // MCP Persistence — Marketplace server'larını veritabanından yükle
     await initMCPPersistence(config.dbPath);
@@ -107,17 +110,6 @@ async function main() {
     const mcpManager = await initializeMCP(activeServers);
     if (mcpManager) {
         logger.info(`[Gateway] 🔌 MCP Runtime initialized — ${mcpManager.connectedServerCount} server(s), ${mcpManager.totalToolCount} tool(s)`);
-    }
-
-    // 3.6 Observability (Langfuse) Initialization
-    const langfuseInitialized = initializeLangfuse({
-        enabled: config.langfuseEnabled,
-        secretKey: config.langfuseSecretKey || '',
-        publicKey: config.langfusePublicKey || '',
-        baseUrl: config.langfuseBaseUrl,
-    });
-    if (langfuseInitialized) {
-        logger.info(`[Gateway] 📊 Observability: Langfuse enabled (${config.langfuseBaseUrl})`);
     }
 
     // 4. Agent Runtime
@@ -181,6 +173,18 @@ async function main() {
     // Wire GraphRAG to agent and memory
     agent.setGraphRAGComponents(graphRAGEngine, shadowMode);
     memory.setGraphRAGEngine(graphRAGEngine);
+
+    // Wire Confidence Score to memory (uses the same LLM provider)
+    memory.setConfidenceThreshold();
+
+    // Wire Agentic RAG ResponseVerifier to agent runtime
+    const { ResponseVerifier } = await import('../memory/retrieval/ResponseVerifier.js');
+    const agenticVerifier = new ResponseVerifier(llm, {
+        supportFloor: config.agenticRAGVerificationSupportFloor,
+        utilityFloor: config.agenticRAGVerificationUtilityFloor,
+        maxRegenerations: config.agenticRAGMaxRegenerations,
+    });
+    agent.setAgenticRAGVerifier(agenticVerifier, config.agenticRAGMaxRegenerations);
 
     // Initialize GraphWorker for background tasks (PageRank, Community Detection, etc.)
     const graphWorker = new GraphWorker(
@@ -394,8 +398,6 @@ async function main() {
         } catch (err) {
             logger.error({ err }, '[Gateway] Kanal kapatma hatası');
         }
-        // Observability flush
-        await shutdownLangfuse();
         // MCP shutdown
         await shutdownMCP();
         database.close();

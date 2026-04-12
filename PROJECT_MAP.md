@@ -37,8 +37,8 @@
 - 📊 **Retrieval Orchestration**: Dual-process (System1/System2) bellek getirme mimarisi
 - 🕸️ **GraphRAG**: Graph-aware retrieval, PageRank skorlama, topluluk tespiti ve gölge mod test altyapısı
 - 🔌 **MCP Marketplace**: Model Context Protocol entegrasyonu, 18+ modül ile genişletilebilir araç ekosistemi
-- 📈 **Token Usage & Cost Tracking**: Provider bazlı token tüketimi ve maliyet hesaplama
-- 📊 **Observability UI**: Langfuse trace'leri, real-time metrikler ve hata analizi arayüzü
+- 📈 **Yerel Metrics Sistemi**: Provider bazlı token tüketimi, maliyet hesaplama ve performans metrikleri
+- 📊 **Observability UI**: Yerel metrikler, real-time dashboard ve hata analizi arayüzü
 - 📡 **Multi-Channel Support**: Telegram, Discord ve WhatsApp kanal entegrasyonları
 - 🎨 **Modern UI/UX**: Markdown render sistemi, syntax highlighting, avatar sistemi ve akıcı animasyonlar
 - ⚡ **Frontend Optimizasyonu**: Component decomposition, React.memo ile render performansı ve sanallaştırılmış mesaj akışı
@@ -669,6 +669,7 @@ HTTP/WebSocket sunucusu ve uygulama başlatma.
 | [`envUtils.ts`](src/gateway/envUtils.ts) | .env dosyası işlemleri |
 | [`userName.ts`](src/gateway/userName.ts) | Kullanıcı adı çözümleme |
 | [`observability.ts`](src/gateway/observability.ts) | Observability API routes - Langfuse proxy |
+| [`metricsCollector.ts`](src/observability/metricsCollector.ts) | Yerel metrics toplama ve saklama |
 
 #### Controllers (`src/gateway/controllers/`)
 
@@ -878,41 +879,48 @@ class FeedbackManager {
 
 ### 7. Observability Modülü (`src/observability/`)
 
-OpenTelemetry tabanlı LLM observability altyapısı. Langfuse ile trace, metric ve evaluation sağlar.
+Yerel metrik tabanlı LLM observability altyapısı. Provider bazlı token tüketimi, maliyet hesaplama ve performans takibi sağlar. Langfuse bağımlılığı kaldırılmıştır, tüm veriler yerel SQLite'da saklanır.
 
 | Dosya | Açıklama |
 |-------|----------|
-| [`langfuse.ts`](src/observability/langfuse.ts) | Langfuse OpenTelemetry SDK entegrasyonu |
+| [`metricsCollector.ts`](src/observability/metricsCollector.ts) | Yerel metrics toplama, saklama ve sorgulama |
+| [`costCalculator.ts`](src/utils/costCalculator.ts) | Provider bazlı maliyet hesaplama |
 | [`src/llm/observability.ts`](src/llm/observability.ts) | LLM provider trace helper'ları |
 
-#### Trace Hiyerarşisi
+#### Metrik Hiyerarşisi
 
 ```
-Trace: user-message-{uuid}
- ├─ Span: agent.processMessage
- │  ├─ Span: memory.getPromptContextBundle
- │  ├─ Span: llm.chat (OpenAI, Anthropic, etc.)
- │  ├─ Span: tool.execute (varsa)
- │  └─ Span: memory.addMemory
+Metrics Entry:
+ ├─ conversationId, messageId, timestamp
+ ├─ Performance: total, retrieval, graphRAG, llmCalls[], tools
+ ├─ Cost: total, totalTokens, promptTokens, completionTokens
+ └─ Context: historyTokens, userMessageTokens, systemPromptTokens
+```
+
+#### Cost Calculation
+
+```typescript
+// Provider bazlı fiyatlar ($/1K tokens)
+calculateCost(provider, model, promptTokens, completionTokens)
+
+// Provider breakdown
+calculateProviderCostBreakdown(llmCalls[])
 ```
 
 #### LLM Provider Coverage: 8/8 ✅
 
-| Provider | Trace Method |
-|----------|--------------|
-| OpenAI | observeOpenAI() wrapper |
-| Anthropic | withTrace() helper |
-| Ollama | withTrace() helper |
-| MiniMax | withTrace() helper |
-| Groq, Mistral, NVIDIA, GitHub | Extends OpenAI → auto-traced |
+| Provider | Cost Tracking |
+|----------|---------------|
+| OpenAI | calculateCost() ile |
+| Anthropic | calculateCost() ile |
+| Ollama | calculateCost() ile (local = $0) |
+| MiniMax | calculateCost() ile |
+| Groq, Mistral, NVIDIA, GitHub | calculateCost() ile |
 
 #### Feature Flag
 
 ```env
-LANGFUSE_ENABLED=false          # Default: kapalı (zero overhead)
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_BASE_URL=https://cloud.langfuse.com
+# Langfuse artık kullanılmıyor - yerel metrics sistemi aktif
 ```
 
 ---
@@ -961,7 +969,7 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com
 | [`ExportDialog.tsx`](src/web/react-app/src/components/chat/ExportDialog.tsx) | Dışa aktarma dialogu |
 | [`ImageLightbox.tsx`](src/web/react-app/src/components/chat/ImageLightbox.tsx) | Resim görüntüleyici |
 | [`OnboardingDialog.tsx`](src/web/react-app/src/components/chat/OnboardingDialog.tsx) | İlk kurulum |
-| [`ObservabilityDialog.tsx`](src/web/react-app/src/components/chat/ObservabilityDialog.tsx) | Observability paneli - Langfuse trace'leri |
+| [`ObservabilityDialog.tsx`](src/web/react-app/src/components/chat/ObservabilityDialog.tsx) | Observability paneli - Yerel metrikler |
 | [`SidebarMenu.tsx`](src/web/react-app/src/components/chat/SidebarMenu.tsx) | Yan menü bileşeni |
 
 ##### MCP Bileşenleri (`src/components/mcp/`)
@@ -1001,7 +1009,8 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com
 | [`useSensitivePaths.ts`](src/web/react-app/src/hooks/queries/useSensitivePaths.ts) | Hassas dizinler query |
 | [`useStats.ts`](src/web/react-app/src/hooks/queries/useStats.ts) | İstatistikler query |
 | [`useMCPServers.ts`](src/web/react-app/src/hooks/queries/useMCPServers.ts) | MCP sunucu listesi query |
-| [`useObservability.ts`](src/web/react-app/src/hooks/queries/useObservability.ts) | Observability metrikleri query |
+| [`useObservability.ts`](src/web/react-app/src/hooks/queries/useObservability.ts) | Observability metrikleri query (eski) |
+| [`useMetrics.ts`](src/web/react-app/src/hooks/queries/useMetrics.ts) | Yerel metrics query (yeni) |
 | [`useUsageStats.ts`](src/web/react-app/src/hooks/queries/useUsageStats.ts) | Kullanım istatistikleri query |
 | [`index.ts`](src/web/react-app/src/hooks/queries/index.ts) | Query hooks barrel export |
 
@@ -1411,11 +1420,8 @@ erDiagram
 | AI SDK | openai | 4.77+ | OpenAI API |
 | AI Inference | @azure-rest/ai-inference | 1.0+ | Azure AI Inference |
 | MCP SDK | @modelcontextprotocol/sdk | 1.29+ | Model Context Protocol |
-| Observability | @langfuse/openai | 5.1+ | Langfuse OpenAI integration |
-| Observability | @langfuse/otel | 5.1+ | Langfuse OpenTelemetry |
-| Observability | @langfuse/tracing | 5.1+ | Langfuse tracing |
-| Observability | @opentelemetry/api | 1.9+ | OpenTelemetry API |
-| Observability | @opentelemetry/sdk-node | 0.214+ | OpenTelemetry SDK |
+| Metrics | Yerel metrics collector | - | SQLite tabanlı metrics |
+| Cost | costCalculator.ts | - | Provider bazlı maliyet hesaplama |
 | Embedding | @xenova/transformers | 2.17+ | ONNX embedding |
 | NLP | chrono-node | 2.9+ | Tarih ayrıştırma |
 | Validation | zod | 3.25+ | Runtime validation |
@@ -1506,11 +1512,11 @@ erDiagram
 | `/api/mcp/tools` | GET | Tüm MCP araçları listele |
 | `/api/mcp/marketplace` | GET | Marketplace kataloğu |
 | `/api/mcp/marketplace/:name/install` | POST | Marketplace'den sunucu yükle |
-| `/api/observability/summary` | GET | Observability özet metrikleri |
-| `/api/observability/traces` | GET | Recent trace'ler |
-| `/api/observability/traces/:traceId` | GET | Trace detayı |
-| `/api/observability/providers` | GET | Provider bazlı istatistikler |
-| `/api/observability/errors` | GET | Hata istatistikleri |
+| `/api/metrics/all` | GET | Tüm metrikler (limit param) |
+| `/api/metrics/:conversationId` | GET | Konuşma bazlı metrikler |
+| `/api/metrics/summary` | GET | Özet metrikler (days param) |
+| `/api/metrics/provider-stats` | GET | Provider bazlı istatistikler |
+| `/api/metrics/error-stats` | GET | Hata istatistikleri |
 | `/api/usage/stats` | GET | Token usage istatistikleri |
 | `/api/usage/daily` | GET | Günlük kullanım raporu |
 
@@ -1620,7 +1626,7 @@ npm run test:mcp:e2e:ui
 3. **Dual-Process Retrieval**: System1 (hızlı) ve System2 (derin) bellek getirme modları.
 4. **GraphRAG Integration**: Graph-aware retrieval ile bellek getirme iyileştirildi.
 5. **MCP Protocol**: Standart Model Context Protocol ile genişletilebilir araç ekosistemi.
-6. **Observability First**: OpenTelemetry tabanlı trace, metric ve cost tracking.
+6. **Observability First**: Yerel SQLite tabanlı metrik, token ve maliyet takibi.
 7. **Multi-Channel Architecture**: Telegram, Discord, WhatsApp kanal desteği.
 8. **Cost Calculator**: Provider/model bazlı gerçek zamanlı maliyet hesaplama.
 9. **Voyage AI Embeddings**: Yeni embedding provider desteği.

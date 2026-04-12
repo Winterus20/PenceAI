@@ -3,11 +3,12 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, SquarePen, Wrench, BrainCircuit, Paperclip, ChevronDown } from 'lucide-react';
-import type { AttachmentItem, Message, ToolCallItem } from '@/store/agentStore';
+import type { AttachmentItem, Message, ToolCallItem, MessageMetrics } from '@/store/agentStore';
 import { cn } from '@/lib/utils';
 import { stripThinkTags, formatTime } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { CodeBlock } from './CodeBlock';
+import { MetricsPanel } from './MetricsPanel';
 
 /* ─── Sub-components ─── */
 
@@ -146,6 +147,8 @@ export interface MessageBubbleProps {
   onEditMessage?: (messageId: string, content: string) => void;
   onImageClick?: (url: string, alt: string) => void;
   feedbacks?: Record<string, { type: 'positive' | 'negative' }>;
+  conversationId?: string;
+  metrics?: MessageMetrics;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
@@ -160,6 +163,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
   onEditMessage,
   onImageClick,
   feedbacks,
+  conversationId,
+  metrics,
 }) => {
   const isUser = msg.role === 'user';
   const isSystem = msg.role === 'system';
@@ -341,6 +346,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
                   >
                     <RefreshCw size={12} aria-hidden="true" />
                   </Button>
+                  {metrics && (
+                    <MetricsPanel
+                      metrics={metrics}
+                      conversationId={conversationId ?? ''}
+                      triggerClassName="h-6 w-6 rounded-none hover:bg-transparent text-foreground/30 hover:text-foreground transition-colors"
+                    />
+                  )}
                 </>
               )}
             </div>

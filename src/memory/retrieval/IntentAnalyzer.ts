@@ -58,13 +58,15 @@ export class IntentAnalyzer {
 
         return {
             hasQuestion: /\?|nasil|neden|ne|hangi|hatirla|remember|recall/.test(normalizedQuery),
-            hasPreferenceCue: /tercih|sev|sever|istemem|favori|aliskanlik|preference|prefer|like|dislike/.test(normalizedQuery),
-            hasFollowUpCue: /takip|devam|son durum|guncel|update|follow[ -]?up|progress|durum|az once|demin|bugun|dun/.test(normalizedQuery),
-            hasRecallCue: /hatirla|hatirlat|recall|remember|bildikler(in|ini)|what do you know|retrieve/.test(normalizedQuery),
+            hasPreferenceCue: /tercih|sev|sever|istemem|favori|aliskanlik|preference|prefer|like|dislike|hangisi|hangisi daha|tercih edersin|ne dersin|nasil bulursun|oneri|oner/.test(normalizedQuery),
+            hasFollowUpCue: /takip|devam|son durum|guncel|update|follow[ -]?up|progress|durum|az once|demin|bugun|dun|peki|ya da|ya da ne|baska|alternatif|devami|sonrasi|nerede|ne oldu|sonuc|sonuc ne|ne yapacagiz|peki ne|peki ya|o zaman|oyleyse|madem|peki ya onun|onun yerine|onun yerine ne|bir de|suna da|buna da|diger|obur/.test(normalizedQuery),
+            hasRecallCue: /hatirla|hatirlat|recall|remember|bildikler(in|ini)|what do you know|retrieve|ne demistin|ne soyledin|ne konustuk|bahsettigim|dedigim|soyledigim|paylastigim|dun|evvelsi gun|gecen (hafta|ay)|az once|demin|biraz once|bir sure once|daha once|o proje|o konu|o sey|onun hakkinda|bununla ilgili|bu konuda|hatirlarsan|hatirladigim kadariyla|bildigim kadariyla|bahsi gecen|sozunu ettigim|kastettigim/.test(normalizedQuery),
             hasConstraintCue: /sadece|yalnizca|ozellikle|kisa|short|brief|odaklan|focus|bounded|limit/.test(normalizedQuery),
             hasRecentContext: recentUserMessages.some(message => message.content.trim().length > 0),
-            hasAnalyticalCue: /analiz|karsilastir|trade-?off|step by step|adim adim|degerlendir|planla|reason|explain|why|diagnose/.test(normalizedQuery),
+            hasAnalyticalCue: /analiz|karsilastir|trade-?off|step by step|adim adim|degerlendir|planla|reason|explain|why|diagnose|neden|nicin|niye|acikla|detayli|detay|karmasik/.test(normalizedQuery),
             hasExploratoryCue: /oner|fikir|arastir|kesfet|alternatif|recipe|tarif|brainstorm|explore|options|ideas/.test(normalizedQuery),
+            hasPersonalReference: /benim|bana|bende|benimki|benimle|benden|yigit|yigit'in|yigit'e|yigit'le|yigit'ten|projem|isim|calismam|odevim|arkadasim|ailem|evim|odam|okulum|sirketim|patronum|mudurum|hocam|yaptigim|ettigim|verdigim|aldigim/.test(normalizedQuery),
+            hasContextualQuestion: /(o|bu|su) (proje|konu|is|sey|olay|durum|yaptigimiz)|nasil (gidiyor|ilerliyor|bitiyor)|ne zaman (bitecek|baslayacak|yapacagiz)|hangi (proje|konu|is|karar)|kim (yapacak|dedi|soyledi|istiyor)/.test(normalizedQuery),
             queryLength: query.trim().length,
             clauseCount,
         };

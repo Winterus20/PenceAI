@@ -82,11 +82,15 @@ const ConfigSchema = z.object({
   temperature: z.coerce.number().min(0).max(2).catch(0.7).default(0.7),
   maxTokens: z.coerce.number().min(256).max(128000).catch(4096).default(4096),
 
-  // Observability (Langfuse)
-  langfuseEnabled: z.coerce.boolean().default(false),
-  langfuseSecretKey: z.string().optional(),
-  langfusePublicKey: z.string().optional(),
-  langfuseBaseUrl: z.string().default('https://cloud.langfuse.com'),
+  // Agentic RAG
+  agenticRAGEnabled: z.coerce.boolean().default(true),
+  agenticRAGMaxHops: z.coerce.number().min(1).max(5).default(3),
+  agenticRAGDecisionConfidence: z.coerce.number().min(0).max(1).default(0.5),
+  agenticRAGCritiqueRelevanceFloor: z.coerce.number().min(0).max(1).default(0.5),
+  agenticRAGCritiqueCompletenessFloor: z.coerce.number().min(0).max(1).default(0.3),
+  agenticRAGVerificationSupportFloor: z.coerce.number().min(0).max(1).default(0.6),
+  agenticRAGVerificationUtilityFloor: z.coerce.number().min(1).max(5).default(2),
+  agenticRAGMaxRegenerations: z.coerce.number().min(0).max(3).default(1),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema> & {
@@ -133,11 +137,16 @@ export function loadConfig(): AppConfig {
         logLevel: process.env.LOG_LEVEL,
         temperature: process.env.TEMPERATURE,
         maxTokens: process.env.MAX_TOKENS,
-        // Observability (Langfuse)
-        langfuseEnabled: process.env.LANGFUSE_ENABLED === 'true',
-        langfuseSecretKey: process.env.LANGFUSE_SECRET_KEY,
-        langfusePublicKey: process.env.LANGFUSE_PUBLIC_KEY,
-        langfuseBaseUrl: process.env.LANGFUSE_BASE_URL || 'https://cloud.langfuse.com',
+
+        // Agentic RAG
+        agenticRAGEnabled: process.env.AGENTIC_RAG_ENABLED,
+        agenticRAGMaxHops: process.env.AGENTIC_RAG_MAX_HOPS,
+        agenticRAGDecisionConfidence: process.env.AGENTIC_RAG_DECISION_CONFIDENCE,
+        agenticRAGCritiqueRelevanceFloor: process.env.AGENTIC_RAG_CRITIQUE_RELEVANCE_FLOOR,
+        agenticRAGCritiqueCompletenessFloor: process.env.AGENTIC_RAG_CRITIQUE_COMPLETENESS_FLOOR,
+        agenticRAGVerificationSupportFloor: process.env.AGENTIC_RAG_VERIFICATION_SUPPORT_FLOOR,
+        agenticRAGVerificationUtilityFloor: process.env.AGENTIC_RAG_VERIFICATION_UTILITY_FLOOR,
+        agenticRAGMaxRegenerations: process.env.AGENTIC_RAG_MAX_REGENERATIONS,
     };
 
     const parsed = ConfigSchema.safeParse(rawConfig);

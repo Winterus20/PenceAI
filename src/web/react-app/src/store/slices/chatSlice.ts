@@ -16,6 +16,7 @@ export const createChatSlice: StateCreator<
   conversations: [],
   activeConversationId: null,
   stats: { conversations: 0, messages: 0, memories: 0 },
+  messageMetrics: {},
   selectedConversationIds: [],
   bulkDeleteConfirm: null,
   editingMessage: { messageId: null, content: '' },
@@ -75,6 +76,10 @@ export const createChatSlice: StateCreator<
 
   setStats: (stats) => set((state) => ({
     stats: { ...state.stats, ...stats }
+  })),
+
+  setMessageMetrics: (payload) => set((state) => ({
+    messageMetrics: { ...state.messageMetrics, [payload.conversationId]: payload.metrics }
   })),
 
   clearMessages: () => set({ messages: [], currentThinking: '' }),

@@ -43,6 +43,11 @@ import { SpreadingActivationEngine } from './retrieval/SpreadingActivation.js';
 import { CoverageRepair } from './retrieval/CoverageRepair.js';
 import { BudgetApplier } from './retrieval/BudgetApplier.js';
 import { BehaviorDiscovery } from './retrieval/BehaviorDiscovery.js';
+import { computeRetrievalConfidence, type RetrievalConfidenceResult } from './retrieval/RetrievalConfidenceScorer.js';
+// Eski Agentic RAG importları (kullanılmıyor ama backward compatibility için tutuluyor)
+// import { RetrievalDecider, type RetrievalDecision, type RetrieverType } from './retrieval/RetrievalDecider.js';
+// import { PassageCritique, type CritiqueResult } from './retrieval/PassageCritique.js';
+// import { MultiHopRetrieval, type MultiHopResult } from './retrieval/MultiHopRetrieval.js';
 export type { PromptContextBundle } from './manager/types.js';
 export type {
     PromptContextRequest,
@@ -94,6 +99,9 @@ export class MemoryRetrievalOrchestrator {
     private readonly budgetApplier: BudgetApplier;
     private readonly behaviorDiscovery: BehaviorDiscovery;
 
+    // Confidence score için gerekli alanlar
+    private confidenceThreshold: number = 0.6;
+
     constructor(private readonly deps: RetrievalOrchestratorDeps) {
         this.intentAnalyzer = new IntentAnalyzer(deps);
         this.retrievalPrimer = new RetrievalPrimer();
@@ -106,6 +114,15 @@ export class MemoryRetrievalOrchestrator {
         this.coverageRepair = new CoverageRepair();
         this.budgetApplier = new BudgetApplier();
         this.behaviorDiscovery = new BehaviorDiscovery(deps);
+        this.confidenceThreshold = this.deps.agenticRAGDecisionConfidence ?? 0.6;
+    }
+
+    /**
+     * Confidence threshold'ı runtime'da yapılandır.
+     */
+    setConfidenceThreshold(threshold: number): void {
+        this.confidenceThreshold = Math.max(0.3, Math.min(1.0, threshold));
+        logger.info({ msg: '[ConfidenceScore] Threshold updated', threshold: this.confidenceThreshold });
     }
 
     private createSelectionSnapshot(
@@ -160,6 +177,8 @@ export class MemoryRetrievalOrchestrator {
         supplementalMemories: MemoryRow[];
         archivalMemories: MemoryRow[];
         decisionReasons: string[];
+        // Confidence score debug
+        confidenceResult?: RetrievalConfidenceResult | null;
     }) {
         const {
             query, activeConversationId, recipe, signals, typePreference, cognitiveLoad,
@@ -170,6 +189,7 @@ export class MemoryRetrievalOrchestrator {
             reviewMemories, followUpCandidates,
             relevantMemories, supplementalMemories, archivalMemories,
             decisionReasons,
+            confidenceResult,
         } = params;
 
         return {
@@ -283,6 +303,12 @@ export class MemoryRetrievalOrchestrator {
                 followUp: followUpSnapshot.breakdown,
             },
             reasons: decisionReasons,
+            // Confidence score debug
+            confidenceScore: confidenceResult ? {
+                score: confidenceResult.score,
+                needsRetrieval: confidenceResult.needsRetrieval,
+                reasons: confidenceResult.reasons,
+            } : null,
         };
     }
 
@@ -309,12 +335,27 @@ export class MemoryRetrievalOrchestrator {
         const analysis = this.intentAnalyzer.analyze(query, recentMessages);
         const { signals, recipe, typePreference, cognitiveLoad } = analysis;
 
+        // Phase 1.5: Confidence Score - Deterministik retrieval decision
+        const recentMessagesForConfidence = recentMessages ?? [];
+        const confidenceResult = computeRetrievalConfidence(signals, query, { 
+            threshold: this.confidenceThreshold,
+            recentMessagesCount: recentMessagesForConfidence.length,
+        });
+        const skipHeavyRetrieval = !confidenceResult.needsRetrieval;
+
+        logger.info({
+            msg: '[ConfidenceScore] Retrieval decision',
+            score: confidenceResult.score,
+            needsRetrieval: confidenceResult.needsRetrieval,
+            reasons: confidenceResult.reasons,
+        });
+
         // Phase 2: GraphRAG retrieval
         let graphRAGResult: GraphRAGResult | null = null;
         const resolvedEngine = typeof this.deps.graphRAGEngine === 'function'
             ? this.deps.graphRAGEngine()
             : this.deps.graphRAGEngine;
-        if (resolvedEngine && recipe.useGraphRAG) {
+        if (resolvedEngine && recipe.useGraphRAG && !skipHeavyRetrieval) {
             try {
                 const result = await resolvedEngine.retrieve(query, {
                     maxHops: recipe.maxHops ?? 2,
@@ -334,12 +375,16 @@ export class MemoryRetrievalOrchestrator {
         }
 
         // Parallel fetch
+        const effectiveSearchLimit = skipHeavyRetrieval ? Math.min(searchLimit, 3) : searchLimit;
         const [searchResult, conversationSummaries, reviewMemories, followUpCandidates] = await Promise.all([
-            this.deps.graphAwareSearch(query, searchLimit, recipe.graphDepth),
+            this.deps.graphAwareSearch(query, effectiveSearchLimit, skipHeavyRetrieval ? 0 : recipe.graphDepth),
             Promise.resolve(this.deps.getRecentConversationSummaries(summaryLimit)),
             Promise.resolve(this.deps.getMemoriesDueForReview(reviewLimit * (recipe.preferReviewSignals ? 2 : 1))),
             Promise.resolve(this.deps.getFollowUpCandidates(followUpDays, followUpLimit)),
         ]);
+
+        // Phase 2.5: Agentic RAG Passage Critique + Multi-Hop Retrieval DEVRE DIŞI
+        // Performance optimizasyonu nedeniyle kapatıldı - ilk arama sonuçları direkt kullanılır
 
         // Budget + dual-process routing
         const primer = this.retrievalPrimer.buildPrimer(query, recentMessages, signals, recipe);
@@ -353,15 +398,18 @@ export class MemoryRetrievalOrchestrator {
         const dualProcess = this.budgetApplier.resolveDualProcessRouting(query, signals, recipe, cognitiveLoad, baseBudgetApplication);
         const budgetApplication = this.budgetApplier.applyDualProcessAdjustments(dualProcess, baseBudgetApplication);
 
-        // Relevant memory selection
+        // Relevant memory selection — Agentic RAG devre dışı, direkt arama sonuçları kullanılır
+        let agenticFilteredMemories: MemoryRow[] = searchResult.active;
+        // Not: Passage critique ve multi-hop devre dışı, filtreleme yapılmıyor
+
         const relevantCandidateLimit = Math.max(budgetApplication.relevantLimit, searchLimit);
         const conversationPrioritized = this.deps.prioritizeConversationMemories(
-            searchResult.active,
+            agenticFilteredMemories,
             recentMessages,
             activeConversationId,
             relevantCandidateLimit,
         );
-        const relevantBase = recipe.preferConversationSignals ? conversationPrioritized : searchResult.active;
+        const relevantBase = recipe.preferConversationSignals ? conversationPrioritized : agenticFilteredMemories;
         const selectionContextBase = {
             query,
             activeConversationId,
@@ -483,6 +531,16 @@ export class MemoryRetrievalOrchestrator {
         decisionReasons.push(...secondPassAudit.guardrailSummary);
         decisionReasons.push(...secondPassAudit.coverageGaps.map(gap => `coverage_gap:${gap.reason}`));
         decisionReasons.push(...secondPassAudit.adjustments.filter(adjustment => adjustment.applied && adjustment.reason).map(adjustment => `second_pass_adjustment:${adjustment.lane}:${adjustment.reason}`));
+
+        // Confidence score decisions
+        if (confidenceResult) {
+            if (confidenceResult.needsRetrieval) {
+                decisionReasons.push(`confidence_score:retrieve (score=${confidenceResult.score.toFixed(2)}, reasons=${confidenceResult.reasons.join(',')})`);
+            } else {
+                decisionReasons.push(`confidence_score:no_retrieve (score=${confidenceResult.score.toFixed(2)})`);
+            }
+        }
+
         decisionReasons.push(`behavior_discovery:${behaviorDiscoveryTrace.state}`);
         if (behaviorDiscoveryTrace.shadowComparison) {
             decisionReasons.push(`behavior_discovery_shadow:${behaviorDiscoveryTrace.shadowComparison.summary}`);
@@ -529,10 +587,14 @@ export class MemoryRetrievalOrchestrator {
             supplementalMemories,
             archivalMemories,
             decisionReasons,
+            // Confidence score debug
+            confidenceResult,
         });
         this.deps.recordDebug(debugPayload);
 
         // Bundle assembly
+        logger.info(`[Memory] 📚 Retrieval: ${relevantMemories.length} relevant, ${archivalMemories.length} archival, ${supplementalMemories.length} supplemental | ${conversationSummaries.length} summaries | ${rankedReviewMemories.length} review | ${rankedFollowUpCandidates.length} followup`);
+
         return {
             relevantMemories,
             archivalMemories,

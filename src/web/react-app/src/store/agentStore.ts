@@ -7,10 +7,11 @@ import { createSettingsSlice } from './slices/settingsSlice';
 
 // Type re-exports for backwards compatibility with existing components
 // This allows us to refactor internally without breaking the rest of the application
-export type { 
-  AttachmentItem, ToolCallItem, Message, ConversationItem, StatsState, 
-  ConfirmRequest, ActiveView, Theme, Channel, BulkDeleteConfirmState, 
-  EditingMessageState, LightboxState, FeedbackState, ToastState, AgentState 
+export type {
+  AttachmentItem, ToolCallItem, Message, ConversationItem, StatsState,
+  ConfirmRequest, ActiveView, Theme, Channel, BulkDeleteConfirmState,
+  EditingMessageState, LightboxState, FeedbackState, ToastState, AgentState,
+  MessageMetrics
 } from './types';
 
 export const useAgentStore = create<AgentState>()(

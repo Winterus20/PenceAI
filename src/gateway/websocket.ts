@@ -37,7 +37,6 @@ interface WebSocketChatMessage {
 	newConversation?: boolean;
 	userName?: string;
 	attachments?: WebSocketAttachment[];
-	traceId?: string; // Langfuse trace ID propagation
 }
 
 interface WebSocketAttachment {
@@ -153,11 +152,9 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
             while (messageQueue.length > 0) {
                 const { data } = messageQueue.shift()!;
                 try {
-                    // Extract traceId from chat message for Langfuse propagation
-                    const traceId = (data as WebSocketChatMessage).traceId;
                     await runWithTraceId(async () => {
                         await handleChatMessage(data, ws);
-                    }, traceId);
+                    });
                 } catch (err) {
                     logger.error({ err }, '[Gateway] Kuyruk mesaj hatası');
                 }
@@ -279,6 +276,8 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                             ws.send(JSON.stringify({ type: 'clear_stream' }));
                         } else if (event.type === 'replace_stream') {
                             ws.send(JSON.stringify({ type: 'replace_stream', content: event.data.content }));
+                        } else if (event.type === 'metrics') {
+                            ws.send(JSON.stringify({ type: 'metrics', data: event.data }));
                         } else {
                             ws.send(JSON.stringify({
                                 type: 'agent_event',

@@ -6,8 +6,9 @@ import { useAgentStore } from './store/agentStore';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { QueryProvider } from './providers/QueryProvider';
 
-// Lazy load MCP Marketplace
+// Lazy load MCP Marketplace and Metrics Page
 const MCPMarketplace = lazy(() => import('./components/mcp/MCPMarketplace'));
+const MetricsPage = lazy(() => import('./pages/MetricsPage'));
 
 function App() {
   const activeView = useAgentStore((state) => state.activeView);
@@ -26,6 +27,12 @@ function App() {
         return (
           <Suspense fallback={<div className="flex items-center justify-center h-full text-muted-foreground">Yükleniyor...</div>}>
             <MCPMarketplace />
+          </Suspense>
+        );
+      case 'metrics':
+        return (
+          <Suspense fallback={<div className="flex items-center justify-center h-full text-muted-foreground">Yükleniyor...</div>}>
+            <MetricsPage />
           </Suspense>
         );
       case 'chat':

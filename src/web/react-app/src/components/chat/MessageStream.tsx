@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { Sparkles, Globe, Code, MessageCircle, BrainCircuit } from 'lucide-react';
-import type { Message } from '@/store/agentStore';
+import type { Message, MessageMetrics } from '@/store/agentStore';
 import { Button } from '@/components/ui/button';
 import { MessageBubble } from './MessageBubble';
 
@@ -17,6 +17,7 @@ interface MessageStreamProps {
   onImageClick?: (url: string, alt: string) => void;
   onSendFeedback?: (messageId: string, type: 'positive' | 'negative') => void;
   feedbacks?: Record<string, { type: 'positive' | 'negative' }>;
+  messageMetrics?: Record<string, MessageMetrics | null>;
 }
 
 const quickActions = [
@@ -31,15 +32,15 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
   showThinking,
   showTools,
   isReceiving,
-  activeConversationId: _unused,
+  activeConversationId,
   onRegenerate,
   onQuickAction,
   onEditMessage,
   onImageClick,
   onSendFeedback,
   feedbacks,
+  messageMetrics,
 }) => {
-  void _unused;
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const virtuosoRef = useRef<HTMLDivElement>(null);
 
@@ -64,7 +65,13 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
     }
   }, [messages.length, isReceiving]);
 
-  const renderMessage = (_index: number, msg: Message) => (
+  const renderMessage = (_index: number, msg: Message) => {
+    const convId = msg.role === 'assistant' ? (activeConversationId ?? '') : '';
+    const metricsForMsg = msg.role === 'assistant' ? (messageMetrics?.[convId] ?? undefined) : undefined;
+    if (msg.role === 'assistant' && metricsForMsg) {
+      console.log('[MessageStream] Passing metrics to MessageBubble for msg', msg.id, 'convId:', convId);
+    }
+    return (
     <MessageBubble
       key={msg.id}
       msg={msg}
@@ -78,8 +85,11 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
       onEditMessage={onEditMessage}
       onImageClick={onImageClick}
       feedbacks={feedbacks}
+      conversationId={msg.role === 'assistant' ? (activeConversationId ?? undefined) : undefined}
+      metrics={metricsForMsg}
     />
   );
+  };
 
   /* ─── Empty State ─── */
   if (messages.length === 0) {
