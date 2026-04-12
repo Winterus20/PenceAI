@@ -628,14 +628,31 @@ export function createBuiltinTools(
                         return `Hata: Brave Search API ${response.status} — ${response.statusText}`;
                     }
 
-                    const data = await response.json() as any;
-                    const results = data?.web?.results;
+                    // Brave Search API response Zod schema
+                    const BraveSearchResult = z.object({
+                        web: z.object({
+                            results: z.array(z.object({
+                                title: z.string(),
+                                url: z.string(),
+                                description: z.string().optional(),
+                                age: z.string().optional(),
+                            })).optional(),
+                        }).optional(),
+                    });
+
+                    const raw = await response.json();
+                    const data = BraveSearchResult.safeParse(raw);
+                    if (!data.success) {
+                        return 'Hata: Brave Search API yanıtı parse edilemedi';
+                    }
+
+                    const results = data.data?.web?.results;
 
                     if (!results || results.length === 0) {
                         return `"${query}" için sonuç bulunamadı.`;
                     }
 
-                    const formatted = results.map((r: any, i: number) => {
+                    const formatted = results.map((r, i: number) => {
                         let entry = `${i + 1}. **${r.title}**\n   ${r.url}`;
                         if (r.description) entry += `\n   ${r.description}`;
                         if (r.age) entry += ` (${r.age})`;
@@ -643,8 +660,8 @@ export function createBuiltinTools(
                     }).join('\n\n');
 
                     return `🔍 "${query}" için ${results.length} sonuç:\n\n${formatted}`;
-                } catch (err: any) {
-                    return `Hata: Web araması yapılamadı — ${err.message}`;
+                } catch (err: unknown) {
+                    return `Hata: Web araması yapılamadı — ${err instanceof Error ? err.message : String(err)}`;
                 }
             },
         });

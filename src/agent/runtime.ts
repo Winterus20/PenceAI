@@ -4,6 +4,7 @@ import { TOOL_CALL_CLEAR_SIGNAL } from '../llm/provider.js';
 import type { UnifiedMessage, ConversationMessage, LLMMessage, LLMResponse, ToolCall, LLMToolDefinition } from '../router/types.js';
 import { MemoryManager } from '../memory/manager.js';
 import type { PromptContextBundle } from '../memory/manager/types.js';
+import type { MemoryRow } from '../memory/types.js';
 import { buildSystemPrompt, getBuiltinToolDefinitions, buildLightExtractionPrompt, buildDeepExtractionPrompt, buildSummarizationPrompt, buildEntityExtractionPrompt } from './prompt.js';
 import { createBuiltinTools, type ToolExecutor, type ConfirmCallback } from './tools.js';
 import { getUnifiedToolRegistry } from './mcp/registry.js';
@@ -174,9 +175,9 @@ export class AgentRuntime {
             this._lastMcpListPrompt = null;
 
             const mcpToolCount = allTools.length - getBuiltinToolDefinitions().length;
-            logger.info(`[Agent] 🔌 MCP tools registered — ${allTools.length} total tools (${mcpToolCount} MCP tools)`);
-        } catch (error) {
-            logger.error({ error }, '[Agent] Failed to register MCP tools');
+            logger.info(`[Agent] MCP tools registered — ${allTools.length} total tools (${mcpToolCount} MCP tools)`);
+        } catch (error: unknown) {
+            logger.error({ err: error }, '[Agent] Failed to register MCP tools');
         }
     }
 
@@ -209,10 +210,10 @@ export class AgentRuntime {
                 this.toolDefinitions = pruned;
                 this._mcpToolsRegistered = true;
                 
-                logger.info(`[Agent] 🔌 Tool cache miss — ${pruned.length} tools (${this._lastToolHash})`);
+                logger.info(`[Agent] Tool cache miss — ${pruned.length} tools (${this._lastToolHash})`);
                 return pruned;
-            } catch (error) {
-                logger.warn({ error }, '[Agent] Failed to get MCP tools, falling back to built-in tools');
+            } catch (error: unknown) {
+                logger.warn({ err: error }, '[Agent] Failed to get MCP tools, falling back to built-in tools');
             }
         }
         return this.toolDefinitions;
@@ -451,12 +452,12 @@ export class AgentRuntime {
         // 2. Kısa mesaj + aktif konuşma varsa → skip (bağlam zaten var)
         // 3. Normal durumlarda → GraphRAG retrieval yap
         const graphRAGConfig = GraphRAGConfigManager.getConfig();
-        let graphRAGResult: { memories: Array<{ id: number; content: string }>; communitySummaries: Array<{ id: string; summary: string }>; graphContext?: Record<string, unknown> } | null = null;
+        let graphRAGResult: { memories: MemoryRow[]; communitySummaries: Array<{ id: string; summary: string }>; graphContext?: Record<string, unknown> } | null = null;
 
         // Double retrieval önleme: contextBundle'dan GraphRAG sonuçları varsa reuse et
         if (contextBundle.graphRAG && contextBundle.graphRAG.memories.length > 0) {
             graphRAGResult = {
-                memories: contextBundle.graphRAG.memories.map(m => ({ id: m.id, content: m.content })),
+                memories: contextBundle.graphRAG.memories,
                 communitySummaries: contextBundle.graphRAG.communitySummaries.map(cs => ({
                     id: cs.communityId,
                     summary: cs.summary,
@@ -506,7 +507,7 @@ export class AgentRuntime {
 
                     if (result.success) {
                         graphRAGResult = {
-                            memories: result.memories.map(m => ({ id: m.id, content: m.content })),
+                            memories: result.memories,
                             communitySummaries: (result.communitySummaries || []).map(cs => ({
                                 id: cs.communityId,
                                 summary: cs.summary,
@@ -538,9 +539,11 @@ export class AgentRuntime {
             const missingMemories = graphRAGResult.memories.filter(gm => !existingIds.has(gm.id));
 
             if (missingMemories.length > 0) {
-                const memoryMap = new Map(relevantMemories.map(m => [m.id, m as any]));
+                const memoryMap = new Map<number, MemoryRow>(
+                    relevantMemories.map(m => [m.id, m])
+                );
                 for (const gm of missingMemories) {
-                    memoryMap.set(gm.id, gm as any);
+                    memoryMap.set(gm.id, gm);
                 }
                 finalRelevantMemories = Array.from(memoryMap.values());
                 logger.info(`[Agent] GraphRAG added ${missingMemories.length} new memories to context directly`);
@@ -715,13 +718,11 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
 
             // Tool definitions'ı her iterasyonda güncelle (MCP araçları dinamik olarak değişebilir)
             const currentToolDefinitions = this._getEffectiveToolDefinitions();
-            
-            // DEBUG: MCP araçlarını logla
+
+            // MCP araç durumunu logla
             const mcpTools = currentToolDefinitions.filter(t => t.name.startsWith('mcp:'));
             if (mcpTools.length > 0) {
-                logger.info(`[Agent] 🔌 MCP tools being sent to LLM: ${mcpTools.map(t => t.name).join(', ')}`);
-            } else {
-                logger.warn('[Agent] ⚠️ No MCP tools found in tool definitions — check MCP server status');
+                logger.debug(`[Agent] MCP tools active: ${mcpTools.map(t => t.name).join(', ')}`);
             }
 
             const chatOptions = {
@@ -1155,7 +1156,12 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                 // 3) Trailing comma düzelt: ,] ve ,} → ] ve }
                 jsonStr = jsonStr.replace(/,\s*([\]}])/g, '$1');
 
-                let parsed: any;
+                interface ParsedGraphResult {
+                    entities?: Array<{ name?: string; type?: string }>;
+                    relations?: Array<{ targetMemoryId?: number; relation?: string; relationType?: string; confidence?: number; description?: string }>;
+                }
+
+                let parsed: ParsedGraphResult;
                 try {
                     parsed = JSON.parse(jsonStr);
                 } catch {
@@ -1164,17 +1170,19 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                 }
                 return {
                     entities: Array.isArray(parsed.entities) ? parsed.entities.filter(
-                        (e: any) => e && typeof e.name === 'string' && e.name.length > 0
-                    ).map((e: any) => ({
+                        (e): e is { name: string; type: string } =>
+                            e != null && typeof e.name === 'string' && e.name.length > 0
+                    ).map((e) => ({
                         name: e.name,
                         type: ['person', 'technology', 'project', 'place', 'organization', 'concept'].includes(e.type) ? e.type : 'concept',
                     })) : [],
                     relations: Array.isArray(parsed.relations) ? parsed.relations.filter(
-                        (r: any) => r && typeof r.targetMemoryId === 'number' &&
+                        (r): r is { targetMemoryId: number; relationType?: string; relation?: string; confidence?: number; description?: string } =>
+                            r != null && typeof r.targetMemoryId === 'number' &&
                             filteredRelated.some(m => m.id === r.targetMemoryId)
-                    ).map((r: any) => ({
+                    ).map((r) => ({
                         targetMemoryId: r.targetMemoryId,
-                        relationType: ['related_to', 'supports', 'contradicts', 'caused_by', 'part_of'].includes(r.relationType) ? r.relationType : 'related_to',
+                        relationType: ['related_to', 'supports', 'contradicts', 'caused_by', 'part_of'].includes(r.relationType ?? r.relation ?? '') ? (r.relationType ?? r.relation ?? 'related_to') : 'related_to',
                         confidence: typeof r.confidence === 'number' ? Math.min(1, Math.max(0, r.confidence)) : 0.5,
                         description: typeof r.description === 'string' ? r.description.substring(0, 200) : '',
                     })) : [],
@@ -1707,8 +1715,8 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
                         result = await tool.execute(tc.arguments);
                     }
                 }
-            } catch (err: any) {
-                result = `Hata: ${err.message}`;
+            } catch (err: unknown) {
+                result = `Hata: ${err instanceof Error ? err.message : String(err)}`;
                 isError = true;
             }
 
@@ -1861,9 +1869,9 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
     /**
      * Bir mesajın kapladığı token miktarını tahmin eder (Araç verileri dahil)
      */
-    private estimateMessageTokens(msg: ConversationMessage): number {
+    private estimateMessageTokens(msg: ConversationMessage & { _cachedTokens?: number }): number {
         // Önbelleğe alınmış token tahmini varsa doğrudan döndür
-        if ((msg as any)._cachedTokens !== undefined) return (msg as any)._cachedTokens;
+        if (msg._cachedTokens !== undefined) return msg._cachedTokens;
 
         let tokens = this.estimateTokens(msg.content);
 
@@ -1885,7 +1893,7 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
         tokens += 4;
 
         // Sonraki erişimler için önbelleğe al
-        (msg as any)._cachedTokens = tokens;
+        msg._cachedTokens = tokens;
         return tokens;
     }
 }
