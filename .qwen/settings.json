@@ -23,7 +23,8 @@
       "Bash(wc *)",
       "Bash(@type *)",
       "WebSearch",
-      "WebFetch(github.com)"
+      "WebFetch(github.com)",
+      "Bash(del *)"
     ]
   },
   "$version": 3
