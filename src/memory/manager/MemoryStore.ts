@@ -127,6 +127,7 @@ export class MemoryStore {
       if (this.memoryLocks.get(scopeLockKey) === lockAcquired) {
         this.memoryLocks.delete(scopeLockKey);
       }
+      this.memoryLocks.delete(lockKey);
       logger.debug({ category: normalized.category, scopeLockKey, contentLockKey, lockKey }, '[Memory] addMemory lock released');
     }
   }

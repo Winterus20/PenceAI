@@ -5,6 +5,19 @@ import type {
     ReconsolidationProposalMode,
 } from './types.js';
 
+/** Reconsolidation pilot güvenlik eşikleri */
+export const DEFAULT_RECONSOLIDATION_GUARDRAILS = {
+    confidenceFloor: 0.78,
+    strictContainmentFloor: 0.92,
+    structuredVarianceSimilarityFloor: 0.95,
+    highSimilaritySemanticFloor: 0.93,
+    highSimilarityJaccardFloor: 0.85,
+    appendSemanticFloor: 0.86,
+    appendJaccardFloor: 0.72,
+} as const;
+
+export type ReconsolidationGuardrailConfig = typeof DEFAULT_RECONSOLIDATION_GUARDRAILS;
+
 export interface NormalizedMemoryWriteInput {
     content: string;
     category: string;
@@ -171,7 +184,10 @@ function computeContainmentRatio(existingContent: string, incomingContent: strin
     return overlap / incomingTokens.size;
 }
 
-export function decideReconsolidationPilot(input: ReconsolidationDecisionInput): ReconsolidationDecision {
+export function decideReconsolidationPilot(
+    input: ReconsolidationDecisionInput,
+    config?: Partial<ReconsolidationGuardrailConfig>,
+): ReconsolidationDecision {
     const {
         memoryType,
         category,
@@ -187,13 +203,8 @@ export function decideReconsolidationPilot(input: ReconsolidationDecisionInput):
     const normalizedIncoming = normalizeWhitespace(incomingContent).toLowerCase();
     const safetyReasons: string[] = [];
     const guardrails: ReconsolidationGuardrailSnapshot = {
-        confidenceFloor: 0.78,
-        strictContainmentFloor: 0.92,
-        structuredVarianceSimilarityFloor: 0.95,
-        highSimilaritySemanticFloor: 0.93,
-        highSimilarityJaccardFloor: 0.85,
-        appendSemanticFloor: 0.86,
-        appendJaccardFloor: 0.72,
+        ...DEFAULT_RECONSOLIDATION_GUARDRAILS,
+        ...config,
         observedConfidence: Number.isFinite(confidence) ? Number(confidence) : null,
         semanticSimilarity,
         jaccardSimilarity,

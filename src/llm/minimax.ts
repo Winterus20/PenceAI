@@ -3,6 +3,13 @@ import { LLMProvider, type ChatOptions, TOOL_CALL_CLEAR_SIGNAL } from './provide
 import type { LLMMessage, LLMResponse, ToolCall } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
 
+interface MiniMaxDelta {
+    content?: string;
+    reasoning_details?: Array<{ text: string }>;
+    tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>;
+    role?: string;
+}
+
 /**
  * MiniMax LLM Provider — OpenAI-uyumlu API kullanır.
  * Base URL: https://api.minimax.io/v1
@@ -26,20 +33,15 @@ export class MiniMaxProvider extends LLMProvider {
         return /auto tool choice requires .*enable-auto-tool-choice.*tool-call-parser|tool_choice.+auto|tool choice.+auto/i.test(error.message);
     }
 
-    private async createChatCompletionWithToolFallback(reqOpts: any): Promise<any> {
+    private async createChatCompletionWithToolFallback(reqOpts: Record<string, unknown>): Promise<any> {
         try {
             return await (this.client.chat.completions as any).create(reqOpts);
         } catch (error) {
-            if (!reqOpts?.tools?.length || !this.isAutoToolChoiceUnsupported(error)) {
+            if (!reqOpts?.tools || (reqOpts.tools as any[]).length === 0 || !this.isAutoToolChoiceUnsupported(error)) {
                 throw error;
             }
 
-            const fallbackReqOpts = {
-                ...reqOpts,
-                tools: undefined,
-                tool_choice: undefined,
-            };
-
+            const { tools: _, tool_choice: __, ...fallbackReqOpts } = reqOpts;
             return await (this.client.chat.completions as any).create(fallbackReqOpts);
         }
     }
@@ -116,26 +118,24 @@ export class MiniMaxProvider extends LLMProvider {
             },
         }));
 
-        const response = await this.withTrace('chat', model, async () => {
-            return await this.createChatCompletionWithToolFallback({
-                model,
-                messages: openaiMessages,
-                tools: tools && tools.length > 0 ? tools : undefined,
-                temperature: options?.temperature ?? 0.7,
-                max_tokens: options?.maxTokens,
-                ...(options?.thinking ? { reasoning_split: true } : {}),
-            }) as OpenAI.Chat.ChatCompletion;
-        });
+        const response = await this.createChatCompletionWithToolFallback({
+            model,
+            messages: openaiMessages,
+            tools: tools && tools.length > 0 ? tools : undefined,
+            temperature: options?.temperature ?? 0.7,
+            max_tokens: options?.maxTokens,
+            ...(options?.thinking ? { reasoning_split: true } : {}),
+        }) as OpenAI.Chat.ChatCompletion;
 
         const choice = response.choices[0];
 
         // Thinking içeriğini çıkar (reasoning_split: true ise reasoning_details alanında olur)
         let thinkingContent: string | undefined;
         if (options?.thinking) {
-            const rawMsg = choice.message as any;
+            const rawMsg = choice.message as { reasoning_details?: Array<{ text?: string }> };
             if (Array.isArray(rawMsg.reasoning_details) && rawMsg.reasoning_details.length > 0) {
                 const joined = rawMsg.reasoning_details
-                    .map((d: any) => d.text || '')
+                    .map((d) => d.text || '')
                     .join('');
                 thinkingContent = joined || undefined;
             }
@@ -261,7 +261,7 @@ export class MiniMaxProvider extends LLMProvider {
         };
 
         for await (const chunk of stream) {
-            const delta = chunk.choices[0]?.delta as any;
+            const delta = chunk.choices[0]?.delta as MiniMaxDelta;
             if (!delta) continue;
             if (delta.content) {
                 const filtered = processChunkText(delta.content);

@@ -98,6 +98,26 @@ export const MAX_ASSOCIATIONS = 8;
 /** Minimum ilişki güven eşiği — bunun altındaki ilişkiler takip edilmez */
 export const MIN_RELATION_CONFIDENCE = 0.25; // 0.35'ten 0.25'e düşürüldü
 
+/** Think engine yapılandırma seçenekleri */
+export interface ThinkEngineConfig {
+    freshnessThreshold?: number;       // Default: 0.3
+    maxHopDepth?: number;              // Default: 2
+    maxAssociations?: number;          // Default: 8
+    maxNeighborsPerHop?: number;       // Default: 5
+    minRelationConfidence?: number;    // Default: 0.25
+    seedCooldownMinutes?: number;      // Default: 30
+}
+
+/** Varsayılan yapılandırma */
+export const DEFAULT_THINK_CONFIG: Readonly<ThinkEngineConfig> = {
+    freshnessThreshold: FRESHNESS_THRESHOLD,
+    maxHopDepth: MAX_HOP_DEPTH,
+    maxAssociations: MAX_ASSOCIATIONS,
+    maxNeighborsPerHop: MAX_NEIGHBORS_PER_HOP,
+    minRelationConfidence: MIN_RELATION_CONFIDENCE,
+    seedCooldownMinutes: 30,
+};
+
 /** Yönlendirme soru şablonları — her düşüncede farklı bir soru seçilir */
 export const REFLECTION_QUESTION_TEMPLATES = [
     [
@@ -143,9 +163,11 @@ export const REFLECTION_QUESTION_TEMPLATES = [
 export function selectSeed(
     manager: MemoryManager,
     recentlySelectedSeedId?: number,
-    cooldownMinutes: number = 30
+    cooldownMinutes?: number,
+    config?: ThinkEngineConfig
 ): ThoughtSeed | null {
     const db = manager.getDatabase();
+    const effectiveCooldown = cooldownMinutes ?? config?.seedCooldownMinutes ?? 30;
 
     // Eğer recentlySelectedSeedId verilmişse, bu belleğin son erişim zamanını kontrol et
     if (recentlySelectedSeedId) {
@@ -156,7 +178,7 @@ export function selectSeed(
         if (seedInfo && seedInfo.last_accessed) {
             const lastAccessed = new Date(seedInfo.last_accessed).getTime();
             const elapsed = Date.now() - lastAccessed;
-            const cooldownMs = cooldownMinutes * 60 * 1000;
+            const cooldownMs = effectiveCooldown * 60 * 1000;
 
             if (elapsed < cooldownMs) {
                 // Cooldown süresi dolmamış, bu seed'i atla
@@ -166,16 +188,20 @@ export function selectSeed(
     }
 
     // Strateji 1: Son erişilen taze anı (son 24 saat)
-    const recentMemory = db.prepare(`
+    const recentMemorySQL = `
         SELECT id, content, importance, stability, last_accessed
         FROM memories
         WHERE is_archived = 0
             AND last_accessed IS NOT NULL
             AND last_accessed > datetime('now', '-1 day')
-            ${recentlySelectedSeedId ? `AND id != ${recentlySelectedSeedId}` : ''}
+            ${recentlySelectedSeedId ? 'AND id != ?' : ''}
         ORDER BY last_accessed DESC
         LIMIT 5
-    `).all() as Array<MemoryRow>;
+    `;
+    const recentMemory = (recentlySelectedSeedId
+        ? db.prepare(recentMemorySQL).all(recentlySelectedSeedId)
+        : db.prepare(recentMemorySQL).all()
+    ) as Array<MemoryRow>;
 
     for (const mem of recentMemory) {
         const retention = computeRetention(
@@ -193,14 +219,18 @@ export function selectSeed(
     }
 
     // Strateji 2: Yüksek önemli anı
-    const importantMemory = db.prepare(`
+    const importantMemorySQL = `
         SELECT id, content, importance, stability, last_accessed
         FROM memories
         WHERE is_archived = 0 AND importance >= 7
-            ${recentlySelectedSeedId ? `AND id != ${recentlySelectedSeedId}` : ''}
+            ${recentlySelectedSeedId ? 'AND id != ?' : ''}
         ORDER BY importance DESC, RANDOM()
         LIMIT 1
-    `).get() as MemoryRow | undefined;
+    `;
+    const importantMemory = (recentlySelectedSeedId
+        ? db.prepare(importantMemorySQL).get(recentlySelectedSeedId)
+        : db.prepare(importantMemorySQL).get()
+    ) as MemoryRow | undefined;
 
     if (importantMemory) {
         const retention = computeRetention(
@@ -218,14 +248,18 @@ export function selectSeed(
     }
 
     // Strateji 3: Rastgele aktif anı (keşif — fallback)
-    const randomMemory = db.prepare(`
+    const randomMemorySQL = `
         SELECT id, content, importance, stability, last_accessed
         FROM memories
         WHERE is_archived = 0
-            ${recentlySelectedSeedId ? `AND id != ${recentlySelectedSeedId}` : ''}
+            ${recentlySelectedSeedId ? 'AND id != ?' : ''}
         ORDER BY RANDOM()
         LIMIT 1
-    `).get() as MemoryRow | undefined;
+    `;
+    const randomMemory = (recentlySelectedSeedId
+        ? db.prepare(randomMemorySQL).get(recentlySelectedSeedId)
+        : db.prepare(randomMemorySQL).get()
+    ) as MemoryRow | undefined;
 
     if (randomMemory) {
         return {
@@ -256,15 +290,19 @@ export function selectSeed(
 export function graphWalk(
     manager: MemoryManager,
     seedId: number,
-    maxDepth: number = MAX_HOP_DEPTH
+    maxDepth?: number,
+    config?: ThinkEngineConfig
 ): Association[] {
+    const effectiveMaxDepth = maxDepth ?? config?.maxHopDepth ?? MAX_HOP_DEPTH;
+    const effectiveMaxAssociations = config?.maxAssociations ?? MAX_ASSOCIATIONS;
+    const effectiveMaxNeighbors = config?.maxNeighborsPerHop ?? MAX_NEIGHBORS_PER_HOP;
     const visited = new Set<number>([seedId]);
     const associations: Association[] = [];
 
     // BFS: her derinlik katmanı ayrı işlenir
     let currentLayer = [seedId];
 
-    for (let hop = 1; hop <= maxDepth; hop++) {
+    for (let hop = 1; hop <= effectiveMaxDepth; hop++) {
         const nextLayer: number[] = [];
 
         for (const nodeId of currentLayer) {
@@ -275,7 +313,7 @@ export function graphWalk(
             const neighbors = manager.getAutonomousGraphWalkNeighbors(
                 nodeId,
                 hopConfidenceThreshold,
-                MAX_NEIGHBORS_PER_HOP
+                effectiveMaxNeighbors
             );
 
             for (const neighbor of neighbors) {
@@ -312,15 +350,15 @@ export function graphWalk(
                 nextLayer.push(neighbor.id);
 
                 // Toplam çağrışım limitine ulaştıysak dur
-                if (associations.length >= MAX_ASSOCIATIONS) break;
+                if (associations.length >= effectiveMaxAssociations) break;
             }
 
-            if (associations.length >= MAX_ASSOCIATIONS) break;
+            if (associations.length >= effectiveMaxAssociations) break;
         }
 
         currentLayer = nextLayer;
 
-        if (associations.length >= MAX_ASSOCIATIONS || currentLayer.length === 0) break;
+        if (associations.length >= effectiveMaxAssociations || currentLayer.length === 0) break;
     }
 
     // Tazelik × önem × güven sırasına göre sırala
@@ -456,17 +494,18 @@ export function think(
     manager: MemoryManager,
     emotion: EmotionalContext,
     recentlySelectedSeedId?: number,
-    seedCooldownMinutes: number = 30,
-    questionTemplateIndex?: number
+    seedCooldownMinutes?: number,
+    questionTemplateIndex?: number,
+    config?: ThinkEngineConfig
 ): ThoughtLogEntry | null {
     // 1. Tohum seç (bir önceki seçileni dışla)
-    const seed = selectSeed(manager, recentlySelectedSeedId);
+    const seed = selectSeed(manager, recentlySelectedSeedId, seedCooldownMinutes, config);
     if (!seed) {
         return null;
     }
 
     // 2. Ağı Gez (Graph Walk)
-    const associations = graphWalk(manager, seed.memoryId);
+    const associations = graphWalk(manager, seed.memoryId, undefined, config);
     if (associations.length === 0) {
         logger.info('[ThinkEngine] No associations found — no memories to think about.');
         return null;

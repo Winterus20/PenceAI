@@ -73,7 +73,17 @@ export async function secureUpdateEnv(updates: Record<string, string>): Promise<
   // Atomic write: temp dosyaya yaz, sonra rename
   const tempPath = `${envPath}.${uuidv4()}.tmp`;
   await fs.promises.writeFile(tempPath, content, 'utf-8');
-  await fs.promises.rename(tempPath, envPath);
+  try {
+      await fs.promises.rename(tempPath, envPath);
+  } catch (err: any) {
+      // Windows'ta rename() EPERM verebilir, fallback kullan
+      if (err.code === 'EPERM' || err.code === 'EBUSY') {
+          await fs.promises.copyFile(tempPath, envPath);
+          await fs.promises.unlink(tempPath).catch(() => {});
+      } else {
+          throw err;
+      }
+  }
 }
 
 /**

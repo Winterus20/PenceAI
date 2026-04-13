@@ -80,47 +80,45 @@ export class AnthropicProvider extends LLMProvider {
             input_schema: t.parameters as Anthropic.Tool['input_schema'],
         }));
 
-        return this.withTrace('chat', model, async () => {
-            const response = await this.client.messages.create({
-                model,
-                max_tokens: options?.maxTokens || 4096,
-                system: options?.systemPrompt,
-                messages: anthropicMessages,
-                tools: tools && tools.length > 0 ? tools : undefined,
-                temperature: options?.temperature ?? 0.7,
-            });
-
-            // Yanıtı çözümle
-            let content = '';
-            const toolCalls: ToolCall[] = [];
-
-            for (const block of response.content) {
-                if (block.type === 'text') {
-                    content += block.text;
-                } else if (block.type === 'tool_use') {
-                    toolCalls.push({
-                        id: block.id,
-                        name: block.name,
-                        arguments: block.input as Record<string, unknown>,
-                    });
-                }
-            }
-
-            let finishReason: LLMResponse['finishReason'] = 'stop';
-            if (response.stop_reason === 'tool_use') finishReason = 'tool_calls';
-            else if (response.stop_reason === 'max_tokens') finishReason = 'length';
-
-            return {
-                content,
-                toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-                finishReason,
-                usage: {
-                    promptTokens: response.usage.input_tokens,
-                    completionTokens: response.usage.output_tokens,
-                    totalTokens: response.usage.input_tokens + response.usage.output_tokens,
-                },
-            };
+        const response = await this.client.messages.create({
+            model,
+            max_tokens: options?.maxTokens || 4096,
+            system: options?.systemPrompt,
+            messages: anthropicMessages,
+            tools: tools && tools.length > 0 ? tools : undefined,
+            temperature: options?.temperature ?? 0.7,
         });
+
+        // Yanıtı çözümle
+        let content = '';
+        const toolCalls: ToolCall[] = [];
+
+        for (const block of response.content) {
+            if (block.type === 'text') {
+                content += block.text;
+            } else if (block.type === 'tool_use') {
+                toolCalls.push({
+                    id: block.id,
+                    name: block.name,
+                    arguments: block.input as Record<string, unknown>,
+                });
+            }
+        }
+
+        let finishReason: LLMResponse['finishReason'] = 'stop';
+        if (response.stop_reason === 'tool_use') finishReason = 'tool_calls';
+        else if (response.stop_reason === 'max_tokens') finishReason = 'length';
+
+        return {
+            content,
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+            finishReason,
+            usage: {
+                promptTokens: response.usage.input_tokens,
+                completionTokens: response.usage.output_tokens,
+                totalTokens: response.usage.input_tokens + response.usage.output_tokens,
+            },
+        };
     }
 
     async chatStream(messages: LLMMessage[], options: ChatOptions | undefined, onToken: (token: string) => void): Promise<LLMResponse> {
@@ -199,26 +197,16 @@ export class AnthropicProvider extends LLMProvider {
 
     async healthCheck(): Promise<boolean> {
         try {
-            // API key geçerliliğini kontrol et — gerçek mesaj göndermeden
-            // Boş mesaj göndererek 400 (geçerli key) vs 401 (geçersiz key) ayrımı yap
-            const res = await fetch('https://api.anthropic.com/v1/messages', {
-                method: 'POST',
-                headers: {
-                    'x-api-key': this.client.apiKey ?? '',
-                    'anthropic-version': '2023-06-01',
-                    'content-type': 'application/json',
-                },
-                body: JSON.stringify({
-                    model: 'claude-3-5-haiku-20241022',
-                    max_tokens: 1,
-                    messages: [],  // Boş mesaj → 400 Bad Request (token harcamaz)
-                }),
+            await this.client.messages.create({
+                model: 'claude-3-5-haiku-20241022',
+                max_tokens: 1,
+                messages: [{ role: 'user', content: '.' }],
             });
-            // 400 = API key geçerli ama istek geçersiz (beklenen)
-            // 401 = API key geçersiz
-            return res.status !== 401 && res.status !== 403;
-        } catch {
-            return false;
+            return true;
+        } catch (err: any) {
+            // 401 = gecersiz API key, 403 = yetkisiz
+            // Diger hatalar (rate limit, network) false doner
+            return err.status !== 401 && err.status !== 403;
         }
     }
 }

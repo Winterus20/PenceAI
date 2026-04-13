@@ -223,7 +223,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
               const rawId = node.rawId ?? 0;
               const prScore = pageRankScores.get(rawId) ?? 0;
               const communityId = communityMap.get(rawId) ?? null;
-              const accessCount = (node as any).access_count ?? 0;
+              const accessCount = node.access_count ?? 0;
               const importance = node.importance ?? 0;
 
               return {
@@ -239,7 +239,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
           }
           const enrichedEdges: EnrichedEdge[] = limitedGraph.edges.map((edge: GraphEdge) => {
               const confidence = edge.confidence ?? 0.5;
-              const weight = (edge as any).weight ?? 1.0;
+              const weight = edge.weight ?? 1.0;
               return {
                   ...edge,
                   displayWeight: confidence * weight,

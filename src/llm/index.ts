@@ -22,12 +22,12 @@ import { NvidiaProvider } from './nvidia.js';
  * Tüm LLM provider'ları fabrikaya kaydeder.
  */
 export function registerAllProviders(): void {
-    LLMProviderFactory.register('openai', async () => new OpenAIProvider());
-    LLMProviderFactory.register('anthropic', async () => new AnthropicProvider());
-    LLMProviderFactory.register('ollama', async () => new OllamaProvider());
-    LLMProviderFactory.register('minimax', async () => new MiniMaxProvider());
-    LLMProviderFactory.register('github', async () => new GitHubProvider());
-    LLMProviderFactory.register('groq', async () => new GroqProvider());
-    LLMProviderFactory.register('mistral', async () => new MistralProvider());
-    LLMProviderFactory.register('nvidia', async () => new NvidiaProvider());
+    LLMProviderFactory.register('openai', () => new OpenAIProvider());
+    LLMProviderFactory.register('anthropic', () => new AnthropicProvider());
+    LLMProviderFactory.register('ollama', () => new OllamaProvider());
+    LLMProviderFactory.register('minimax', () => new MiniMaxProvider());
+    LLMProviderFactory.register('github', () => new GitHubProvider());
+    LLMProviderFactory.register('groq', () => new GroqProvider());
+    LLMProviderFactory.register('mistral', () => new MistralProvider());
+    LLMProviderFactory.register('nvidia', () => new NvidiaProvider());
 }

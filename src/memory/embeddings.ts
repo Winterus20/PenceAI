@@ -58,6 +58,45 @@ export interface EmbeddingProvider {
     readonly name: string;
 }
 
+// ========== Base Http Embedding ==========
+
+/**
+ * HTTP tabanlı embedding provider'ları için soyut temel sınıf.
+ * Tüm provider'lar OpenAI-uyumlu /embeddings endpoint'i kullanır.
+ */
+abstract class BaseHttpEmbedding implements EmbeddingProvider {
+    abstract readonly name: string;
+    abstract readonly dimensions: number;
+    protected abstract readonly baseURL: string;
+    protected abstract readonly model: string;
+    private apiKey: string;
+
+    constructor(apiKey: string) {
+        if (!apiKey) {
+            throw new Error('Embedding API key sağlanmadı (embedding için gerekli)');
+        }
+        this.apiKey = apiKey;
+    }
+
+    async embed(texts: string[]): Promise<number[][]> {
+        if (texts.length === 0) return [];
+        const response = await fetchWithRetry(`${this.baseURL}/embeddings`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ model: this.model, input: texts }),
+        });
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`${this.name} embedding hatası (${response.status}): ${error}`);
+        }
+        const data = await response.json() as { data: Array<{ embedding: number[]; index: number }> };
+        return data.data.sort((a, b) => a.index - b.index).map(d => d.embedding);
+    }
+}
+
 // ========== MiniMax Embedding ==========
 
 /**
@@ -65,49 +104,14 @@ export interface EmbeddingProvider {
  * Model: embo-01 (1536 boyut)
  * API: https://api.minimax.io/v1/embeddings (OpenAI uyumlu)
  */
-export class MiniMaxEmbedding implements EmbeddingProvider {
+export class MiniMaxEmbedding extends BaseHttpEmbedding {
     readonly name = 'minimax';
     readonly dimensions = 1536;
-    private apiKey: string;
-    private model: string;
-    private baseURL = 'https://api.minimax.io/v1';
-
+    protected readonly baseURL = 'https://api.minimax.io/v1';
+    protected readonly model: string;
     constructor(apiKey: string, model?: string) {
-        if (!apiKey) {
-            throw new Error('MiniMax API key sağlanmadı (embedding için gerekli)');
-        }
-        this.apiKey = apiKey;
+        super(apiKey);
         this.model = model || 'embo-01';
-    }
-
-    async embed(texts: string[]): Promise<number[][]> {
-        if (texts.length === 0) return [];
-
-        const response = await fetchWithRetry(`${this.baseURL}/embeddings`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${this.apiKey}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: this.model,
-                input: texts,
-            }),
-        });
-
-        if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`MiniMax embedding hatası (${response.status}): ${error}`);
-        }
-
-        const data = await response.json() as {
-            data: Array<{ embedding: number[]; index: number }>;
-        };
-
-        // Index sırasına göre sırala
-        return data.data
-            .sort((a, b) => a.index - b.index)
-            .map(d => d.embedding);
     }
 }
 
@@ -118,48 +122,14 @@ export class MiniMaxEmbedding implements EmbeddingProvider {
  * Model: text-embedding-3-small (1536 boyut)
  * API: https://api.openai.com/v1/embeddings
  */
-export class OpenAIEmbedding implements EmbeddingProvider {
+export class OpenAIEmbedding extends BaseHttpEmbedding {
     readonly name = 'openai';
     readonly dimensions = 1536;
-    private apiKey: string;
-    private model: string;
-    private baseURL = 'https://api.openai.com/v1';
-
+    protected readonly baseURL = 'https://api.openai.com/v1';
+    protected readonly model: string;
     constructor(apiKey: string, model?: string) {
-        if (!apiKey) {
-            throw new Error('OpenAI API key sağlanmadı (embedding için gerekli)');
-        }
-        this.apiKey = apiKey;
+        super(apiKey);
         this.model = model || 'text-embedding-3-small';
-    }
-
-    async embed(texts: string[]): Promise<number[][]> {
-        if (texts.length === 0) return [];
-
-        const response = await fetchWithRetry(`${this.baseURL}/embeddings`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${this.apiKey}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: this.model,
-                input: texts,
-            }),
-        });
-
-        if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`OpenAI embedding hatası (${response.status}): ${error}`);
-        }
-
-        const data = await response.json() as {
-            data: Array<{ embedding: number[]; index: number }>;
-        };
-
-        return data.data
-            .sort((a, b) => a.index - b.index)
-            .map(d => d.embedding);
     }
 }
 
@@ -170,48 +140,14 @@ export class OpenAIEmbedding implements EmbeddingProvider {
  * Model: voyage-3-large (3072 boyut)
  * API: https://api.voyageai.com/v1/embeddings (OpenAI uyumlu)
  */
-export class VoyageEmbedding implements EmbeddingProvider {
+export class VoyageEmbedding extends BaseHttpEmbedding {
     readonly name = 'voyage';
     readonly dimensions = 3072;
-    private apiKey: string;
-    private model: string;
-    private baseURL = 'https://api.voyageai.com/v1';
-
+    protected readonly baseURL = 'https://api.voyageai.com/v1';
+    protected readonly model: string;
     constructor(apiKey: string, model?: string) {
-        if (!apiKey) {
-            throw new Error('Voyage AI API key sağlanmadı (embedding için gerekli)');
-        }
-        this.apiKey = apiKey;
+        super(apiKey);
         this.model = model || 'voyage-3-large';
-    }
-
-    async embed(texts: string[]): Promise<number[][]> {
-        if (texts.length === 0) return [];
-
-        const response = await fetchWithRetry(`${this.baseURL}/embeddings`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${this.apiKey}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: this.model,
-                input: texts,
-            }),
-        });
-
-        if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`Voyage AI embedding hatası (${response.status}): ${error}`);
-        }
-
-        const data = await response.json() as {
-            data: Array<{ embedding: number[]; index: number }>;
-        };
-
-        return data.data
-            .sort((a, b) => a.index - b.index)
-            .map(d => d.embedding);
     }
 }
 

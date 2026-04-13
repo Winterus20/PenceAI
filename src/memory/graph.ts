@@ -10,6 +10,8 @@ import { computeRetention, computeNewStability, computeNextReview, daysSinceAcce
 import { daysSince } from '../utils/datetime.js';
 import { logger } from '../utils/logger.js';
 
+export const DEFAULT_GRAPH_LIMIT = 100;
+
 /**
  * Bellek graf yöneticisi — entity'ler, ilişkiler, proximity ve Ebbinghaus stability.
  */
@@ -296,7 +298,7 @@ export class MemoryGraphManager {
      * Tüm bellek graph'ını döndürür (frontend görselleştirme için).
      * @param limit - Frontend'in aşırı RAM kullanımını önlemek için max bellek sınırı
      */
-    getMemoryGraph(limit: number = 200): MemoryGraph {
+    getMemoryGraph(limit: number = DEFAULT_GRAPH_LIMIT): MemoryGraph {
         const nodes: GraphNode[] = [];
         const edges: GraphEdge[] = [];
         const nodeIds = new Set<string>();
@@ -586,28 +588,30 @@ export class MemoryGraphManager {
         const deleteStmt = this.db.prepare(`DELETE FROM memory_relations WHERE id = ?`);
         const updateConfStmt = this.db.prepare(`UPDATE memory_relations SET confidence = ? WHERE id = ?`);
 
-        const runDecay = this.db.transaction(() => {
-            for (const rel of relations) {
-                const accessCount = rel.access_count ?? 0;
-                const baseRate = rel.decay_rate ?? DEFAULT_BASE_RATE;
-                const effectiveRate = baseRate / (1 + 0.1 * accessCount);
+        const BATCH_SIZE = 500;
+        for (let batchStart = 0; batchStart < relations.length; batchStart += BATCH_SIZE) {
+            const batch = relations.slice(batchStart, batchStart + BATCH_SIZE);
+            this.db.transaction(() => {
+                for (const rel of batch) {
+                    const accessCount = rel.access_count ?? 0;
+                    const baseRate = rel.decay_rate ?? DEFAULT_BASE_RATE;
+                    const effectiveRate = baseRate / (1 + 0.1 * accessCount);
 
-                let dSince = daysSince(rel.last_accessed_at);
+                    let dSince = daysSince(rel.last_accessed_at);
 
-                const effectiveConfidence = rel.confidence * Math.exp(-effectiveRate * dSince);
+                    const effectiveConfidence = rel.confidence * Math.exp(-effectiveRate * dSince);
 
-                if (effectiveConfidence < PRUNE_THRESHOLD) {
-                    deleteStmt.run(rel.id);
-                    pruned++;
-                } else if (effectiveConfidence < rel.confidence) {
-                    // Kademeli decay: confidence'ı DB'de güncelle
-                    updateConfStmt.run(effectiveConfidence, rel.id);
-                    decayed++;
+                    if (effectiveConfidence < PRUNE_THRESHOLD) {
+                        deleteStmt.run(rel.id);
+                        pruned++;
+                    } else if (effectiveConfidence < rel.confidence) {
+                        // Kademeli decay: confidence'ı DB'de güncelle
+                        updateConfStmt.run(effectiveConfidence, rel.id);
+                        decayed++;
+                    }
                 }
-            }
-        });
-
-        runDecay();
+            })();
+        }
 
         if (pruned > 0) {
             this.cleanupOrphanEntities();

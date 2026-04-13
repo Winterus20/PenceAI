@@ -17,6 +17,8 @@ export interface AutonomousTask {
     payload: any;
     addedAt: number;
     execute?: (signal: AbortSignal) => Promise<void>;
+    retryCount?: number;       // How many times retried
+    maxRetries?: number;       // Maximum retries allowed (default: 2)
 }
 
 export class TaskQueue {
@@ -137,12 +139,13 @@ export class TaskQueue {
     }
 
     dequeue(): AutonomousTask | undefined {
-        // Sadece addedAt zamanı gelmiş görevleri çıkar — ileri tarihli görevleri atla
+        // Queue is already sorted by priority and addedAt, check first element only
         const now = Date.now();
-        const index = this.queue.findIndex(t => t.addedAt <= now);
-        if (index === -1) return undefined;
+        if (this.queue.length === 0) return undefined;
+        const task = this.queue[0];
+        if (task.addedAt > now) return undefined; // Not yet ready
 
-        const task = this.queue.splice(index, 1)[0];
+        this.queue.shift(); // Remove first element
         this.syncToDb(task, 'running');
         return task;
     }

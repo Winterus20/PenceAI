@@ -152,6 +152,7 @@ export class SubAgentManager {
      * @returns oluşturulan görev veya null (limitlere takılırsa)
      */
     public createTask(fixation: Fixation): ResearchTask | null {
+        this._cleanupStaleTasks();
         // Günlük limit kontrolü
         this._resetDailyCountIfNeeded();
         if (this.dailyTaskCount >= this.config.maxDailyTasks) {
@@ -191,7 +192,7 @@ export class SubAgentManager {
         }
 
         const task: ResearchTask = {
-            id: `research_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            id: `subagent_research_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             fixation: fixation.topic,
             query: this._buildQuery(fixation),
             category: this._inferCategory(fixation),
@@ -302,7 +303,7 @@ export class SubAgentManager {
         try {
             const rows = this.db.prepare(`
                 SELECT payload FROM autonomous_tasks
-                WHERE type = 'research' AND status = 'completed'
+                WHERE type = 'subagent_research' AND status = 'completed'
                 ORDER BY updated_at DESC
                 LIMIT ?
             `).all(limit) as Array<{ payload: string }>;
@@ -411,6 +412,23 @@ export class SubAgentManager {
         return 'web_search';
     }
 
+    private _cleanupStaleTasks(): void {
+        const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+        const now = Date.now();
+        const staleIds: string[] = [];
+        
+        for (const [id, task] of this.activeTasks) {
+            const age = now - new Date(task.createdAt).getTime();
+            if (age > maxAge) {
+                staleIds.push(id);
+            }
+        }
+        
+        for (const id of staleIds) {
+            this.failTask(id, 'Task expired (stale > 24h)');
+        }
+    }
+
     private _resetDailyCountIfNeeded(): void {
         const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
         if (this.lastTaskDate !== today) {
@@ -423,7 +441,7 @@ export class SubAgentManager {
         try {
             this.db.prepare(`
                 INSERT INTO autonomous_tasks (id, type, priority, payload, status, added_at, updated_at)
-                VALUES (?, 'research', ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, 'subagent_research', ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     status = excluded.status,
                     payload = excluded.payload,

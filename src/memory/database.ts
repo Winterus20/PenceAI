@@ -2,8 +2,8 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import * as sqliteVec from "sqlite-vec";
-import { logger } from '../utils/logger.js';
-import { calculateCost } from '../utils/costCalculator.js';
+import { logger, calculateCost } from '../utils/index.js';
+import { REVIEW_SCHEDULE_FACTOR } from './ebbinghaus.js';
 
 /** Token usage kayıt tipi */
 export interface TokenUsageRecord {
@@ -35,6 +35,9 @@ export interface DailyUsageEntry {
 export class PenceDatabase {
   private db: Database.Database;
   private embeddingDimensions: number;
+
+  /** En son migration versiyonu. Her yeni migration'da artırın. */
+  private static readonly LATEST_SCHEMA_VERSION = 17;
 
   constructor(dbPath: string, embeddingDimensions: number = 1536) {
     // data dizinini oluştur
@@ -292,10 +295,30 @@ export class PenceDatabase {
     this.migrate();
   }
 
+  private getSchemaVersion(): number {
+    try {
+      // Ensure settings table exists before querying
+      const tableExists = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'").get();
+      if (!tableExists) return 0;
+      const row = this.db.prepare("SELECT value FROM settings WHERE key='schema_version'").get() as { value: string } | undefined;
+      return row ? parseInt(row.value, 10) : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private setSchemaVersion(version: number): void {
+    this.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('schema_version', ?, CURRENT_TIMESTAMP)").run(String(version));
+  }
+
   /**
    * Veritabanı şemasını günceller (Migration).
    */
   private migrate(): void {
+    const currentVersion = this.getSchemaVersion();
+    if (currentVersion >= PenceDatabase.LATEST_SCHEMA_VERSION) return;
+
+    this.db.transaction(() => {
     // Tablo bilgilerini cache-le (N+1 pragma sorgularını azalt)
     const memoriesTableInfo = this.db.prepare("PRAGMA table_info(memories)").all() as any[];
     const convTableInfo = this.db.prepare("PRAGMA table_info(conversations)").all() as any[];
@@ -365,8 +388,7 @@ export class PenceDatabase {
         this.db.exec("ALTER TABLE memories ADD COLUMN review_count INTEGER DEFAULT 0");
 
         // Mevcut kayıtlar için dinamik stability backfill: stability = importance * 2.0
-        // next_review_at: şu andan itibaren stability*0.357 gün sonra (R=0.7 eşiği)
-        // -ln(0.7) ≈ 0.3567
+        // next_review_at: şu andan itibaren stability*REVIEW_SCHEDULE_FACTOR gün sonra (R=0.7 eşiği)
         const now = Math.floor(Date.now() / 1000);
         this.db.prepare(`
           UPDATE memories
@@ -374,7 +396,7 @@ export class PenceDatabase {
             stability = CAST(importance AS REAL) * 2.0,
             retrievability = 1.0,
             review_count = 0,
-            next_review_at = ? + CAST(CAST(importance AS REAL) * 2.0 * 0.3567 * 86400 AS INTEGER)
+            next_review_at = ? + CAST(CAST(importance AS REAL) * 2.0 * ${REVIEW_SCHEDULE_FACTOR} * 86400 AS INTEGER)
           WHERE is_archived = 0
         `).run(now);
         logger.info('[Database] ✅ Ebbinghaus backfill tamamlandı');
@@ -829,6 +851,9 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ GraphRAG Faz 2 migration failed (graph_community_summaries):');
       }
     }
+
+      this.setSchemaVersion(PenceDatabase.LATEST_SCHEMA_VERSION);
+    })();
   }
 
   /**
@@ -837,23 +862,23 @@ export class PenceDatabase {
    */
   private validateEmbeddingDimensions(): void {
     try {
-      const row = this.db.prepare(`SELECT value FROM settings WHERE key = 'embedding_dimensions'`).get() as { value: string } | undefined;
-      if (row) {
-        const storedDim = parseInt(row.value, 10);
-        if (!isNaN(storedDim) && storedDim !== this.embeddingDimensions) {
-          logger.warn(
-            `[Database] ⚠️ Embedding boyut uyuşmazlığı: DB=${storedDim}, Config=${this.embeddingDimensions}. ` +
-            `Mevcut embedding verilerini silip yeniden hesaplatmanız gerekebilir.`
-          );
-        }
+      const tableExists = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'").get();
+      if (!tableExists) return;
+
+      const stored = this.db.prepare("SELECT value FROM settings WHERE key='embedding_dimensions'").get() as { value: string } | undefined;
+      if (!stored) {
+        this.db.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('embedding_dimensions', ?, CURRENT_TIMESTAMP)").run(String(this.embeddingDimensions));
+        return;
       }
-      // Güncel boyutu kaydet
-      this.db.prepare(`
-        INSERT INTO settings (key, value, updated_at) VALUES ('embedding_dimensions', ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-      `).run(String(this.embeddingDimensions));
-    } catch {
-      // settings tablosu henüz oluşmamış olabilir, yoksay
+      const storedDim = parseInt(stored.value, 10);
+      if (storedDim !== this.embeddingDimensions) {
+        logger.warn(`[Database] ⚠️ Embedding boyutu değişti: ${storedDim} → ${this.embeddingDimensions}. Eski embedding'ler siliniyor.`);
+        this.db.prepare("DELETE FROM memory_embeddings").run();
+        this.db.prepare("DELETE FROM message_embeddings").run();
+        this.db.prepare("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'embedding_dimensions'").run(String(this.embeddingDimensions));
+      }
+    } catch (err) {
+      logger.warn({ err }, '[Database] Embedding dimension validation failed:');
     }
   }
 

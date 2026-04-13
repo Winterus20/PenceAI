@@ -1,6 +1,7 @@
 import { LLMProvider, type ChatOptions, TOOL_CALL_CLEAR_SIGNAL } from './provider.js';
 import type { LLMMessage, LLMResponse, ToolCall } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
+import { logger } from '../utils/logger.js';
 import { randomUUID } from 'crypto';
 
 interface OllamaMessage {
@@ -35,6 +36,9 @@ export class OllamaProvider extends LLMProvider {
     constructor() {
         super();
         this.baseUrl = getConfig().ollamaBaseUrl;
+        if (!getConfig().enableOllamaTools) {
+            logger.info('[Ollama] Tool calling devre disi. Aktif etmek icin: ENABLE_OLLAMA_TOOLS=true');
+        }
     }
 
     async chat(messages: LLMMessage[], options?: ChatOptions): Promise<LLMResponse> {
@@ -97,12 +101,10 @@ export class OllamaProvider extends LLMProvider {
             }));
         }
 
-        const res = await this.withTrace('chat', model, async () => {
-            return await fetch(`${this.baseUrl}/api/chat`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
+        const res = await fetch(`${this.baseUrl}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
         });
 
         if (!res.ok) {
@@ -193,7 +195,7 @@ export class OllamaProvider extends LLMProvider {
                             onToken(TOOL_CALL_CLEAR_SIGNAL);
                         }
                         hasToolCalls = true;
-                        data.message.tool_calls.forEach((tc, i) => toolCallsCollected.push({ id: randomUUID(), name: tc.function.name, arguments: tc.function.arguments }));
+                        data.message.tool_calls.forEach((tc) => toolCallsCollected.push({ id: randomUUID(), name: tc.function.name, arguments: tc.function.arguments }));
                     }
                 } catch { /* eksik JSON satırı, atla */ }
             }

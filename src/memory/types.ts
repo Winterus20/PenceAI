@@ -207,6 +207,7 @@ export interface GraphNode {
     category?: string;
     importance?: number;
     entityType?: string;   // person, technology, project, concept, place, etc.
+    access_count?: number; // DB-level field — bellek erişim sayısı
 }
 
 export interface GraphEdge {
@@ -215,6 +216,7 @@ export interface GraphEdge {
     type: string;          // related_to, supports, contradicts, caused_by, part_of, has_entity
     confidence: number;
     description: string;
+    weight?: number;       // DB-level field — ilişki ağırlığı
 }
 
 export interface MemoryGraph {

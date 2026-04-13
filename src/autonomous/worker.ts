@@ -138,12 +138,38 @@ export class BackgroundWorker {
                     this.queue.markCompleted(task.id);
                 } catch (error: any) {
                     if (error.name === 'AbortError') {
-                        logger.info(`[Worker] Task ${task.id} was aborted mid-execution. Checkpointing...`);
-                        // Put it back in the queue (or handle specific checkpointing later)
-                        this.queue.enqueue(task);
+                        const abortCount = task.retryCount ?? 0;
+                        const maxAborts = 3; // Prevent infinite abort loops
+                        if (abortCount < maxAborts) {
+                            logger.info(`[Worker] Task ${task.id} was aborted mid-execution (abort ${abortCount + 1}/${maxAborts}). Requeueing...`);
+                            task.retryCount = abortCount + 1;
+                            this.queue.enqueue(task);
+                        } else {
+                            logger.warn(`[Worker] Task ${task.id} aborted ${maxAborts} times — dropping to prevent infinite loop.`);
+                            this.queue.markFailed(task.id);
+                        }
                     } else {
-                        logger.error({ err: error }, `[Worker] Task execution failed (${task.id}):`);
-                        this.queue.markFailed(task.id);
+                        const retryCount = task.retryCount ?? 0;
+                        const maxRetries = task.maxRetries ?? 2;
+                        
+                        // Check if error is transient (timeout, network, rate limit)
+                        const isTransient = error.code === 'ETIMEDOUT' || 
+                                           error.code === 'ECONNRESET' ||
+                                           error.message?.includes('timeout') ||
+                                           error.message?.includes('rate limit') ||
+                                           error.message?.includes('429') ||
+                                           error.message?.includes('503');
+                        
+                        if (isTransient && retryCount < maxRetries) {
+                            const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 30000); // exponential backoff, max 30s
+                            logger.warn(`[Worker] Transient error for task ${task.id}, retry ${retryCount + 1}/${maxRetries} in ${retryDelay}ms`);
+                            task.retryCount = retryCount + 1;
+                            task.addedAt = Date.now() + retryDelay;
+                            this.queue.enqueue(task);
+                        } else {
+                            logger.error({ err: error }, `[Worker] Task execution failed (${task.id})${retryCount >= maxRetries ? ' (max retries reached)' : ''}:`);
+                            this.queue.markFailed(task.id);
+                        }
                     }
                 } finally {
                     this.activeTaskId = null;

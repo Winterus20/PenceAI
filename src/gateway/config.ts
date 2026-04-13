@@ -61,14 +61,16 @@ const ConfigSchema = z.object({
   sensitivePaths: z.preprocess(
     (val) => {
         if (typeof val === 'string' && val) return val.split(',').map(s => s.trim()).filter(Boolean);
-        return [
-            'C:\\Windows',
-            'C:\\Program Files',
-            'C:\\Program Files (x86)',
-            path.join(os.homedir(), 'AppData'),
-            'C:\\ProgramData',
-            '/etc', '/usr', '/var', '/boot', '/root',
-        ];
+        const isWindows = os.platform() === 'win32';
+        return isWindows
+            ? [
+                'C:\\Windows',
+                'C:\\Program Files',
+                'C:\\Program Files (x86)',
+                path.join(os.homedir(), 'AppData'),
+                'C:\\ProgramData',
+              ]
+            : ['/etc', '/usr', '/var', '/boot', '/root', '/home'];
     },
     z.array(z.string())
   ),

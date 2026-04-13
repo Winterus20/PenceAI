@@ -41,6 +41,11 @@ function getBehaviorDiscoveryShadow(): BehaviorDiscoveryShadow {
 export function registerRoutes(app: Express, deps: RouteDeps): void {
     const { memory, llm, router, agent, broadcastStats } = deps;
 
+    const maskKey = (key: string | undefined) => {
+        if (!key || key.length < 8) return '';
+        return key.substring(0, 4) + '••••' + key.substring(key.length - 4);
+    };
+
     // ============ REST API ============
 
     // ============ Controllers ============
@@ -98,13 +103,13 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         defaultLLMProvider: env.DEFAULT_LLM_PROVIDER || 'openai',
         defaultLLMModel: env.DEFAULT_LLM_MODEL || '',
         defaultUserName: env.DEFAULT_USER_NAME || 'Kullanıcı',
-        openaiApiKey: env.OPENAI_API_KEY || '',
-        anthropicApiKey: env.ANTHROPIC_API_KEY || '',
-        minimaxApiKey: env.MINIMAX_API_KEY || '',
-        githubToken: env.GITHUB_TOKEN || '',
-        groqApiKey: env.GROQ_API_KEY || '',
-        mistralApiKey: env.MISTRAL_API_KEY || '',
-        nvidiaApiKey: env.NVIDIA_API_KEY || '',
+        openaiApiKey: maskKey(env.OPENAI_API_KEY),
+        anthropicApiKey: maskKey(env.ANTHROPIC_API_KEY),
+        minimaxApiKey: maskKey(env.MINIMAX_API_KEY),
+        githubToken: maskKey(env.GITHUB_TOKEN),
+        groqApiKey: maskKey(env.GROQ_API_KEY),
+        mistralApiKey: maskKey(env.MISTRAL_API_KEY),
+        nvidiaApiKey: maskKey(env.NVIDIA_API_KEY),
         ollamaBaseUrl: env.OLLAMA_BASE_URL || 'http://localhost:11434',
         allowShellExecution: env.ALLOW_SHELL_EXECUTION === 'true',
         systemPrompt: env.SYSTEM_PROMPT || '',
@@ -114,7 +119,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         logLevel: env.LOG_LEVEL || 'info',
         embeddingProvider: env.EMBEDDING_PROVIDER || 'openai',
         embeddingModel: env.EMBEDDING_MODEL || 'text-embedding-3-small',
-        braveSearchApiKey: env.BRAVE_SEARCH_API_KEY || '',
+        braveSearchApiKey: maskKey(env.BRAVE_SEARCH_API_KEY),
         baseSystemPrompt: BASE_SYSTEM_PROMPT,
         // Gelişmiş Model Ayarları
         temperature: env.TEMPERATURE || '0.7',
@@ -178,6 +183,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
             return res.status(400).json({ error: 'Biyografi (bio) zorunludur' });
         }
         try {
+            const jobId = `onboard_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
             // Arka planda derin analiz başlat (non-blocking)
             agent.processRawTextForMemories(bio, userName || 'Kullanıcı').then(() => {
                 broadcastStats();
@@ -185,7 +191,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
                 logger.error({ err }, '[API] Onboarding bio extraction failed in background');
             });
 
-            res.json({ success: true });
+            res.json({ success: true, jobId, message: 'Bellek çıkarımı arka planda başlatıldı' });
         } catch (err: any) {
             res.status(500).json({ error: err.message });
         }
@@ -293,8 +299,9 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     app.post('/api/graphrag/set-phase', (req, res) => {
       const { phase } = req.body;
       const phaseNum = parseInt(phase, 10);
+      const validPhases = Object.values(GraphRAGRolloutPhase).filter(v => typeof v === 'number') as number[];
 
-      if (!Object.values(GraphRAGRolloutPhase).includes(phaseNum) || isNaN(phaseNum)) {
+      if (!validPhases.includes(phaseNum) || isNaN(phaseNum)) {
         return res.status(400).json({ error: 'Invalid phase. Use 1 (OFF), 2 (SHADOW), 3 (PARTIAL), or 4 (FULL).' });
       }
 

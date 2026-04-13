@@ -80,8 +80,17 @@ export function resolveGatewayPublicDir(currentDir: string): string {
 }
 
 export function registerRequestTracing(app: Application, onRequest: () => void): void {
+    let activityTimer: ReturnType<typeof setTimeout> | null = null;
+
     app.use((req, _res, next) => {
-        onRequest();
+        // Sadece API ve WS istekleri kullanıcı aktivitesi olarak sayılır
+        // Static dosya istekleri (CSS, JS, resimler) worker'ı bölmaz
+        const isApiOrWs = req.path.startsWith('/api/') || req.path === '/ws';
+        if (isApiOrWs) {
+            // Debounce: Aynı 100ms penceresindeki istekler tek sinyal olarak sayılır
+            if (activityTimer) clearTimeout(activityTimer);
+            activityTimer = setTimeout(onRequest, 100);
+        }
 
         runWithTraceId(() => {
             logger.info({ method: req.method, url: req.url }, 'Gelen İstek');

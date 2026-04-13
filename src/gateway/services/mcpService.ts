@@ -12,7 +12,6 @@ import { MCPClientManager } from '../../agent/mcp/client.js';
 import { getUnifiedToolRegistry } from '../../agent/mcp/registry.js';
 import { getMCPEventBus } from '../../agent/mcp/eventBus.js';
 import { logger } from '../../utils/logger.js';
-import { secureUpdateEnvFile } from '../envUtils.js';
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
@@ -232,11 +231,6 @@ async function getOrCreateMCPManager(): Promise<MCPClientManager> {
 }
 
 /**
- * MCP Manager'ı set et (runtime.ts'den çağrılır).
- *
- * @param manager - MCPClientManager instance
- */
-/**
  * MCP Manager'ı set et (runtime.ts'den event bus ile çağrılır).
  *
  * @param manager - MCPClientManager instance
@@ -390,8 +384,8 @@ export async function activateServer(name: string): Promise<{ success: boolean; 
     await registry.registerMCPManager(manager);
     logger.info(`[MCP:service] Registry updated — ${registry.toolCount} total tools available`);
 
-    // ✅ MCP_SERVERS environment variable'ını güncelle
-    await updateMCPServersEnv();
+    // MCP_SERVERS environment variable'ını guncelle
+    updateMCPServersEnv();
 
     installedServers.set(name, server);
     saveServerToDB(server);
@@ -430,7 +424,7 @@ export async function deactivateServer(name: string): Promise<{ success: boolean
     server.toolCount = 0;
     installedServers.set(name, server);
     saveServerToDB(server);
-    await updateMCPServersEnv();
+    updateMCPServersEnv();
     logger.info(`[MCP:service] Server '${name}' marked as disabled (no active manager)`);
     return { success: true };
   }
@@ -441,7 +435,7 @@ export async function deactivateServer(name: string): Promise<{ success: boolean
     server.toolCount = 0;
     installedServers.set(name, server);
     saveServerToDB(server);
-    await updateMCPServersEnv();
+    updateMCPServersEnv();
     logger.info(`[MCP:service] Server '${name}' deactivated`);
 
     // Event bus emit
@@ -479,8 +473,8 @@ export async function uninstallServer(name: string): Promise<{ success: boolean;
   installedServers.delete(name);
   deleteServerFromDB(name);
   
-  // ✅ MCP_SERVERS environment variable'ını güncelle
-  await updateMCPServersEnv();
+  // MCP_SERVERS environment variable'ını guncelle
+  updateMCPServersEnv();
   
   // Eğer hiç server kalmadıysa manager'ı da temizle
   if (installedServers.size === 0 && mcpManager) {
@@ -523,7 +517,7 @@ export function getServerStatus(name: string): MCPServerRecord | null {
  * Server'ları senkronize eder. (Artık .env dosyasına YAZILMIYOR)
  * Bütün yapılandırma veritabanında saklanır.
  */
-async function updateMCPServersEnv(): Promise<void> {
+function updateMCPServersEnv(): void {
   const activeServersCount = Array.from(installedServers.values()).filter(s => s.status === 'active').length;
   logger.info(`[MCP:service] Registry synchronized. Active servers: ${activeServersCount}`);
 }
@@ -539,9 +533,9 @@ export async function initMCPPersistence(dbPath: string): Promise<void> {
     installedServers.set(server.name, server);
   }
   logger.info(`[MCP:service] Loaded ${savedServers.length} servers from database`);
-  
-  // ✅ Environment variable'ını da güncelle — kayıtlı server'lar MCP_SERVERS'a yazılsın
-  await updateMCPServersEnv();
+
+  // MCP_SERVERS environment variable'ını guncelle
+  updateMCPServersEnv();
 }
 
 /**

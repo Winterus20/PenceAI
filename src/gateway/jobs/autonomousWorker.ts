@@ -110,7 +110,6 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
         const evaluation = {
             relevanceScore,
             timeSensitivity,
-            emotionalIntensity: 0.5,
             sourceType: 'thought_chain' as const
         };
         const currentHour = new Date().getHours();

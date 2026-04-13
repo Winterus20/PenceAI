@@ -49,7 +49,4 @@ export { BudgetApplier } from './BudgetApplier.js';
 export { BehaviorDiscovery } from './BehaviorDiscovery.js';
 
 // Re-export Agentic RAG modules (Faz 1-5)
-export { RetrievalDecider, type RetrievalDecision, type RetrieverType } from './RetrievalDecider.js';
-export { PassageCritique, type PassageEvaluation, type CritiqueResult, type RelevanceLevel, type CompletenessLevel } from './PassageCritique.js';
 export { ResponseVerifier, type VerificationResult, type SupportLevel } from './ResponseVerifier.js';
-export { MultiHopRetrieval, type MultiHopResult, type HopEntry } from './MultiHopRetrieval.js';

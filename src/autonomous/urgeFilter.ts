@@ -89,6 +89,9 @@ export const MAX_THRESHOLD_ADJUSTMENT = 0.3;
 /** Sinyal geçmişi pencere boyutu */
 export const SIGNAL_HISTORY_SIZE = 20;
 
+/** Maksimum yaş için feedback sinyalleri (7 gün ms cinsinden) */
+export const SIGNAL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 // ═══════════════════════════════════════════════════════════
 //  Saf Fonksiyonlar — Hard Logic (Mutlak Kurallar)
 // ═══════════════════════════════════════════════════════════
@@ -265,11 +268,13 @@ export function decayFeedbackState(
 
     // Her saat %10 azalma
     const factor = Math.exp(-0.1 * hoursSinceLastSignal);
+    const cutoff = Date.now() - SIGNAL_MAX_AGE_MS;
 
     return {
         ...state,
         thresholdAdjustment: state.thresholdAdjustment * factor,
         reluctancePenalty: state.reluctancePenalty * factor,
+        signalHistory: state.signalHistory.filter(s => s.timestamp > cutoff),
     };
 }
 

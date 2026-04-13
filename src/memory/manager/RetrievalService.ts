@@ -58,8 +58,17 @@ export interface RetrievalDeps {
 
 export class RetrievalService {
   private lastRetrievalDebug: Map<string, unknown> = new Map();
+  /** TaskQueue — MemoryManager.setTaskQueue() ile sonradan bağlanır */
+  taskQueue: TaskQueue | null = null;
 
   constructor(private deps: RetrievalDeps) {}
+
+  /**
+   * TaskQueue referansını günceller (MemoryManager.setTaskQueue tarafından çağrılır).
+   */
+  setTaskQueue(queue: TaskQueue): void {
+    this.deps.taskQueue = queue;
+  }
 
   // ========== Bellek Arama ==========
 

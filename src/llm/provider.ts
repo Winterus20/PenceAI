@@ -1,7 +1,6 @@
 import type { LLMMessage, LLMToolDefinition, LLMResponse } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
 import { logger } from '../utils/logger.js';
-import { traceLLMCall, traceLLMStream } from './observability.js';
 
 /**
  * Streaming sırasında tool call tespit edildiğinde onToken ile gönderilen özel sinyal.
@@ -77,28 +76,6 @@ export abstract class LLMProvider {
      * Provider'ın erişilebilir olup olmadığını kontrol eder.
      */
     abstract healthCheck(): Promise<boolean>;
-
-    /**
-     * LLM çağrısını çalıştırır.
-     */
-    protected async withTrace<T>(
-      operation: string,
-      model: string,
-      fn: () => Promise<T>
-    ): Promise<T> {
-      return traceLLMCall(this.name, `${this.name}.${operation} (${model})`, fn);
-    }
-
-    /**
-     * Streaming LLM çağrısını çalıştırır.
-     */
-    protected async withTraceStream<T>(
-      operation: string,
-      model: string,
-      fn: () => Promise<T>
-    ): Promise<T> {
-      return traceLLMStream(this.name, `${this.name}.${operation} (${model})`, fn);
-    }
 }
 
 export interface ChatOptions {
@@ -115,13 +92,13 @@ export interface ChatOptions {
  * Provider adından LLMProvider instance'ı oluşturur.
  */
 export class LLMProviderFactory {
-    private static providers: Map<string, () => Promise<LLMProvider>> = new Map();
+    private static providers: Map<string, () => LLMProvider> = new Map();
 
-    static register(name: string, factory: () => Promise<LLMProvider>): void {
+    static register(name: string, factory: () => LLMProvider): void {
         this.providers.set(name, factory);
     }
 
-    static async create(name: string): Promise<LLMProvider> {
+    static create(name: string): LLMProvider {
         const factory = this.providers.get(name);
         if (!factory) {
             throw new Error(`Bilinmeyen LLM provider: ${name}. Mevcut: ${Array.from(this.providers.keys()).join(', ')}`);

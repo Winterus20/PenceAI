@@ -11,7 +11,7 @@ import { getConfig, loadConfig } from './config.js';
 import { PenceDatabase } from '../memory/database.js';
 import { MemoryManager } from '../memory/manager.js';
 import { MessageRouter } from '../router/index.js';
-import { registerAllProviders, LLMProviderFactory } from '../llm/index.js';
+import { registerAllProviders, LLMProviderFactory, LLMProvider } from '../llm/index.js';
 import { AgentRuntime } from '../agent/runtime.js';
 import { createEmbeddingProvider } from '../memory/embeddings.js';
 import { initializeMCP, shutdownMCP } from '../agent/mcp/runtime.js';
@@ -22,9 +22,10 @@ import { TaskQueue, BackgroundWorker, TaskPriority } from '../autonomous/index.j
 import { FeedbackManager } from '../autonomous/urgeFilter.js';
 import { SubAgentManager } from '../autonomous/curiosityEngine.js';
 import { SemanticRouter } from '../router/semantic.js';
-import { logger, runWithTraceId } from '../utils/logger.js';
+import { logger, runWithTraceId } from '../utils/index.js';
 import { registerRoutes } from './routes.js';
 import { setupWebSocket } from './websocket.js';
+import { registerLocalIntents } from './intents.js';
 import { registerSystemJobs } from './jobs/systemTasks.js';
 import { registerAutonomousWorkerJobs } from './jobs/autonomousWorker.js';
 import {
@@ -47,6 +48,39 @@ import { GraphRAGConfigManager, DEFAULT_GRAPH_RAG_CONFIG } from '../memory/graph
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// ═══════════════════════════════════════════════════════════
+//  Bootstrap Helpers
+// ═══════════════════════════════════════════════════════════
+
+async function bootstrapDatabase(): Promise<{ database: PenceDatabase; memory: MemoryManager }> {
+    const embeddingProbe = createEmbeddingProvider();
+    const embeddingDimensions = embeddingProbe?.dimensions ?? 1536;
+    const config = getConfig();
+    const database = new PenceDatabase(config.dbPath, embeddingDimensions);
+    const memory = new MemoryManager(database);
+    logger.info(`[Gateway] 💾 Veritabanı hazır: ${config.dbPath} (embedding dim=${embeddingDimensions})`);
+    metricsCollector.setDatabase(database.getDb());
+    await initMCPPersistence(config.dbPath);
+    return { database, memory };
+}
+
+function bootstrapLLM(): LLMProvider {
+    registerAllProviders();
+    const config = getConfig();
+    const llm = LLMProviderFactory.create(config.defaultLLMProvider);
+    logger.info(`[Gateway] 🤖 LLM Provider: ${llm.name}`);
+
+    const configModel = config.defaultLLMModel;
+    if (llm.supportedModels.length > 0 && !llm.supportedModels.includes(configModel)) {
+        logger.warn(`[Gateway] ⚠️  DEFAULT_LLM_MODEL="${configModel}" ${llm.name} provider'ı tarafından desteklenmiyor!`);
+        logger.warn(`[Gateway] 💡 Desteklenen bazı modeller: ${llm.supportedModels.slice(0, 8).join(', ')}`);
+        logger.warn(`[Gateway] ℹ️  Provider varsayılan modeli kullanılacak: ${llm.supportedModels[0]}`);
+    } else {
+        logger.info(`[Gateway] ✅ Model doğrulandı: ${configModel}`);
+    }
+    return llm;
+}
+
 async function main() {
     logger.info(`
   ╔══════════════════════════════════════╗
@@ -59,35 +93,13 @@ async function main() {
     const config = loadConfig();
     logger.info(`[Gateway] ⚙️  Port: ${config.port} | Provider: ${config.defaultLLMProvider} | Model: ${config.defaultLLMModel}`);
 
-    // 2. Veritabanı — embedding boyutunu provider'dan al
-    const embeddingProbe = createEmbeddingProvider();
-    const embeddingDimensions = embeddingProbe?.dimensions ?? 1536;
-    const database = new PenceDatabase(config.dbPath, embeddingDimensions);
-    const memory = new MemoryManager(database);
-    logger.info(`[Gateway] 💾 Veritabanı hazır: ${config.dbPath} (embedding dim=${embeddingDimensions})`);
-
-    // Metrics Collector'ı veritabanına bağla
-    metricsCollector.setDatabase(database.getDb());
-
-    // MCP Persistence — Marketplace server'larını veritabanından yükle
-    await initMCPPersistence(config.dbPath);
+    // 2. Veritabanı
+    const { database, memory } = await bootstrapDatabase();
 
     // 3. LLM Provider
-    registerAllProviders();
-    let llm;
+    let llm: LLMProvider;
     try {
-        llm = await LLMProviderFactory.create(config.defaultLLMProvider);
-        logger.info(`[Gateway] 🤖 LLM Provider: ${llm.name}`);
-
-        // Model doğrulaması — config'deki model bu provider'da destekleniyor mu?
-        const configModel = config.defaultLLMModel;
-        if (llm.supportedModels.length > 0 && !llm.supportedModels.includes(configModel)) {
-            logger.warn(`[Gateway] ⚠️  DEFAULT_LLM_MODEL="${configModel}" ${llm.name} provider'ı tarafından desteklenmiyor!`);
-            logger.warn(`[Gateway] 💡 Desteklenen bazı modeller: ${llm.supportedModels.slice(0, 8).join(', ')}`);
-            logger.warn(`[Gateway] ℹ️  Provider varsayılan modeli kullanılacak: ${llm.supportedModels[0]}`);
-        } else {
-            logger.info(`[Gateway] ✅ Model doğrulandı: ${configModel}`);
-        }
+        llm = bootstrapLLM();
     } catch (err: any) {
         logger.error(`[Gateway] ❌ LLM Provider başlatılamadı: ${err.message}`);
         logger.error(`[Gateway] 💡 .env dosyanızda API anahtarını ayarlayın. Kopya: cp .env.example .env`);
@@ -120,85 +132,70 @@ async function main() {
     const graphRAGConfig = GraphRAGConfigManager.getConfig();
     logger.info(`[Gateway] 🕸️ GraphRAG initializing: enabled=${graphRAGConfig.enabled}, phase=${GraphRAGConfigManager.getCurrentPhase()}`);
 
-    const db = database.getDb();
-    const graphCache = new GraphCache(db);
-    const graphExpander = new GraphExpander(db, graphCache);
-    const pageRankScorer = new PageRankScorer(db);
-    const communityDetector = new CommunityDetector(db);
-    const communitySummarizer = new CommunitySummarizer(db, llm);
+    // Initialize GraphRAG (optional — agent/memory work without it)
+    let graphRAGComponents: { engine: GraphRAGEngine; worker: GraphWorker; shadow: ShadowMode } | null = null;
+    try {
+        const db = database.getDb();
+        const graphCache = new GraphCache(db);
+        const graphExpander = new GraphExpander(db, graphCache);
+        const pageRankScorer = new PageRankScorer(db);
+        const communityDetector = new CommunityDetector(db);
+        const communitySummarizer = new CommunitySummarizer(db, llm);
 
-    // Hybrid search function for GraphRAG (defined before engine and shadow mode)
-    const hybridSearchFn = async (query: string, limit: number) => {
-        try {
-            const results = await memory.hybridSearch(query, limit);
-            // hybridSearch already returns MemoryRow[] directly
-            return results;
-        } catch (err) {
-            logger.warn({ err }, '[Gateway] GraphRAG hybrid search failed:');
-            return [];
-        }
-    };
+        const hybridSearchFn = async (query: string, limit: number) => {
+            try {
+                const results = await memory.hybridSearch(query, limit);
+                return results;
+            } catch (err) {
+                logger.warn({ err }, '[Gateway] GraphRAG hybrid search failed:');
+                return [];
+            }
+        };
 
-    const graphRAGEngine = new GraphRAGEngine(
-        db,
-        graphExpander,
-        pageRankScorer,
-        communityDetector,
-        communitySummarizer,
-        graphCache,
-        hybridSearchFn,
-        {
-            maxHops: graphRAGConfig.maxHops,
-            maxExpandedNodes: graphRAGConfig.sampleRate === 1.0 ? 100 : 50,
-            minConfidence: 0.3,
-            usePageRank: graphRAGConfig.usePageRank,
-            useCommunities: graphRAGConfig.useCommunities,
-            useCache: true,
-            tokenBudget: graphRAGConfig.tokenBudget,
-            communitySummaryBudget: Math.floor(graphRAGConfig.tokenBudget * 0.25),
-            timeoutMs: graphRAGConfig.timeoutMs,
-            fallbackToStandardSearch: graphRAGConfig.fallbackEnabled,
-            rrfKConstant: graphRAGConfig.rrfKConstant,
-            memoryImportanceWeight: graphRAGConfig.memoryImportanceWeight,
-            memoryAccessCountWeight: graphRAGConfig.memoryAccessCountWeight,
-            memoryConfidenceWeight: graphRAGConfig.memoryConfidenceWeight,
-        },
-    );
+        const graphRAGEngine = new GraphRAGEngine(
+            db, graphExpander, pageRankScorer, communityDetector,
+            communitySummarizer, graphCache, hybridSearchFn,
+            {
+                maxHops: graphRAGConfig.maxHops,
+                maxExpandedNodes: graphRAGConfig.sampleRate === 1.0 ? 100 : 50,
+                minConfidence: 0.3,
+                usePageRank: graphRAGConfig.usePageRank,
+                useCommunities: graphRAGConfig.useCommunities,
+                useCache: true,
+                tokenBudget: graphRAGConfig.tokenBudget,
+                communitySummaryBudget: Math.floor(graphRAGConfig.tokenBudget * 0.25),
+                timeoutMs: graphRAGConfig.timeoutMs,
+                fallbackToStandardSearch: graphRAGConfig.fallbackEnabled,
+                rrfKConstant: graphRAGConfig.rrfKConstant,
+                memoryImportanceWeight: graphRAGConfig.memoryImportanceWeight,
+                memoryAccessCountWeight: graphRAGConfig.memoryAccessCountWeight,
+                memoryConfidenceWeight: graphRAGConfig.memoryConfidenceWeight,
+            },
+        );
 
-    const shadowMode = new ShadowMode(
-        graphRAGEngine,
-        hybridSearchFn,
-    );
+        const shadowMode = new ShadowMode(graphRAGEngine, hybridSearchFn);
+        agent.setGraphRAGComponents(graphRAGEngine, shadowMode);
+        memory.setGraphRAGEngine(graphRAGEngine);
+        memory.setConfidenceThreshold();
 
-    // Wire GraphRAG to agent and memory
-    agent.setGraphRAGComponents(graphRAGEngine, shadowMode);
-    memory.setGraphRAGEngine(graphRAGEngine);
+        const { ResponseVerifier } = await import('../memory/retrieval/ResponseVerifier.js');
+        const agenticVerifier = new ResponseVerifier(llm, {
+            supportFloor: config.agenticRAGVerificationSupportFloor,
+            utilityFloor: config.agenticRAGVerificationUtilityFloor,
+            maxRegenerations: config.agenticRAGMaxRegenerations,
+        });
+        agent.setAgenticRAGVerifier(agenticVerifier, config.agenticRAGMaxRegenerations);
 
-    // Wire Confidence Score to memory (uses the same LLM provider)
-    memory.setConfidenceThreshold();
+        const graphWorker = new GraphWorker(
+            db, pageRankScorer, communityDetector, communitySummarizer, graphCache,
+        );
+        graphWorker.start();
+        logger.info(`[Gateway] ✅ GraphRAG Background Worker started`);
 
-    // Wire Agentic RAG ResponseVerifier to agent runtime
-    const { ResponseVerifier } = await import('../memory/retrieval/ResponseVerifier.js');
-    const agenticVerifier = new ResponseVerifier(llm, {
-        supportFloor: config.agenticRAGVerificationSupportFloor,
-        utilityFloor: config.agenticRAGVerificationUtilityFloor,
-        maxRegenerations: config.agenticRAGMaxRegenerations,
-    });
-    agent.setAgenticRAGVerifier(agenticVerifier, config.agenticRAGMaxRegenerations);
-
-    // Initialize GraphWorker for background tasks (PageRank, Community Detection, etc.)
-    const graphWorker = new GraphWorker(
-        db,
-        pageRankScorer,
-        communityDetector,
-        communitySummarizer,
-        graphCache,
-    );
-    graphWorker.start();
-    logger.info(`[Gateway] ✅ GraphRAG Background Worker started`);
-
-    // Store references for graceful shutdown
-    const graphRAGComponents = { engine: graphRAGEngine, worker: graphWorker, shadow: shadowMode };
+        graphRAGComponents = { engine: graphRAGEngine, worker: graphWorker, shadow: shadowMode };
+    } catch (err) {
+        logger.warn({ err }, '[Gateway] GraphRAG init failed, continuing without it');
+    }
 
     // 4.5 Autonomous Sub-system Managers
     const feedbackManager = new FeedbackManager(database.getDb());
@@ -211,6 +208,20 @@ async function main() {
     const app = express();
     const server = createServer(app);
     const wss = new WebSocketServer({ noServer: true });
+
+    // broadcastStats — debounce ile flood önleme
+    let statsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    function broadcastStats() {
+        if (statsDebounceTimer) clearTimeout(statsDebounceTimer);
+        statsDebounceTimer = setTimeout(() => {
+            const stats = memory.getStats();
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'stats', stats }));
+                }
+            });
+        }, 500);
+    }
 
     // 4.6 Autonomous Worker (With SQLite Checkpointing)
     const taskQueue = new TaskQueue(database.getDb());
@@ -234,25 +245,7 @@ async function main() {
     const semanticRouter = new SemanticRouter(0.82);
 
     // Register basic local intents to test 0-latency routing
-    semanticRouter.registerIntent({
-        name: 'clear_queue',
-        description: 'Bekleyen otonom görevleri temizler',
-        examples: ['kuyruğu temizle', 'görevleri durdur', 'bütün işleri iptal et', 'arkaplan işlerini sil'],
-        action: async (msg) => {
-            taskQueue.clear();
-            return '✅ Arka plan görev kuyruğu başarıyla temizlendi ve sıfırlandı.';
-        }
-    });
-
-    semanticRouter.registerIntent({
-        name: 'worker_status',
-        description: 'Arka plan işçisinin durumunu raporlar',
-        examples: ['durum nedir', 'worker durumu', 'kuyrukta kaç iş var', 'ajan ne yapıyor'],
-        action: async (msg) => {
-            return `⚙️ Otonom Worker Durumu:\n- Bekleyen Görev Sayısı: ${taskQueue.length}`;
-        }
-    });
-
+    registerLocalIntents(semanticRouter, taskQueue, TaskPriority);
     logger.info(`[Gateway] 🧠 Semantic Router hazır (Lokal Niyet Algılama Aktif)`);
 
     // 6. Express (WebSocket zaten init edildi)
@@ -283,20 +276,6 @@ async function main() {
     // ============ WebSocket ============
 
     setupWebSocket(wss, { memory, agent, semanticRouter, autonomousWorker, broadcastStats });
-
-    // broadcastStats — debounce ile flood önleme (#19)
-    let statsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-    function broadcastStats() {
-        if (statsDebounceTimer) clearTimeout(statsDebounceTimer);
-        statsDebounceTimer = setTimeout(() => {
-            const stats = memory.getStats();
-            wss.clients.forEach(client => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(JSON.stringify({ type: 'stats', stats }));
-                }
-            });
-        }, 500);
-    }
 
     // ============ Kanalları Bağla ============
 
@@ -341,6 +320,7 @@ async function main() {
             addedAt: Date.now()
         });
     }, DECAY_INTERVAL_MS);
+    decayTimer.unref(); // Process exit'i engelleme — shutdown sırasında temizlenmese bile
 
     // Embedding'i eksik bellekleri arka planda tamamla (P4_LOW)
     taskQueue.enqueue({
@@ -386,8 +366,10 @@ async function main() {
         
         // Stop GraphRAG worker
         try {
-            graphWorker.stop();
-            logger.info('[Gateway] 🕸️ GraphRAG Worker stopped');
+            if (graphRAGComponents?.worker) {
+                graphRAGComponents.worker.stop();
+                logger.info('[Gateway] 🕸️ GraphRAG Worker stopped');
+            }
         } catch (err) {
             logger.warn({ err }, '[Gateway] GraphRAG Worker shutdown error:');
         }

@@ -1,10 +1,10 @@
-import { computeReviewPriority, selectConversationAwareSupplementalMemories } from './contextUtils.js';
+import { selectConversationAwareSupplementalMemories } from './contextUtils.js';
 import type {
     BehaviorDiscoveryTrace,
     GraphAwareSearchResult,
     MemoryRow,
-    MemoryType,
 } from './types.js';
+import type { ConversationSummary } from './manager/types.js';
 import type {
     BundleSelectionContext,
     CognitiveLoadAssessment,
@@ -44,10 +44,6 @@ import { CoverageRepair } from './retrieval/CoverageRepair.js';
 import { BudgetApplier } from './retrieval/BudgetApplier.js';
 import { BehaviorDiscovery } from './retrieval/BehaviorDiscovery.js';
 import { computeRetrievalConfidence, type RetrievalConfidenceResult } from './retrieval/RetrievalConfidenceScorer.js';
-// Eski Agentic RAG importları (kullanılmıyor ama backward compatibility için tutuluyor)
-// import { RetrievalDecider, type RetrievalDecision, type RetrieverType } from './retrieval/RetrievalDecider.js';
-// import { PassageCritique, type CritiqueResult } from './retrieval/PassageCritique.js';
-// import { MultiHopRetrieval, type MultiHopResult } from './retrieval/MultiHopRetrieval.js';
 export type { PromptContextBundle } from './manager/types.js';
 export type {
     PromptContextRequest,
@@ -90,6 +86,48 @@ function estimateMemoryTokenCount(memories: MemoryRow[]): number {
     return memories.reduce((total, memory) => total + Math.ceil(memory.content.length / 4), 0);
 }
 
+interface Phase1Result {
+    recentMessages: Array<{ role: string; content: string; created_at: string; conversation_title: string }>;
+    signals: RetrievalIntentSignals;
+    recipe: PromptContextRecipe;
+    typePreference: RetrievalTypePreference;
+    cognitiveLoad: CognitiveLoadAssessment;
+    confidenceResult: RetrievalConfidenceResult | null;
+    skipHeavyRetrieval: boolean;
+}
+
+interface Phase2Result {
+    graphRAGResult: GraphRAGResult | null;
+    searchResult: GraphAwareSearchResult;
+    conversationSummaries: ConversationSummary[];
+    reviewMemories: MemoryRow[];
+    followUpCandidates: MemoryRow[];
+    effectiveSearchLimit: number;
+}
+
+interface Phase3Result {
+    relevantMemories: MemoryRow[];
+    archivalMemories: MemoryRow[];
+    supplementalMemories: MemoryRow[];
+    rankedReviewMemories: MemoryRow[];
+    rankedFollowUpCandidates: MemoryRow[];
+    relevantBase: MemoryRow[];
+    supplementalCandidates: MemoryRow[];
+    relevantSecondPass: ReturnType<InstanceType<typeof CoverageRepair>['applySecondPass']>;
+    supplementalSecondPass: ReturnType<InstanceType<typeof CoverageRepair>['applySecondPass']>;
+    primer: RetrievalPrimerSnapshot;
+    dualProcess: DualProcessRoutingSnapshot;
+    budgetApplication: RetrievalBudgetApplication;
+    behaviorDiscoveryConfig: RetrievalBehaviorDiscoveryConfig;
+    behaviorDiscoveryShadowPlan: RetrievalBehaviorDiscoveryShadowPlan | null;
+    selectionContext: BundleSelectionContext;
+    relevantRankedEntries: ReturnType<InstanceType<typeof ScoringPipeline>['buildRankedEntries']>;
+    archivalRankedEntries: ReturnType<InstanceType<typeof ScoringPipeline>['buildRankedEntries']>;
+    supplementalRankedEntries: ReturnType<InstanceType<typeof ScoringPipeline>['buildRankedEntries']>;
+    reviewRankedEntries: ReturnType<InstanceType<typeof ScoringPipeline>['buildRankedEntries']>;
+    followUpRankedEntries: ReturnType<InstanceType<typeof ScoringPipeline>['buildRankedEntries']>;
+}
+
 export class MemoryRetrievalOrchestrator {
     private readonly intentAnalyzer: IntentAnalyzer;
     private readonly retrievalPrimer: RetrievalPrimer;
@@ -99,7 +137,7 @@ export class MemoryRetrievalOrchestrator {
     private readonly budgetApplier: BudgetApplier;
     private readonly behaviorDiscovery: BehaviorDiscovery;
 
-    // Confidence score için gerekli alanlar
+    // Confidence score icin gerekli alanlar
     private confidenceThreshold: number = 0.6;
 
     constructor(private readonly deps: RetrievalOrchestratorDeps) {
@@ -118,7 +156,7 @@ export class MemoryRetrievalOrchestrator {
     }
 
     /**
-     * Confidence threshold'ı runtime'da yapılandır.
+     * Confidence threshold'i runtime'da yapilandir.
      */
     setConfidenceThreshold(threshold: number): void {
         this.confidenceThreshold = Math.max(0.3, Math.min(1.0, threshold));
@@ -177,7 +215,6 @@ export class MemoryRetrievalOrchestrator {
         supplementalMemories: MemoryRow[];
         archivalMemories: MemoryRow[];
         decisionReasons: string[];
-        // Confidence score debug
         confidenceResult?: RetrievalConfidenceResult | null;
     }) {
         const {
@@ -279,7 +316,7 @@ export class MemoryRetrievalOrchestrator {
                 supplemental: supplementalMemories.length,
                 review: reviewMemories.length,
                 followUp: followUpCandidates.length,
-                recentMessages: 0, // Not tracked in debug payload directly
+                recentMessages: 0,
             },
             candidates: {
                 relevant: relevantSnapshot.candidateCount,
@@ -303,7 +340,6 @@ export class MemoryRetrievalOrchestrator {
                 followUp: followUpSnapshot.breakdown,
             },
             reasons: decisionReasons,
-            // Confidence score debug
             confidenceScore: confidenceResult ? {
                 score: confidenceResult.score,
                 needsRetrieval: confidenceResult.needsRetrieval,
@@ -312,34 +348,18 @@ export class MemoryRetrievalOrchestrator {
         };
     }
 
-    async getPromptContextBundle(request: PromptContextRequest): Promise<PromptContextBundle> {
-        const {
-            query,
-            activeConversationId,
-            options,
-        } = request;
-        const {
-            searchLimit = 10,
-            summaryLimit = 5,
-            reviewLimit = 5,
-            followUpDays = 14,
-            followUpLimit = 3,
-            relevantMemoryLimit = 5,
-            fallbackMemoryLimit = 10,
-            recentHours = 48,
-            recentMessagesLimit = 20,
-        } = options ?? {};
+    private async phase1IntentAnalysis(request: PromptContextRequest): Promise<Phase1Result> {
+        const { query, activeConversationId, options } = request;
+        const recentHours = options?.recentHours ?? 48;
+        const recentMessagesLimit = options?.recentMessagesLimit ?? 20;
 
-        // Phase 1: Intent analysis
         const recentMessages = this.deps.getRecentMessages(recentHours, recentMessagesLimit, activeConversationId);
         const analysis = this.intentAnalyzer.analyze(query, recentMessages);
         const { signals, recipe, typePreference, cognitiveLoad } = analysis;
 
-        // Phase 1.5: Confidence Score - Deterministik retrieval decision
-        const recentMessagesForConfidence = recentMessages ?? [];
-        const confidenceResult = computeRetrievalConfidence(signals, query, { 
+        const confidenceResult = computeRetrievalConfidence(signals, query, {
             threshold: this.confidenceThreshold,
-            recentMessagesCount: recentMessagesForConfidence.length,
+            recentMessagesCount: recentMessages?.length ?? 0,
         });
         const skipHeavyRetrieval = !confidenceResult.needsRetrieval;
 
@@ -350,7 +370,18 @@ export class MemoryRetrievalOrchestrator {
             reasons: confidenceResult.reasons,
         });
 
-        // Phase 2: GraphRAG retrieval
+        return { recentMessages, signals, recipe, typePreference, cognitiveLoad, confidenceResult, skipHeavyRetrieval };
+    }
+
+    private async phase2Retrieval(request: PromptContextRequest, phase1: Phase1Result): Promise<Phase2Result> {
+        const { query, options } = request;
+        const { signals, recipe, skipHeavyRetrieval } = phase1;
+        const searchLimit = options?.searchLimit ?? 10;
+        const summaryLimit = options?.summaryLimit ?? 5;
+        const reviewLimit = options?.reviewLimit ?? 5;
+        const followUpDays = options?.followUpDays ?? 14;
+        const followUpLimit = options?.followUpLimit ?? 3;
+
         let graphRAGResult: GraphRAGResult | null = null;
         const resolvedEngine = typeof this.deps.graphRAGEngine === 'function'
             ? this.deps.graphRAGEngine()
@@ -374,7 +405,6 @@ export class MemoryRetrievalOrchestrator {
             }
         }
 
-        // Parallel fetch
         const effectiveSearchLimit = skipHeavyRetrieval ? Math.min(searchLimit, 3) : searchLimit;
         const [searchResult, conversationSummaries, reviewMemories, followUpCandidates] = await Promise.all([
             this.deps.graphAwareSearch(query, effectiveSearchLimit, skipHeavyRetrieval ? 0 : recipe.graphDepth),
@@ -383,24 +413,31 @@ export class MemoryRetrievalOrchestrator {
             Promise.resolve(this.deps.getFollowUpCandidates(followUpDays, followUpLimit)),
         ]);
 
-        // Phase 2.5: Agentic RAG Passage Critique + Multi-Hop Retrieval DEVRE DIŞI
-        // Performance optimizasyonu nedeniyle kapatıldı - ilk arama sonuçları direkt kullanılır
+        return { graphRAGResult, searchResult, conversationSummaries, reviewMemories, followUpCandidates, effectiveSearchLimit };
+    }
 
-        // Budget + dual-process routing
+    private phase3Selection(request: PromptContextRequest, phase1: Phase1Result, phase2: Phase2Result): Phase3Result {
+        const { query, activeConversationId, options } = request;
+        const { recentMessages, signals, recipe, typePreference, cognitiveLoad } = phase1;
+        const { searchResult, reviewMemories, followUpCandidates } = phase2;
+        const {
+            searchLimit = 10,
+            relevantMemoryLimit = 5,
+            fallbackMemoryLimit = 10,
+        } = options ?? {};
+
         const primer = this.retrievalPrimer.buildPrimer(query, recentMessages, signals, recipe);
         const baseBudgetApplication = this.budgetApplier.applyCognitiveLoadBudget(recipe, cognitiveLoad, {
             searchLimit,
             relevantMemoryLimit,
             fallbackMemoryLimit,
-            reviewLimit,
-            followUpLimit,
+            reviewLimit: options?.reviewLimit ?? 5,
+            followUpLimit: options?.followUpLimit ?? 3,
         });
         const dualProcess = this.budgetApplier.resolveDualProcessRouting(query, signals, recipe, cognitiveLoad, baseBudgetApplication);
         const budgetApplication = this.budgetApplier.applyDualProcessAdjustments(dualProcess, baseBudgetApplication);
 
-        // Relevant memory selection — Agentic RAG devre dışı, direkt arama sonuçları kullanılır
         let agenticFilteredMemories: MemoryRow[] = searchResult.active;
-        // Not: Passage critique ve multi-hop devre dışı, filtreleme yapılmıyor
 
         const relevantCandidateLimit = Math.max(budgetApplication.relevantLimit, searchLimit);
         const conversationPrioritized = this.deps.prioritizeConversationMemories(
@@ -426,12 +463,10 @@ export class MemoryRetrievalOrchestrator {
             spreadingActivation: spreadingActivationState,
         };
 
-        // Scoring + second pass (relevant)
         const relevantRankedEntries = this.scoringPipeline.buildRankedEntries(relevantBase, selectionContext);
         const relevantSecondPass = this.coverageRepair.applySecondPass('relevant', relevantRankedEntries, budgetApplication.relevantLimit, selectionContext);
         const relevantMemories = relevantSecondPass.selected;
 
-        // Behavior discovery shadow plan
         const behaviorDiscoveryConfig = this.behaviorDiscovery.resolveConfig();
         const behaviorDiscoveryShadowPlan = this.behaviorDiscovery.buildShadowPlan(
             behaviorDiscoveryConfig,
@@ -441,7 +476,6 @@ export class MemoryRetrievalOrchestrator {
             budgetApplication.relevantLimit,
         );
 
-        // Archival + supplemental selection
         const archivalRankedEntries = this.scoringPipeline.buildRankedEntries(searchResult.archival, selectionContext);
         const archivalMemories = archivalRankedEntries
             .slice(0, budgetApplication.archivalLimit)
@@ -466,7 +500,6 @@ export class MemoryRetrievalOrchestrator {
         const supplementalSecondPass = this.coverageRepair.applySecondPass('supplemental', supplementalRankedEntries, supplementalLimit, selectionContext);
         const supplementalMemories = supplementalSecondPass.selected;
 
-        // Review + follow-up ranking
         const reviewRankedEntries = this.scoringPipeline.buildRankedEntries(reviewMemories, selectionContext);
         const rankedReviewMemories = reviewRankedEntries
             .slice(0, budgetApplication.reviewLimit)
@@ -476,12 +509,57 @@ export class MemoryRetrievalOrchestrator {
             .slice(0, budgetApplication.followUpLimit)
             .map(entry => entry.memory);
 
-        // Snapshots + audit
+        return {
+            relevantMemories, archivalMemories, supplementalMemories,
+            rankedReviewMemories, rankedFollowUpCandidates,
+            relevantBase, supplementalCandidates,
+            relevantSecondPass, supplementalSecondPass,
+            relevantRankedEntries, archivalRankedEntries, supplementalRankedEntries,
+            reviewRankedEntries, followUpRankedEntries,
+            primer, dualProcess, budgetApplication,
+            behaviorDiscoveryConfig, behaviorDiscoveryShadowPlan,
+            selectionContext,
+        };
+    }
+
+    private phase4Assembly(
+        request: PromptContextRequest,
+        phase1: Phase1Result,
+        phase2: Phase2Result,
+        phase3: Phase3Result,
+    ): PromptContextBundle {
+        const { query, activeConversationId, options } = request;
+        const { recentMessages, signals, recipe, typePreference, cognitiveLoad, confidenceResult } = phase1;
+        const { graphRAGResult, searchResult, conversationSummaries } = phase2;
+        const {
+            relevantMemories, archivalMemories, supplementalMemories,
+            rankedReviewMemories, rankedFollowUpCandidates,
+            relevantBase, supplementalCandidates,
+            relevantSecondPass, supplementalSecondPass,
+            relevantRankedEntries, archivalRankedEntries, supplementalRankedEntries,
+            reviewRankedEntries, followUpRankedEntries,
+            primer, dualProcess, budgetApplication,
+            behaviorDiscoveryConfig, behaviorDiscoveryShadowPlan,
+            selectionContext,
+        } = phase3;
+        const {
+            searchLimit = 10,
+            summaryLimit = 5,
+            reviewLimit = 5,
+            followUpDays = 14,
+            followUpLimit = 3,
+            relevantMemoryLimit = 5,
+            fallbackMemoryLimit = 10,
+            recentHours = 48,
+            recentMessagesLimit = 20,
+        } = options ?? {};
+
         const relevantSnapshot = this.createSelectionSnapshot(relevantBase, relevantMemories, activeConversationId);
         const archivalSnapshot = this.createSelectionSnapshot(searchResult.archival, archivalMemories, activeConversationId);
         const supplementalSnapshot = this.createSelectionSnapshot(supplementalCandidates, supplementalMemories, activeConversationId);
-        const reviewSnapshot = this.createSelectionSnapshot(reviewMemories, rankedReviewMemories, activeConversationId);
-        const followUpSnapshot = this.createSelectionSnapshot(followUpCandidates, rankedFollowUpCandidates, activeConversationId);
+        const reviewSnapshot = this.createSelectionSnapshot(phase2.reviewMemories, rankedReviewMemories, activeConversationId);
+        const followUpSnapshot = this.createSelectionSnapshot(phase2.followUpCandidates, rankedFollowUpCandidates, activeConversationId);
+
         const secondPassAudit: RetrievalSecondPassAuditSnapshot = {
             applied: relevantSecondPass.adjustment.applied || supplementalSecondPass.adjustment.applied,
             mode: dualProcess.selectedMode,
@@ -490,7 +568,6 @@ export class MemoryRetrievalOrchestrator {
             adjustments: [relevantSecondPass.adjustment, supplementalSecondPass.adjustment],
         };
 
-        // Explanations
         const explanations = {
             relevant: this.scoringPipeline.buildExplanations('relevant', relevantRankedEntries, relevantMemories, selectionContext),
             archival: this.scoringPipeline.buildExplanations('archival', archivalRankedEntries, archivalMemories, selectionContext),
@@ -499,18 +576,17 @@ export class MemoryRetrievalOrchestrator {
             followUp: this.scoringPipeline.buildExplanations('follow_up', followUpRankedEntries, rankedFollowUpCandidates, selectionContext),
         };
 
-        // BehaviorDiscovery shadow comparison
         if (this.deps.behaviorDiscoveryShadow && graphRAGResult) {
             const startTime = Date.now();
             const baselineResults = relevantMemories.map(m => ({ id: m.id, score: 0 }));
             const experimentalResults = graphRAGResult.memories.map(m => ({ id: m.id, score: 0 }));
 
-            await this.deps.behaviorDiscoveryShadow.runComparison(
+            this.deps.behaviorDiscoveryShadow.runComparison(
                 query,
                 baselineResults,
                 experimentalResults,
                 recipe.useGraphRAG ? 'graph_rag' : 'spreading_activation',
-            );
+            ).catch(() => {});
 
             const duration = Date.now() - startTime;
             const metrics = this.deps.behaviorDiscoveryShadow.getMetrics();
@@ -519,7 +595,6 @@ export class MemoryRetrievalOrchestrator {
             }
         }
 
-        // Behavior discovery trace + reason list
         const behaviorDiscoveryTrace = this.behaviorDiscovery.buildTrace(
             behaviorDiscoveryConfig,
             signals,
@@ -532,7 +607,6 @@ export class MemoryRetrievalOrchestrator {
         decisionReasons.push(...secondPassAudit.coverageGaps.map(gap => `coverage_gap:${gap.reason}`));
         decisionReasons.push(...secondPassAudit.adjustments.filter(adjustment => adjustment.applied && adjustment.reason).map(adjustment => `second_pass_adjustment:${adjustment.lane}:${adjustment.reason}`));
 
-        // Confidence score decisions
         if (confidenceResult) {
             if (confidenceResult.needsRetrieval) {
                 decisionReasons.push(`confidence_score:retrieve (score=${confidenceResult.score.toFixed(2)}, reasons=${confidenceResult.reasons.join(',')})`);
@@ -547,7 +621,6 @@ export class MemoryRetrievalOrchestrator {
             decisionReasons.push(`behavior_discovery_readiness:${behaviorDiscoveryTrace.shadowComparison.readiness}`);
         }
 
-        // Debug payload + record
         const debugPayload = this.buildDebugPayload({
             query,
             activeConversationId,
@@ -559,7 +632,7 @@ export class MemoryRetrievalOrchestrator {
             dualProcess,
             secondPassAudit,
             explanations,
-            spreadingActivationState,
+            spreadingActivationState: phase3.selectionContext.spreadingActivation,
             behaviorDiscovery: behaviorDiscoveryTrace,
             budgetApplication,
             budgetOptions: {
@@ -587,13 +660,11 @@ export class MemoryRetrievalOrchestrator {
             supplementalMemories,
             archivalMemories,
             decisionReasons,
-            // Confidence score debug
             confidenceResult,
         });
         this.deps.recordDebug(debugPayload);
 
-        // Bundle assembly
-        logger.info(`[Memory] 📚 Retrieval: ${relevantMemories.length} relevant, ${archivalMemories.length} archival, ${supplementalMemories.length} supplemental | ${conversationSummaries.length} summaries | ${rankedReviewMemories.length} review | ${rankedFollowUpCandidates.length} followup`);
+        logger.info(`[Memory] Retrieval: ${relevantMemories.length} relevant, ${archivalMemories.length} archival, ${supplementalMemories.length} supplemental | ${conversationSummaries.length} summaries | ${rankedReviewMemories.length} review | ${rankedFollowUpCandidates.length} followup`);
 
         return {
             relevantMemories,
@@ -612,5 +683,12 @@ export class MemoryRetrievalOrchestrator {
                 graphContext: graphRAGResult.graphContext as unknown as Record<string, unknown>,
             } : null,
         };
+    }
+
+    async getPromptContextBundle(request: PromptContextRequest): Promise<PromptContextBundle> {
+        const phase1 = await this.phase1IntentAnalysis(request);
+        const phase2 = await this.phase2Retrieval(request, phase1);
+        const phase3 = this.phase3Selection(request, phase1, phase2);
+        return this.phase4Assembly(request, phase1, phase2, phase3);
     }
 }

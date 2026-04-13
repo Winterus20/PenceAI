@@ -13,6 +13,7 @@ import { MessageRouter } from '../router/index.js';
 import type { SemanticRouter } from '../router/semantic.js';
 import type { BackgroundWorker } from '../autonomous/index.js';
 import { logger, runWithTraceId } from '../utils/logger.js';
+import { processAttachments, type WebSocketAttachment } from './attachmentProcessor.js';
 
 /**
  * WebSocket yapılandırma sabitleri
@@ -23,11 +24,10 @@ export const WS_CONFIG = {
   confirmationTimeoutMs: 60000,
   /** Maksimum mesaj uzunluğu (karakter) */
   maxMessageLength: 50000,
-  /** Maksimum dosya boyutu (Base64, byte) */
-  maxAttachmentBase64Size: 10 * 1024 * 1024, // 10 MB
-  /** Metin dosyası kısaltma sınırı (karakter) */
-  maxTextFileLength: 20000,
 } as const;
+
+/** Maksimum mesaj işlem süresi (ms) — aşılırsa timeout */
+const MESSAGE_PROCESSING_TIMEOUT_MS = 5 * 60 * 1000; // 5 dakika
 
 // WebSocket mesaj tipleri
 interface WebSocketChatMessage {
@@ -37,13 +37,6 @@ interface WebSocketChatMessage {
 	newConversation?: boolean;
 	userName?: string;
 	attachments?: WebSocketAttachment[];
-}
-
-interface WebSocketAttachment {
-	mimeType?: string;
-	fileName?: string;
-	size?: number;
-	data?: string;
 }
 
 interface WebSocketSetThinkingMessage {
@@ -119,6 +112,7 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
          */
         const confirmCallback: ConfirmCallback = (info) => {
             return new Promise<boolean>((resolve) => {
+                if (confirmCounter >= Number.MAX_SAFE_INTEGER - 1000) confirmCounter = 0;
                 const confirmId = `confirm_${++confirmCounter}_${Date.now()}`;
                 pendingConfirmations.set(confirmId, { resolve });
 
@@ -153,7 +147,12 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                 const { data } = messageQueue.shift()!;
                 try {
                     await runWithTraceId(async () => {
-                        await handleChatMessage(data, ws);
+                        await Promise.race([
+                            handleChatMessage(data, ws),
+                            new Promise<void>((_, reject) =>
+                                setTimeout(() => reject(new Error('Mesaj işlem süresi doldu (5 dk)')), MESSAGE_PROCESSING_TIMEOUT_MS)
+                            ),
+                        ]);
                     });
                 } catch (err) {
                     logger.error({ err }, '[Gateway] Kuyruk mesaj hatası');
@@ -182,69 +181,8 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
         }
 
             // ---- Dosya ekleme işleme ----
-            const TEXT_MIMES = new Set([
-                'text/plain', 'text/markdown', 'text/csv', 'text/html', 'text/css',
-                'text/javascript', 'text/typescript', 'application/json', 'application/xml',
-                'application/javascript', 'application/typescript',
-            ]);
-            const isTextFile = (mimeType: string, fileName: string) =>
-                TEXT_MIMES.has(mimeType) ||
-                mimeType.startsWith('text/') ||
-                /\.(txt|md|json|csv|xml|html|htm|css|js|ts|jsx|tsx|py|rb|java|c|cpp|h|hpp|cs|go|rs|sh|yaml|yml|toml|ini|cfg|conf|env|log|sql)$/i.test(fileName || '');
-
-            let enrichedContent: string = chatData.content ?? '';
             const wsAttachments: WebSocketAttachment[] = Array.isArray(chatData.attachments) ? chatData.attachments : [];
-            const builtAttachments: import('../router/types.js').Attachment[] = [];
-
-            for (const att of wsAttachments) {
-                const mime: string = att.mimeType || 'application/octet-stream';
-                const name: string = att.fileName || 'dosya';
-
-                // OPT-5: Base64 boyut sınırı — büyük dosyalar olay döngüsünü bloke eder
-                if (att.data && typeof att.data === 'string' && att.data.length > WS_CONFIG.maxAttachmentBase64Size) {
-                    logger.warn(`[Gateway] ⚠️ Dosya çok büyük, atlandı: ${name} (${(att.data.length / 1024 / 1024).toFixed(1)} MB base64)`);
-                    enrichedContent += `\n\n[Dosya çok büyük ve işlenemedi: ${name} (${mime})]`;
-                    continue;
-                }
-
-                if (att.data && isTextFile(mime, name)) {
-                    let text: string;
-                    try {
-                        text = Buffer.from(att.data as string, 'base64').toString('utf-8');
-                    } catch {
-                        text = '(içerik okunamadı)';
-                    }
-                    const truncated = text.length > WS_CONFIG.maxTextFileLength ? text.substring(0, WS_CONFIG.maxTextFileLength) + '\n...(dosya uzun, kısaltıldı)' : text;
-                    const lang = name.split('.').pop() || '';
-                    enrichedContent += `\n\n---\n**[Dosya: ${name}]**\n\`\`\`${lang}\n${truncated}\n\`\`\``;
-                    logger.info(`[Gateway] 📄 Metin dosyası eklendi: ${name} (${text.length} karakter)`);
-                } else if (mime.startsWith('image/') && att.data) {
-                    let imgBuffer: Buffer;
-                    try {
-                        imgBuffer = Buffer.from(att.data as string, 'base64');
-                    } catch {
-                        imgBuffer = Buffer.alloc(0);
-                    }
-                    builtAttachments.push({
-                        type: 'image',
-                        mimeType: mime,
-                        fileName: name,
-                        size: att.size,
-                        data: imgBuffer,
-                    });
-                    enrichedContent += enrichedContent.trim() ? '' : '(Aşağıdaki görseli analiz et)';
-                    logger.info(`[Gateway] 🖼️ Görsel eklendi: ${name} (${mime}, ${imgBuffer.length} byte)`);
-                } else {
-                    builtAttachments.push({
-                        type: mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : 'document',
-                        mimeType: mime,
-                        fileName: name,
-                        size: att.size,
-                    });
-                    enrichedContent += `\n\n[Kullanıcı bir dosya ekledi: ${name} (${mime})]`;
-                    logger.info(`[Gateway] 📎 Binary dosya eklendi: ${name} (${mime})`);
-                }
-            }
+            const { enrichedContent, builtAttachments } = processAttachments(chatData.content, wsAttachments);
 
             const message = MessageRouter.createWebMessage(
                 enrichedContent,
@@ -255,7 +193,13 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
 
             try {
                 // 1. Semantic Router Interception
-                const semanticCheck = await semanticRouter.route(message.content, message);
+                const messageContext: Record<string, unknown> = {
+                    userId: message.senderId,
+                    userName: message.senderName,
+                    channelId: message.channelId,
+                    timestamp: message.timestamp,
+                };
+                const semanticCheck = await semanticRouter.route(message.content, messageContext);
                 if (semanticCheck.handled && semanticCheck.response) {
                     if (ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({

@@ -4,6 +4,12 @@
  * Hiçbir dış bağımlılığı yoktur — tamamen saf fonksiyonlardan oluşur.
  */
 
+/** Ebbinghaus hatırlama eşiği — R=0.7 */
+export const RETENTION_THRESHOLD = 0.7;
+
+/** Review planlama faktörü: -ln(0.7) ≈ 0.3567 */
+export const REVIEW_SCHEDULE_FACTOR = -Math.log(RETENTION_THRESHOLD);
+
 /**
  * R(t) = e^(-t/S)
  * @param stability  — hafızanın kararlılığı (gün cinsinden)
@@ -21,7 +27,7 @@ export function computeRetention(stability: number, daysSince: number): number {
  * @returns unix timestamp (saniye)
  */
 export function computeNextReview(stability: number): number {
-    const daysUntilReview = stability * 0.3567; // -ln(0.7)
+    const daysUntilReview = stability * REVIEW_SCHEDULE_FACTOR;
     return Math.floor(Date.now() / 1000) + Math.round(daysUntilReview * 86400);
 }
 

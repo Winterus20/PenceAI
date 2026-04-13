@@ -3,6 +3,9 @@ import { DEFAULT_USER_NAME, type MemoryRow, type MemoryWriteMetadata } from './t
 import { computeRetention } from './ebbinghaus.js';
 import { daysSince } from '../utils/datetime.js';
 
+/** Konuşma bağlamı kelime dağarcığı için son N mesaj */
+const CONVERSATION_LEXICON_WINDOW = 6;
+
 export interface RRFScoreEntry<T> {
     score: number;
     item: T;
@@ -202,7 +205,7 @@ function buildConversationLexicon(
     recentMessages: Array<{ role: string; content: string; created_at: string; conversation_title: string }>,
 ): Set<string> {
     const lexicon = new Set<string>(extractTerms(query));
-    const recentSlice = recentMessages.slice(-6);
+    const recentSlice = recentMessages.slice(-CONVERSATION_LEXICON_WINDOW);
     for (const message of recentSlice) {
         for (const term of extractTerms(message.content)) {
             lexicon.add(term);

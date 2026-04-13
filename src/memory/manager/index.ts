@@ -144,6 +144,8 @@ export class MemoryManager {
     this.spreadingActivationService = new SpreadingActivationService(this.graph);
 
     // Retrieval Orchestrator (graphRAGEngine setGraphRAGEngine ile sonradan set edilir)
+    // NOT: Bu closure'lar lazy evaluation ile çalışır — sadece getPromptContextBundle() çağrıldığında
+    // this'e erişirler. Constructor sırasında çağrılmazlar, circular reference riski yoktur.
     this.retrievalOrchestrator = new MemoryRetrievalOrchestrator({
       graphAwareSearch: (query, limit, maxDepth) => this.graphAwareSearch(query, limit, maxDepth),
       getRecentConversationSummaries: (limit) => this.conversationManager.getRecentConversationSummaries(limit),
@@ -159,6 +161,9 @@ export class MemoryManager {
       recordDebug: (payload) => this.recordRetrievalDebug('promptContextBundle', payload),
       graphRAGEngine: () => this.graphRAGEngine ?? undefined,
     });
+
+    // Initialize default settings
+    this.initDefaultSettings();
   }
 
   /**
@@ -185,6 +190,7 @@ export class MemoryManager {
   setTaskQueue(queue: TaskQueue): void {
     this.taskQueue = queue;
     this.memoryStore.setTaskQueue(queue);
+    this.retrievalService.setTaskQueue(queue);
     logger.info('[Memory] ⚙️ TaskQueue bağlandı — Ebbinghaus güncellemeleri arka plana yönlendirilecek.');
   }
 
@@ -322,10 +328,7 @@ export class MemoryManager {
         return [];
       }
     }
-    // İlk kez — config'ten varsayılanları yükle ve DB'ye kaydet
-    const defaults: string[] = getConfig().sensitivePaths || [];
-    this.setSetting('sensitive_paths', JSON.stringify(defaults));
-    return defaults;
+    return getConfig().sensitivePaths || [];
   }
 
   setSensitivePaths(paths: string[]): void {
@@ -525,6 +528,12 @@ export class MemoryManager {
 
         logger.info({ msg: parts.join(' | ') });
       }
+    }
+  }
+
+  private initDefaultSettings(): void {
+    if (!this.getSetting('sensitive_paths')) {
+      this.setSetting('sensitive_paths', JSON.stringify(getConfig().sensitivePaths || []));
     }
   }
 

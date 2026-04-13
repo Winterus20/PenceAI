@@ -9,7 +9,7 @@ import { buildSystemPrompt, getBuiltinToolDefinitions, buildLightExtractionPromp
 import { createBuiltinTools, type ToolExecutor, type ConfirmCallback } from './tools.js';
 import { getUnifiedToolRegistry } from './mcp/registry.js';
 import { isMCPEnabled } from './mcp/config.js';
-import { logger } from '../utils/logger.js';
+import { logger } from '../utils/index.js';
 import type { FeedbackManager } from '../autonomous/urgeFilter.js';
 import type { TaskQueue } from '../autonomous/queue.js';
 import { TaskPriority } from '../autonomous/queue.js';
@@ -19,7 +19,7 @@ import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
 import { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
 import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../memory/graphRAG/config.js';
 import { ResponseVerifier } from '../memory/retrieval/ResponseVerifier.js';
-import { calculateCost } from '../utils/costCalculator.js';
+import { calculateCost } from '../utils/index.js';
 
 const MAX_TOOL_ITERATIONS_DEFAULT = 5;
 
