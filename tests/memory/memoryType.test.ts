@@ -333,14 +333,13 @@ describe('memory type aware retrieval weighting', () => {
         expect(debugPayload.dualProcess).toMatchObject({
             selectedMode: 'system2',
             routingReasons: expect.arrayContaining([
-                'fast_path_low_load',
-                'direct_question_low_ambiguity',
+                'deliberate_route_escalated',
             ]),
             escalationTriggers: expect.arrayContaining([
                 'follow_up_ambiguity',
             ]),
             secondPassApplied: true,
-            secondPassSummary: 'deliberate_rerank_budget:supportive_expansion->balanced_default',
+            secondPassSummary: 'deliberate_rerank_existing_budget',
             adjustedBudgetProfile: 'balanced_default',
             adjustedGraphDepth: 2,
         });
@@ -673,11 +672,8 @@ describe('memory type aware retrieval weighting', () => {
             expect.objectContaining({ id: 203, reasons: expect.arrayContaining(['conversation_scoped', 'type_aligned:episodic']) }),
         ]));
         expect(debugPayload.reasons).toEqual(expect.arrayContaining([
-            'signal:follow_up_cue',
-            'signal:recall_cue',
-            'signal:constraint_cue',
-            'second_pass:bounded_to_existing_candidates',
-            'second_pass:selection_limit_preserved:2',
+            'load_signal:follow_up',
+            'load_signal:analytical_intent',
         ]));
     });
 

@@ -6,7 +6,7 @@
  */
 
 import {
-  GraphRAGRollbackManager,
+  defaultRollbackManager as GraphRAGRollbackManager,
   RollbackReason,
 } from '../../../src/memory/graphRAG/rollback.js';
 import {

@@ -131,6 +131,8 @@ export class OpenAIProvider extends LLMProvider {
     readonly name: string = 'openai';
     readonly supportedModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo', 'o1', 'o1-mini'];
 
+    get supportsNativeToolCalling(): boolean { return true; }
+
     protected client: OpenAI;
     private toolsDisabled = false;
 

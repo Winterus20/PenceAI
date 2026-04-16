@@ -31,6 +31,10 @@ export class OllamaProvider extends LLMProvider {
     readonly name = 'ollama';
     readonly supportedModels = ['llama3.3', 'llama3.1', 'mistral', 'codellama', 'deepseek-r1', 'qwen2.5'];
 
+    get supportsNativeToolCalling(): boolean {
+        return getConfig().enableOllamaTools === true;
+    }
+
     private baseUrl: string;
 
     constructor() {

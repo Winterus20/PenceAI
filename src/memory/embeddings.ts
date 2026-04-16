@@ -75,7 +75,15 @@ abstract class BaseHttpEmbedding implements EmbeddingProvider {
         if (!apiKey) {
             throw new Error('Embedding API key sağlanmadı (embedding için gerekli)');
         }
-        this.apiKey = apiKey;
+        // Gelişmiş kontrol: API key içinde geçersiz karakterler (ör. sansürlenmiş •) var mı?
+        if (/[^\x20-\x7E]/.test(apiKey)) {
+            logger.warn(`[Embedding] Geçersiz API Key formatı tespit edildi (Unicode karakter içeriyor). Semantik arama çalışmayabilir veya hatalara yol açabilir.`);
+            // ASCII olmayan karakterleri temizle ki uygulama çökmesin.
+            // Ama yine de muhtemelen yetki hatası alacaktır.
+            this.apiKey = apiKey.replace(/[^\x20-\x7E]/g, '');
+        } else {
+            this.apiKey = apiKey;
+        }
     }
 
     async embed(texts: string[]): Promise<number[][]> {

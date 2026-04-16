@@ -7,6 +7,8 @@ export class AnthropicProvider extends LLMProvider {
     readonly name = 'anthropic';
     readonly supportedModels = ['claude-sonnet-4-20250514', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229'];
 
+    get supportsNativeToolCalling(): boolean { return true; }
+
     private client: Anthropic;
 
     constructor() {

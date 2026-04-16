@@ -90,12 +90,76 @@ export class ResponseVerifier {
         }
 
         const prompt = this.buildPrompt(query, response, memories);
-        const result = await this.llmProvider.chat([
-            { role: 'system', content: VERIFICATION_PROMPT },
-            { role: 'user', content: prompt },
-        ], { temperature: 0.2, maxTokens: 1024 });
+        try {
+            if (this.llmProvider.supportsNativeToolCalling) {
+                const result = await this.llmProvider.chat([
+                    { role: 'system', content: VERIFICATION_PROMPT + '\nOutput MUST be provided using the tool.' },
+                    { role: 'user', content: prompt }
+                ], { temperature: 0.1, tools: [this.getVerificationToolDefinition()] });
+                
+                return this.extractFromToolCall(result.content, response);
+            }
+            
+            // Fallback for non-tool models
+            const result = await this.llmProvider.chat([
+                { role: 'system', content: VERIFICATION_PROMPT },
+                { role: 'user', content: prompt },
+            ], { temperature: 0.2, maxTokens: 1024 });
 
-        return this.parseResponse(result.content, response);
+            return this.parseResponse(result.content, response);
+        } catch(err) {
+            return this.defaultResult(response);
+        }
+    }
+
+    private getVerificationToolDefinition(): any {
+        return {
+            name: 'submit_verification',
+            description: 'Evaluate the generated response returning fact-checking values',
+            parameters: {
+                type: 'object',
+                properties: {
+                    isSupported: { type: 'string', enum: ['FullySupported', 'PartiallySupported', 'Unsupported'] },
+                    supportScore: { type: 'number' },
+                    utilityScore: { type: 'number' },
+                    hallucinations: { type: 'array', items: { type: 'string' } },
+                    needsRegeneration: { type: 'boolean' },
+                    feedback: { type: 'string' }
+                },
+                required: ['isSupported', 'supportScore', 'utilityScore', 'hallucinations', 'needsRegeneration', 'feedback']
+            }
+        };
+    }
+
+    private extractFromToolCall(content: string, response: string): VerificationResult {
+        try {
+            const jsonStart = content.indexOf('{');
+            const jsonEnd = content.lastIndexOf('}');
+            if (jsonStart === -1 || jsonEnd === -1) {
+                return this.parseResponse(content, response); // Fallback
+            }
+
+            const jsonStr = content.substring(jsonStart, jsonEnd + 1);
+            const data = JSON.parse(jsonStr);
+
+            const isSupported = (data.isSupported as SupportLevel) ?? 'PartiallySupported';
+            const supportScore = typeof data.supportScore === 'number' ? data.supportScore : 0.5;
+            const utilityScore = typeof data.utilityScore === 'number' ? data.utilityScore : 3;
+            const hallucinations = Array.isArray(data.hallucinations) ? data.hallucinations : [];
+            const needsRegeneration = typeof data.needsRegeneration === 'boolean' ? data.needsRegeneration : false;
+            const feedback = data.feedback ?? '';
+
+            return {
+                isSupported,
+                supportScore,
+                utilityScore,
+                hallucinations,
+                needsRegeneration,
+                feedback,
+            };
+        } catch {
+            return this.defaultResult(response);
+        }
     }
 
     private noMemoryResult(response: string): VerificationResult {

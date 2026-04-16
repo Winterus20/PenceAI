@@ -6,7 +6,7 @@
  */
 
 import {
-  GraphRAGMonitor,
+  defaultMonitor as GraphRAGMonitor,
   AlertSeverity,
 } from '../../../src/memory/graphRAG/monitoring.js';
 

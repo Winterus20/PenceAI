@@ -7,6 +7,7 @@
  */
 
 // Logger mock
+import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../../../src/memory/graphRAG/config.js';
 jest.mock('../../../src/utils/logger.js', () => ({
   logger: {
     debug: jest.fn(),
@@ -89,6 +90,7 @@ describe('RetrievalOrchestrator + GraphRAG Integration (Extended)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    GraphRAGConfigManager.setRolloutPhase(GraphRAGRolloutPhase.FULL);
 
     // Mock GraphRAGEngine instance
     mockGraphRAGEngine = new GraphRAGEngine(
@@ -207,12 +209,12 @@ describe('RetrievalOrchestrator + GraphRAG Integration (Extended)', () => {
 
       // Analytical + exploratory sinyalleri
       mockDeps.getRecentMessages = jest.fn().mockReturnValue([
-        { role: 'user', content: 'Bu konuyu analiz et ve farklı perspektifleri keşfet', created_at: new Date().toISOString(), conversation_title: 'test' },
+        { role: 'user', content: 'Bana farklı alternatifler keşfet', created_at: new Date().toISOString(), conversation_title: 'test' },
       ]);
 
       const orchestrator = new MemoryRetrievalOrchestrator(mockDeps);
       await orchestrator.getPromptContextBundle({
-        query: 'Bu konuyu analiz et ve farklı perspektifleri keşfet',
+        query: 'Bana farklı alternatifler keşfet',
         activeConversationId: 'test-conv',
       });
 
@@ -346,12 +348,12 @@ describe('RetrievalOrchestrator + GraphRAG Integration (Extended)', () => {
       );
 
       mockDeps.getRecentMessages = jest.fn().mockReturnValue([
-        { role: 'user', content: 'Bu konuyu analiz et ve farklı perspektifleri keşfet', created_at: new Date().toISOString(), conversation_title: 'test' },
+        { role: 'user', content: 'Bana farklı alternatifler keşfet', created_at: new Date().toISOString(), conversation_title: 'test' },
       ]);
 
       const orchestrator = new MemoryRetrievalOrchestrator(mockDeps);
       await orchestrator.getPromptContextBundle({
-        query: 'Bu konuyu analiz et ve farklı perspektifleri keşfet',
+        query: 'Bana farklı alternatifler keşfet',
         activeConversationId: 'test-conv',
       });
 
@@ -408,7 +410,7 @@ describe('RetrievalOrchestrator + GraphRAG Integration (Extended)', () => {
       );
 
       mockDeps.getRecentMessages = jest.fn().mockReturnValue([
-        { role: 'user', content: 'Bu konuyu analiz et ve farklı perspektifleri keşfet', created_at: new Date().toISOString(), conversation_title: 'test' },
+        { role: 'user', content: 'Bana farklı alternatifler keşfet', created_at: new Date().toISOString(), conversation_title: 'test' },
       ]);
 
       const orchestrator = new MemoryRetrievalOrchestrator(mockDeps);
@@ -416,7 +418,7 @@ describe('RetrievalOrchestrator + GraphRAG Integration (Extended)', () => {
       // Concurrent retrievals
       const promises = Array(3).fill(null).map(() =>
         orchestrator.getPromptContextBundle({
-          query: 'Bu konuyu analiz et ve farklı perspektifleri keşfet',
+          query: 'Bana farklı alternatifler keşfet',
           activeConversationId: 'test-conv',
         })
       );

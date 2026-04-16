@@ -159,7 +159,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
 
         for (const [key, val] of Object.entries(body)) {
             if (map[key]) {
-                if (typeof val === 'string' && val.includes('***')) continue;
+                if (typeof val === 'string' && (val.includes('***') || val.includes('••••'))) continue;
                 updates[map[key]] = String(val);
             }
         }

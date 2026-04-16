@@ -15,6 +15,14 @@ export const TOOL_CALL_CLEAR_SIGNAL = '\x00__CLEAR_STREAM__\x00';
 export abstract class LLMProvider {
     abstract readonly name: string;
     abstract readonly supportedModels: string[];
+    
+    /**
+     * Agentic RAG'ın kullanacağı araçlar bu provider (örn. OpenAI/Anthropic) tarafından
+     * yerel olarak tool formatıyla destekleniyor mu? 
+     */
+    get supportsNativeToolCalling(): boolean {
+        return false;
+    }
 
     /**
      * Provider'ın varsayılan modeli (supportedModels[0] veya override).

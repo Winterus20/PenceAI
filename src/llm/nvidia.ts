@@ -26,6 +26,8 @@ export class NvidiaProvider extends OpenAIProvider {
         'deepseek-ai/deepseek-r1',
         'deepseek-ai/deepseek-r1-distill-llama-8b',
         // === Qwen ===
+        'qwen/qwen3.5-397b-a17b',
+        'qwen/qwen3.5-122b-a10b',
         'qwen/qwen3-235b-a22b',
         'qwen/qwen2.5-coder-32b-instruct',
         'qwen/qwq-32b',
@@ -34,16 +36,19 @@ export class NvidiaProvider extends OpenAIProvider {
         'nvidia/nemotron-3-super-120b-a12b',
         // === Mistral ===
         'mistralai/mistral-large-3-675b-instruct-2512',
-        'mistralai/mistral-small-3_1-24b-instruct-2503',
+        'mistralai/mistral-small-4-119b-2603',
         'mistralai/mixtral-8x22b-instruct',
         // === Google Gemma ===
+        'google/gemma-4-31b-it',
         'google/gemma-3-27b-it',
-        'google/gemma-2-9b-it',
         // === Microsoft Phi ===
         'microsoft/phi-4-multimodal-instruct',
         'microsoft/phi-3.5-mini',
         // === MiniMax ===
+        'minimaxai/minimax-m2.7',
         'minimaxai/minimax-m2.5',
+        // === Z.ai ===
+        'z-ai/glm5',
         // === OpenAI OSS ===
         'openai/gpt-oss-120b',
         // === MoonshotAI Kimi ===

@@ -44,6 +44,11 @@ import { CoverageRepair } from './retrieval/CoverageRepair.js';
 import { BudgetApplier } from './retrieval/BudgetApplier.js';
 import { BehaviorDiscovery } from './retrieval/BehaviorDiscovery.js';
 import { computeRetrievalConfidence, type RetrievalConfidenceResult } from './retrieval/RetrievalConfidenceScorer.js';
+import { getConfig } from '../gateway/config.js';
+import { LLMProviderFactory, type LLMProvider } from '../llm/provider.js';
+import { registerAllProviders } from '../llm/index.js';
+import { PassageCritique } from './retrieval/PassageCritique.js';
+import { MultiHopRetrieval } from './retrieval/MultiHopRetrieval.js';
 export type { PromptContextBundle } from './manager/types.js';
 export type {
     PromptContextRequest,
@@ -137,6 +142,11 @@ export class MemoryRetrievalOrchestrator {
     private readonly budgetApplier: BudgetApplier;
     private readonly behaviorDiscovery: BehaviorDiscovery;
 
+    // Agentic RAG
+    private readonly llmProvider: LLMProvider;
+    private readonly passageCritique: PassageCritique;
+    private readonly multiHopRetrieval: MultiHopRetrieval;
+
     // Confidence score icin gerekli alanlar
     private confidenceThreshold: number = 0.6;
 
@@ -153,6 +163,17 @@ export class MemoryRetrievalOrchestrator {
         this.budgetApplier = new BudgetApplier();
         this.behaviorDiscovery = new BehaviorDiscovery(deps);
         this.confidenceThreshold = this.deps.agenticRAGDecisionConfidence ?? 0.6;
+
+        const appConfig = getConfig();
+        registerAllProviders();
+        this.llmProvider = LLMProviderFactory.create(appConfig.defaultLLMProvider);
+        this.passageCritique = new PassageCritique(this.llmProvider, {
+            completenessFloor: appConfig.agenticRAGCritiqueCompletenessFloor ?? 0.3,
+            relevanceFloor: appConfig.agenticRAGCritiqueRelevanceFloor ?? 0.5,
+        });
+        this.multiHopRetrieval = new MultiHopRetrieval(this.llmProvider, this.passageCritique, {
+            maxHops: appConfig.agenticRAGMaxHops ?? 2,
+        });
     }
 
     /**
@@ -412,6 +433,49 @@ export class MemoryRetrievalOrchestrator {
             Promise.resolve(this.deps.getMemoriesDueForReview(reviewLimit * (recipe.preferReviewSignals ? 2 : 1))),
             Promise.resolve(this.deps.getFollowUpCandidates(followUpDays, followUpLimit)),
         ]);
+
+        if (getConfig().agenticRAGEnabled && !skipHeavyRetrieval && searchResult.active.length > 0) {
+            logger.info({ msg: '[Agentic RAG] Evaluating initial passages' });
+            // Step 1: Initial Critique
+            const critique = await this.passageCritique.evaluate(query, searchResult.active);
+
+            // Step 2: Keep only relevant passages
+            let agenticActive = searchResult.active.filter((_, i) => critique.evaluations[i]?.keep);
+
+            // Step 3: Multi-Hop execution if missing info exists
+            if (critique.needsMoreRetrieval) {
+                logger.info({ msg: '[Agentic RAG] Missing info detected. Triggering multi-hop loop' });
+                const extraMemoriesResult = await this.multiHopRetrieval.execute(
+                    query,
+                    agenticActive,
+                    critique,
+                    async (refinedQuery, hop, target) => {
+                        let extraResults: MemoryRow[] = [];
+                        if (target === 'graphRAG' && resolvedEngine) {
+                            const result = await resolvedEngine.retrieve(refinedQuery, { maxHops: 1 });
+                            if (result.success && result.memories) {
+                                extraResults = result.memories;
+                            }
+                        } else {
+                            const res = await this.deps.graphAwareSearch(refinedQuery, effectiveSearchLimit, 0);
+                            extraResults = res.active;
+                        }
+                        return extraResults;
+                    }
+                );
+                
+                // Append multi-hop results
+                agenticActive = [...agenticActive, ...extraMemoriesResult.memories];
+            }
+
+            // Fallback: If evaluation filtered everything but there was no extra memories returned, fallback to initial search
+            if (agenticActive.length === 0) {
+                logger.warn({ msg: '[Agentic RAG] All passages filtered and no extra info found. Falling back to active search' });
+                agenticActive = searchResult.active;
+            }
+
+            searchResult.active = agenticActive;
+        }
 
         return { graphRAGResult, searchResult, conversationSummaries, reviewMemories, followUpCandidates, effectiveSearchLimit };
     }
