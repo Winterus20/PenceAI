@@ -78,6 +78,13 @@ junit.xml
 # Planning & research documents (local-only)
 FUTURE_IMPLEMENTATION_PLAN.md
 TECHNOLOGY_RESEARCH_REPORT.md
+PROJECT_MAP.md
+QWEN.md
 
 # GitHub Actions (kasıtlı olarak ignore — workflow yok)
 .github/
+
+# AI Assistant hidden dirs
+.qwen/
+.roo/
+.roo-ignore

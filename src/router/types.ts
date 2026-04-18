@@ -14,7 +14,10 @@ export interface UnifiedMessage {
     attachments: Attachment[];  // Ek dosyalar
     timestamp: Date;
     replyToId?: string;        // Yanıt verilen mesaj ID'si
-    metadata?: Record<string, unknown>;
+    metadata?: {
+        isBackgroundContext?: boolean;
+        [key: string]: unknown;
+    };
 }
 
 export interface Attachment {

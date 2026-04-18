@@ -165,14 +165,19 @@ export class MemoryRetrievalOrchestrator {
         this.confidenceThreshold = this.deps.agenticRAGDecisionConfidence ?? 0.6;
 
         const appConfig = getConfig();
-        registerAllProviders();
-        this.llmProvider = LLMProviderFactory.create(appConfig.defaultLLMProvider);
+        if (this.deps.agenticRAGLLMProvider) {
+            this.llmProvider = this.deps.agenticRAGLLMProvider;
+        } else {
+            registerAllProviders();
+            this.llmProvider = LLMProviderFactory.create(appConfig.defaultLLMProvider);
+        }
+
         this.passageCritique = new PassageCritique(this.llmProvider, {
-            completenessFloor: appConfig.agenticRAGCritiqueCompletenessFloor ?? 0.3,
-            relevanceFloor: appConfig.agenticRAGCritiqueRelevanceFloor ?? 0.5,
+            completenessFloor: this.deps.agenticRAGCritiqueCompletenessFloor ?? appConfig.agenticRAGCritiqueCompletenessFloor ?? 0.3,
+            relevanceFloor: this.deps.agenticRAGCritiqueRelevanceFloor ?? appConfig.agenticRAGCritiqueRelevanceFloor ?? 0.5,
         });
         this.multiHopRetrieval = new MultiHopRetrieval(this.llmProvider, this.passageCritique, {
-            maxHops: appConfig.agenticRAGMaxHops ?? 2,
+            maxHops: this.deps.agenticRAGMaxHops ?? appConfig.agenticRAGMaxHops ?? 2,
         });
     }
 

@@ -92,7 +92,7 @@ export class OllamaProvider extends LLMProvider {
         // Ollama tool support (server'da --enable-auto-tool-choice flag'i gerektirir)
         // Eğer server tools desteklemiyorsa bu kod tools göndermez
         const config = getConfig();
-        const enableOllamaTools = config.enableOllamaTools ?? false; // .env'de ENABLE_OLLAMA_TOOLS=true ekle
+        const enableOllamaTools = this.supportsNativeToolCalling;
         
         if (enableOllamaTools && options?.tools && options.tools.length > 0) {
             body.tools = options.tools.map(t => ({
@@ -158,7 +158,7 @@ export class OllamaProvider extends LLMProvider {
         };
         
         const config = getConfig();
-        const enableOllamaTools = config.enableOllamaTools ?? false;
+        const enableOllamaTools = this.supportsNativeToolCalling;
         if (enableOllamaTools && options?.tools?.length) {
             body.tools = options.tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
         }

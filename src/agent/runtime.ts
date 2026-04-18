@@ -6,6 +6,7 @@ import { MemoryManager } from '../memory/manager.js';
 import type { PromptContextBundle } from '../memory/manager/types.js';
 import type { MemoryRow } from '../memory/types.js';
 import { buildSystemPrompt, getBuiltinToolDefinitions, buildLightExtractionPrompt, buildDeepExtractionPrompt, buildSummarizationPrompt, buildEntityExtractionPrompt } from './prompt.js';
+import { injectFallbackToolDirectives } from './toolPromptBuilder.js';
 import { createBuiltinTools, type ToolExecutor, type ConfirmCallback } from './tools.js';
 import { getUnifiedToolRegistry } from './mcp/registry.js';
 import { isMCPEnabled } from './mcp/config.js';
@@ -373,16 +374,26 @@ export class AgentRuntime {
         }
 
         // OPT-2: Mükerrer Base64 dönüşümünü önlemek için cache mekanizması
-        const base64Cache = new Map<Buffer, string>();
-        const getBase64 = (buf: Buffer) => {
+        const base64Cache = new Map<Buffer | string, string>();
+        const getBase64 = (buf: any) => {
+            if (!Buffer.isBuffer(buf)) {
+                if (typeof buf === 'string') return buf;
+                return '';
+            }
             if (!base64Cache.has(buf)) base64Cache.set(buf, buf.toString('base64'));
-            return base64Cache.get(buf);
+            return base64Cache.get(buf) as string;
         };
 
         const userMessage = this.createUserConversationMessage(message, getBase64);
         let { conversationId, previousConversationId, history } = this.beginConversationTurn(message, userMessage);
 
         this.handleClosedConversation(previousConversationId);
+
+        // Eğer mesaj sessizce dinlenen bir arka plan bağlamı ise LLM çağrısı yapmadan işlemi sonlandır.
+        if (message.metadata?.isBackgroundContext) {
+            logger.info(`[Agent] 🤫 Arka plan bağlamı eklendi (LLM yanıtı üretilmeyecek): ${conversationId}`);
+            return { response: '', conversationId };
+        }
 
         // OPT F-03: Lazy init — araçları yalnızca confirmCallback değiştiğinde yeniden oluştur
         // Burada memory merge işlemi kullanılabilir diye userName bilgisini geçiriyoruz
@@ -598,14 +609,15 @@ export class AgentRuntime {
             systemPrompt += `\n\n## GraphRAG Community Context\nAşağıdaki topluluk özetleri, kullanıcının bellek grafiğinden otomatik olarak çıkarılmıştır:\n${communityContext}`;
         }
 
-        // Strict mode modeller (gemma, llama, mistral) native tool calling
-        // desteklemez. Bu modellere sistem prompt'unda açık format talimatı ver.
-        const currentModel = getConfig().defaultLLMModel.toLowerCase();
-        const isStrictModel = currentModel.includes('gemma') || currentModel.includes('llama') || currentModel.includes('mistral');
+        // Native Tool Calling desteklemeyen modeller (fallback modu)
+        // Modelin arayüz yeteneğini doğrudan provider'dan alıyoruz.
+        const requiresFallback = !this.llm.supportsNativeToolCalling;
 
         // MCP araç listesini sistem prompt'una ekle — LLM araçları görebilsin
         // Cache: Sadece MCP server listesi değiştiğinde güncelle
-        const allTools = this._getEffectiveToolDefinitions();
+        // Eğer mesaj Discord'dan geliyorsa şu anlık (kullanıcı talebiyle) araçları yasakla
+        const isToolingDisabled = message.channelType === 'discord';
+        const allTools = isToolingDisabled ? [] : this._getEffectiveToolDefinitions();
         const mcpTools = allTools.filter((t: LLMToolDefinition) => t.name.startsWith('mcp:'));
         
         if (mcpTools.length > 0) {
@@ -635,29 +647,10 @@ export class AgentRuntime {
         }
 
         let finalSystemPrompt = systemPrompt;
-        if (isStrictModel) {
-            finalSystemPrompt += `
-
-## KRİTİK: Araç Çağrısı Formatı
-Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLUDUR — başka formatta araç çağıra MAZSIN.
-
-**Format:** \`araçAdı(parametre="değer")\`
-
-**Örnekler:**
-- Dosya okumak: \`readFile(path="C:\\Users\\Yigit\\dosya.txt")\`
-- Dizin listelemek: \`listDirectory(path="C:\\Users\\Yigit\\Documents")\`
-- Komut çalıştırmak: \`executeShell(command="echo %USERNAME%")\`
-- Dosyaya yazmak: \`writeFile(path="C:\\Users\\Yigit\\test.txt", content="Merhaba")\`
-- Bellekte aramak: \`searchMemory(query="kullanıcı tercihleri")\`
-- Konuşma aramak: \`searchConversation(query="proje durumu")\`
-- Bellek silmek: \`deleteMemory(id="mem_123")\`
-
-**KURALLAR:**
-1. Araç çağrısını MUTLAKA yukarıdaki formatta yaz — açıklama veya giriş cümlesinden SONRA yeni satırda tek başına.
-2. Araç çağrısı dışında başka hiçbir şey yazma — sadece araç çağrısı satırını yaz.
-3. Araç çağrısını asla kod bloğu (\`\`\`) içine SARMA.
-4. Araç sonucu sana "[Araç Sonucu - ...]:" formatında dönecektir — bu sonucu kullanarak kullanıcıya yanıt ver.
-5. Bir aracı gerçekten kullanmak istiyorsan, BAHSETME — doğrudan çağır.`;
+        if (requiresFallback) {
+            // Eğer native tool calling desteklenmiyorsa, tool prompt builder'ı kullanarak
+            // dinamik olan tüm tool imza ve açıklamalarını sisteme enjekte et
+            finalSystemPrompt = injectFallbackToolDirectives(finalSystemPrompt, allTools);
         }
 
         // LLM mesajlarını hazırla
@@ -717,7 +710,7 @@ Araç kullanmak istediğinde aşağıdaki FORMATLA yanıt ver. Bu format ZORUNLU
             onEvent?.({ type: 'iteration', data: { iteration: iterations } });
 
             // Tool definitions'ı her iterasyonda güncelle (MCP araçları dinamik olarak değişebilir)
-            const currentToolDefinitions = this._getEffectiveToolDefinitions();
+            const currentToolDefinitions = isToolingDisabled ? [] : this._getEffectiveToolDefinitions();
 
             // MCP araç durumunu logla
             const mcpTools = currentToolDefinitions.filter(t => t.name.startsWith('mcp:'));

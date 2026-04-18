@@ -70,6 +70,21 @@ function normalizeOpenAIMessages(
             }
         }
 
+        // Strict mode'da system rolü kullanılmadığı için sistem talimatını
+        // ilk user mesajına enjekte et; aksi halde model kendi varsayılan
+        // kimliğine dönebilir ve araç talimatlarını görmez.
+        const trimmedSystemPrompt = systemPrompt?.trim();
+        if (trimmedSystemPrompt) {
+            const systemEnvelope = `[Sistem Talimatlari - MUTLAK UY]\n${trimmedSystemPrompt}\n[/Sistem Talimatlari]`;
+            if (normalized.length === 0) {
+                normalized.push({ role: 'user', content: systemEnvelope });
+            } else if (normalized[0].role === 'user') {
+                normalized[0].content = `${systemEnvelope}\n\n${normalized[0].content}`;
+            } else {
+                normalized.unshift({ role: 'user', content: systemEnvelope });
+            }
+        }
+
         const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = normalized.map(msg => ({
             role: msg.role,
             content: msg.content,
@@ -131,7 +146,13 @@ export class OpenAIProvider extends LLMProvider {
     readonly name: string = 'openai';
     readonly supportedModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo', 'o1', 'o1-mini'];
 
-    get supportsNativeToolCalling(): boolean { return true; }
+    get supportsNativeToolCalling(): boolean {
+        const config = getConfig();
+        const model = config.defaultLLMModel || this.defaultModel;
+        const currentModel = model.toLowerCase();
+        // Strict modeller için fallback gerekiyor
+        return !(currentModel.includes('gemma') || currentModel.includes('llama') || currentModel.includes('mistral'));
+    }
 
     protected client: OpenAI;
     private toolsDisabled = false;

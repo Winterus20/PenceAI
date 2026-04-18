@@ -46,7 +46,7 @@ const ConfigSchema = z.object({
     z.array(z.string()).default([])
   ),
   discordBotToken: z.string().optional(),
-  discordAllowedChannels: z.preprocess(
+  discordAllowedUsers: z.preprocess(
     (val) => (typeof val === 'string' && val ? val.split(',').map(s => s.trim()) : []),
     z.array(z.string()).default([])
   ),
@@ -124,7 +124,7 @@ export function loadConfig(): AppConfig {
         telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
         telegramAllowedUsers: process.env.TELEGRAM_ALLOWED_USERS,
         discordBotToken: process.env.DISCORD_BOT_TOKEN,
-        discordAllowedChannels: process.env.DISCORD_ALLOWED_CHANNELS,
+        discordAllowedUsers: process.env.DISCORD_ALLOWED_USERS,
         whatsappEnabled: process.env.WHATSAPP_ENABLED,
         allowShellExecution: process.env.ALLOW_SHELL_EXECUTION,
         fsRootDir: process.env.FS_ROOT_DIR,

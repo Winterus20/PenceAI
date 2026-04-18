@@ -129,8 +129,8 @@ class MetricsCollector {
         context: JSON.parse((row.context_json as string) || '{}')
       }));
     } catch (error: unknown) {
-      logger.error({ err: error }, '[MetricsCollector] Failed to get conversation metrics');
-      return [];
+      logger.error({ err: error, conversationId }, '[MetricsCollector] Failed to get conversation metrics');
+      throw error;
     }
   }
 
@@ -155,8 +155,8 @@ class MetricsCollector {
         context: JSON.parse((row.context_json as string) || '{}')
       }));
     } catch (error: unknown) {
-      logger.error({ err: error }, '[MetricsCollector] Failed to get all metrics');
-      return [];
+      logger.error({ err: error, limit }, '[MetricsCollector] Failed to get all metrics');
+      throw error;
     }
   }
 
@@ -183,8 +183,8 @@ class MetricsCollector {
 
       return this.aggregate(metrics);
     } catch (error: unknown) {
-      logger.error({ err: error }, '[MetricsCollector] Failed to get aggregated metrics');
-      return this.emptyAggregatedMetrics();
+      logger.error({ err: error, days }, '[MetricsCollector] Failed to get aggregated metrics');
+      throw error;
     }
   }
 
@@ -225,8 +225,8 @@ class MetricsCollector {
 
       return result;
     } catch (error: unknown) {
-      logger.error({ err: error }, '[MetricsCollector] Failed to get provider stats');
-      return {};
+      logger.error({ err: error, days }, '[MetricsCollector] Failed to get provider stats');
+      throw error;
     }
   }
 

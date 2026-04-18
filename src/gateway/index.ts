@@ -35,6 +35,8 @@ import {
     resolveGatewayPublicDir,
 } from './bootstrap.js';
 
+import { DiscordChannel } from './channels/discord.js';
+
 // GraphRAG imports
 import { GraphCache } from '../memory/graphRAG/GraphCache.js';
 import { GraphExpander } from '../memory/graphRAG/GraphExpander.js';
@@ -284,9 +286,11 @@ async function main() {
         try {
             await runWithTraceId(async () => {
                 const { response } = await agent.processMessage(message);
-                await router.sendResponse(message.channelType, message.channelId, {
-                    content: response,
-                });
+                if (response && response.trim() !== '') {
+                    await router.sendResponse(message.channelType, message.channelId, {
+                        content: response,
+                    });
+                }
             });
         } catch (err: any) {
             logger.error({ err }, `[Gateway] Mesaj işleme hatası`);
@@ -296,7 +300,14 @@ async function main() {
         }
     });
 
-    // TODO: Telegram, Discord, WhatsApp kanallarını bağla (Faz 2)
+    // TODO: Telegram, WhatsApp kanallarını bağla (Faz 2)
+    if (config.discordBotToken) {
+        const discordChannel = new DiscordChannel(config.discordBotToken, config.discordAllowedUsers);
+        router.registerChannel(discordChannel);
+    }
+
+    // Eklenen dış kanalların WebSocket/REST'den bağımsız bağlantılarını başlat
+    await router.connectAll();
 
     // ============ Bellek Bakımı (Decay) ============
 

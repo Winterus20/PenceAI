@@ -507,8 +507,7 @@ export function think(
     // 2. Ağı Gez (Graph Walk)
     const associations = graphWalk(manager, seed.memoryId, undefined, config);
     if (associations.length === 0) {
-        logger.info('[ThinkEngine] No associations found — no memories to think about.');
-        return null;
+        logger.info('[ThinkEngine] No associations found — generating lonely thought.');
     }
 
     logger.info(`[ThinkEngine] Seed selected: "${seed.content.substring(0, 50)}..." (${seed.type})`);

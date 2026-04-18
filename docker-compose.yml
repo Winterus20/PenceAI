@@ -1,0 +1,20 @@
+services:
+  penceai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: penceai:latest
+    container_name: penceai_agent
+    ports:
+      - "3001:3001"
+    volumes:
+      # Veritabanının kalıcı olarak host makinesinde tutulması
+      - ./data:/app/data
+      # Opsiyonel: Dışarıdan ayar girmek isterseniz .env dosyanızı map edebilirsiniz
+      - ./.env:/app/.env
+    environment:
+      - PORT=3001
+      # Geri kalan ortam değişkenleri .env dosyası üzerinden otomatik okunacaktır.
+      # DB_PATH zorunlu dizini ayarlıyoruz ki Docker içerisindeki volume noktasına yazsın.
+      - DB_PATH=/app/data/penceai.db
+    restart: unless-stopped
