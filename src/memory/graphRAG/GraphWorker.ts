@@ -197,7 +197,7 @@ export class GraphWorker {
       intervalMs: this.config.communityDetectionIntervalMs,
       execute: async () => {
         const result = this.communityDetector.detectCommunities();
-        logger.info(`[GraphWorker] Community Detection: ${result.communities.length} communities found`);
+        logger.info(`[GraphWorker] Hierarchical Community Detection: ${result.communities.length} communities found (maxLevel: ${result.maxLevel})`);
       },
       lastRunAt: 0,
       nextRunAt: Date.now() + this.config.communityDetectionIntervalMs,
@@ -222,8 +222,9 @@ export class GraphWorker {
       name: 'Summary Generation',
       intervalMs: this.config.summaryGenerationIntervalMs,
       execute: async () => {
-        const summaries = await this.communitySummarizer.summarizeAllCommunities();
-        logger.info(`[GraphWorker] Summary Generation: ${summaries.length} summaries created`);
+        // Hiyerarşik özetleme: Level 0 + Level 1 roll-up summaries
+        const summaries = await this.communitySummarizer.summarizeHierarchical(1);
+        logger.info(`[GraphWorker] Hierarchical Summary Generation: ${summaries.length} summaries created (multi-level)`);
       },
       lastRunAt: 0,
       nextRunAt: Date.now() + this.config.summaryGenerationIntervalMs,

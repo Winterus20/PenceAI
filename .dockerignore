@@ -21,7 +21,7 @@ FUTURE_IMPLEMENTATION_PLAN.md
 architecture_overview.md
 *.md
 !README.md
-
+GEMINI.md
 .DS_Store
 .vscode/
 .idea/

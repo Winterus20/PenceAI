@@ -10,6 +10,7 @@ export class ExtractorPipeline {
             unprocessedText: text,
             entities: [],
             relations: [],
+            claims: [],
             existingEntitiesCache
         };
 

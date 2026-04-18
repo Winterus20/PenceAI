@@ -156,7 +156,7 @@ async function main() {
 
         const graphRAGEngine = new GraphRAGEngine(
             db, graphExpander, pageRankScorer, communityDetector,
-            communitySummarizer, graphCache, hybridSearchFn,
+            communitySummarizer, graphCache, hybridSearchFn, llm,
             {
                 maxHops: graphRAGConfig.maxHops,
                 maxExpandedNodes: graphRAGConfig.sampleRate === 1.0 ? 100 : 50,
@@ -172,6 +172,9 @@ async function main() {
                 memoryImportanceWeight: graphRAGConfig.memoryImportanceWeight,
                 memoryAccessCountWeight: graphRAGConfig.memoryAccessCountWeight,
                 memoryConfidenceWeight: graphRAGConfig.memoryConfidenceWeight,
+                searchMode: graphRAGConfig.useGlobalSearch ? 'auto' : 'local',
+                globalSearchTopK: graphRAGConfig.globalSearchTopK,
+                globalSearchLevel: graphRAGConfig.globalSearchLevel,
             },
         );
 

@@ -14,6 +14,7 @@ export { GraphWorker, FULL_PHASE_CONFIG } from './GraphWorker.js';
 
 // Faz 3 exports
 export { GraphRAGEngine } from './GraphRAGEngine.js';
+export { GlobalSearchEngine } from './GlobalSearchEngine.js';
 export { TokenPruner } from './TokenPruner.js';
 export { ShadowMode } from './ShadowMode.js';
 export { BehaviorDiscoveryShadow } from './BehaviorDiscoveryShadow.js';
@@ -54,6 +55,11 @@ export type {
   SearchMetadata,
   GraphRAGResult,
 } from './GraphRAGEngine.js';
+
+export type {
+  GlobalSearchResult,
+  GlobalSearchOptions,
+} from './GlobalSearchEngine.js';
 
 export type {
   TokenBudget,

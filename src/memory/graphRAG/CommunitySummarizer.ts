@@ -26,6 +26,7 @@ export interface CommunitySummary {
   keyRelations: { source: string; target: string; type: string }[];
   topics: string[];
   generatedAt: Date;
+  level: number;               // Hiyerarşi seviyesi (0 = leaf, 1+ = super)
 }
 
 /** Summarization seçenekleri */
@@ -157,6 +158,56 @@ export class CommunitySummarizer {
   }
 
   /**
+   * Hiyerarşik özetleme: Level 0'dan başlayarak üst seviyeleri özetler.
+   * Üst seviye topluluklar, alt topluluklarının özetlerinden bir roll-up üretir.
+   * 
+   * @param maxLevel - Hiyerarşideki en yüksek seviye (default: 1)
+   * @param options - Summarization seçenekleri
+   * @returns CommunitySummary[] (tüm seviyeler)
+   */
+  async summarizeHierarchical(
+    maxLevel: number = 1,
+    options?: Partial<SummarizationOptions>,
+  ): Promise<CommunitySummary[]> {
+    const allSummaries: CommunitySummary[] = [];
+
+    // Level 0: Normal leaf community özetleme
+    logger.info('[CommunitySummarizer] Hierarchical summarization: Starting Level 0...');
+    const level0Summaries = await this.summarizeAllCommunities(options);
+    for (const s of level0Summaries) s.level = 0;
+    allSummaries.push(...level0Summaries);
+
+    // Level 1+: Üst seviyelerin roll-up özetlerini üret
+    for (let level = 1; level <= maxLevel; level++) {
+      logger.info(`[CommunitySummarizer] Hierarchical summarization: Starting Level ${level}...`);
+      const superCommunities = this.loadCommunitiesByLevel(level);
+      if (superCommunities.length === 0) {
+        logger.debug(`[CommunitySummarizer] No communities at Level ${level}, stopping`);
+        break;
+      }
+
+      for (const superComm of superCommunities) {
+        // Bu süper-topluluğun alt topluluk özetlerini topla
+        const childSummaries = this.loadChildSummaries(superComm.id);
+        if (childSummaries.length === 0) {
+          logger.debug(`[CommunitySummarizer] No child summaries for super-community ${superComm.id}`);
+          continue;
+        }
+
+        const rollUpSummary = await this.generateRollUpSummary(superComm, childSummaries, options);
+        if (rollUpSummary) {
+          rollUpSummary.level = level;
+          this.saveSummary(rollUpSummary);
+          allSummaries.push(rollUpSummary);
+        }
+      }
+    }
+
+    logger.info(`[CommunitySummarizer] Hierarchical summarization complete: ${allSummaries.length} total summaries across ${maxLevel + 1} levels`);
+    return allSummaries;
+  }
+
+  /**
    * Özet'i veritabanından getir.
    * 
    * @param communityId - Community ID
@@ -179,6 +230,7 @@ export class CommunitySummarizer {
         keyRelations: JSON.parse(row.key_relations),
         topics: JSON.parse(row.topics),
         generatedAt: new Date(row.generated_at),
+        level: 0,
       };
     } catch (err) {
       logger.warn({ err }, '[CommunitySummarizer] getSummary hatası:');
@@ -331,6 +383,7 @@ export class CommunitySummarizer {
       keyRelations,
       topics,
       generatedAt: new Date(),
+      level: 0,
     };
   }
 
@@ -383,6 +436,7 @@ export class CommunitySummarizer {
       keyRelations: [],
       topics: topCategories,
       generatedAt: new Date(),
+      level: 0,
     };
   }
 
@@ -482,6 +536,8 @@ Lütfen aşağıdaki formatta JSON olarak özet üret:
           ? JSON.parse(row.dominant_relation_types)
           : [],
         createdAt: new Date(row.created_at),
+        level: 0,
+        parentId: null,
       };
     } catch (err) {
       logger.warn({ err }, '[CommunitySummarizer] loadCommunity hatası:');
@@ -536,6 +592,8 @@ Lütfen aşağıdaki formatta JSON olarak özet üret:
             ? JSON.parse(row.dominant_relation_types)
             : [],
           createdAt: new Date(row.created_at),
+          level: 0,
+          parentId: null,
         });
       }
 
@@ -556,5 +614,165 @@ Lütfen aşağıdaki formatta JSON olarak özet üret:
       maxKeyRelations: options?.maxKeyRelations ?? DEFAULT_MAX_KEY_RELATIONS,
       llmProvider: options?.llmProvider,
     };
+  }
+
+  /**
+   * Belirli seviyedeki toplulukları veritabanından yükle.
+   */
+  private loadCommunitiesByLevel(level: number): Community[] {
+    try {
+      const communities = this.db.prepare(`
+        SELECT id, modularity_score, dominant_relation_types, created_at
+        FROM graph_communities
+        WHERE level = ?
+        ORDER BY modularity_score DESC
+      `).all(level) as Array<{
+        id: string;
+        modularity_score: number | null;
+        dominant_relation_types: string | null;
+        created_at: string;
+      }>;
+
+      const result: Community[] = [];
+      for (const row of communities) {
+        const members = this.db.prepare(`
+          SELECT node_id FROM graph_community_members WHERE community_id = ?
+        `).all(row.id) as Array<{ node_id: number }>;
+
+        result.push({
+          id: row.id,
+          memberNodeIds: members.map(m => m.node_id),
+          modularityScore: row.modularity_score ?? 0,
+          dominantRelationTypes: row.dominant_relation_types
+            ? JSON.parse(row.dominant_relation_types)
+            : [],
+          createdAt: new Date(row.created_at),
+          level,
+          parentId: null,
+        });
+      }
+
+      return result;
+    } catch (err) {
+      logger.warn({ err }, '[CommunitySummarizer] loadCommunitiesByLevel hatası:');
+      return [];
+    }
+  }
+
+  /**
+   * Bir süper-topluluğun alt topluluk özetlerini yükle.
+   */
+  private loadChildSummaries(superCommunityId: string): CommunitySummary[] {
+    try {
+      // parent_id = superCommunityId olan Level 0 toplulukları bul
+      const childCommunities = this.db.prepare(`
+        SELECT id FROM graph_communities WHERE parent_id = ?
+      `).all(superCommunityId) as Array<{ id: string }>;
+
+      if (childCommunities.length === 0) return [];
+
+      const summaries: CommunitySummary[] = [];
+      for (const child of childCommunities) {
+        const summary = this.getSummary(child.id);
+        if (summary) summaries.push(summary);
+      }
+
+      return summaries;
+    } catch (err) {
+      logger.warn({ err }, '[CommunitySummarizer] loadChildSummaries hatası:');
+      return [];
+    }
+  }
+
+  /**
+   * Süper-topluluk için roll-up özet üret.
+   * Alt toplulukların özetlerini birleştirerek LLM ile üst seviye bir özet oluşturur.
+   */
+  private async generateRollUpSummary(
+    superCommunity: Community,
+    childSummaries: CommunitySummary[],
+    options?: Partial<SummarizationOptions>,
+  ): Promise<CommunitySummary | null> {
+    const opts = this.normalizeOptions(options);
+
+    // Alt özetleri prompt'a hazırla
+    const childSummaryTexts = childSummaries
+      .map((s, i) => `Alt Topluluk ${i + 1} (${s.topics.join(', ')}): ${s.summary}`)
+      .join('\n\n');
+
+    const allKeyEntities = childSummaries
+      .flatMap(s => s.keyEntities)
+      .slice(0, 15);
+
+    const allTopics = [...new Set(childSummaries.flatMap(s => s.topics))];
+
+    const prompt = `Sen bir bilgi grafiği analiz uzmanısın. Aşağıda birbirleriyle bağlantılı birden fazla alt topluluğun özetleri veriliyor. Bu alt toplulukları kapsayan üst seviye bir özet oluştur.
+
+Alt Topluluk Özetleri (${childSummaries.length} adet):
+${childSummaryTexts}
+
+Ortak Konular: ${allTopics.join(', ')}
+
+Lütfen aşağıdaki formatta JSON olarak özet üret:
+{
+  "summary": "Tüm alt toplulukları kapsayan makro düzeyde özet (max ${opts.maxSummaryLength} karakter)",
+  "keyEntities": [
+    {"name": "Entity adı", "type": "tip", "importance": 0.8}
+  ],
+  "keyRelations": [
+    {"source": "Kaynak", "target": "Hedef", "type": "ilişki tipi"}
+  ],
+  "topics": ["makro konu1", "makro konu2"]
+}
+
+Önemli kurallar:
+1. Bu bir ÜST SEVİYE özettir — detaylara değil, büyük resme odaklan
+2. summary max ${opts.maxSummaryLength} karakter olmalı
+3. Sadece JSON döndür, başka açıklama ekleme
+4. ÇIKTI SADECE JSON OLMALIDIR.`;
+
+    const messages: import('../../router/types.js').LLMMessage[] = [
+      { role: 'system', content: 'Sen bir bilgi grafiği analiz uzmanısın. Birden fazla topluluğu kapsayan makro düzeyde bir özet oluşturursun.' },
+      { role: 'user', content: prompt },
+    ];
+
+    try {
+      const response = await this.llmProvider.chat(messages, {
+        temperature: 0.3,
+        maxTokens: 1000,
+      });
+
+      const content = response.content?.trim();
+      if (!content) throw new Error('Empty response from LLM');
+
+      // Aynı parse mantığını kullanarak sonucu parse et
+      const dummyCommunity: Community = {
+        id: superCommunity.id,
+        memberNodeIds: superCommunity.memberNodeIds,
+        modularityScore: superCommunity.modularityScore,
+        dominantRelationTypes: superCommunity.dominantRelationTypes,
+        createdAt: superCommunity.createdAt,
+        level: superCommunity.level ?? 1,
+        parentId: superCommunity.parentId ?? null,
+      };
+
+      // parseLLMResponse, MemoryRow[] bekliyor — burada boş dizi veriiyoruz
+      // çünkü roll-up'ta ham veri yerine alt özetlerden besliyoruz
+      return this.parseLLMResponse(content, dummyCommunity, []);
+    } catch (err) {
+      logger.warn({ err }, `[CommunitySummarizer] Roll-up summary failed for super-community: ${superCommunity.id}`);
+
+      // Fallback: alt özetleri birleştir
+      const combinedSummary = childSummaries.map(s => s.summary).join(' ');
+      return {
+        communityId: superCommunity.id,
+        summary: combinedSummary.substring(0, opts.maxSummaryLength),
+        keyEntities: allKeyEntities.slice(0, opts.maxKeyEntities),
+        keyRelations: [],
+        topics: allTopics.slice(0, 5),
+        generatedAt: new Date(),
+        level: 1,
+      };
+    }
   }
 }

@@ -852,6 +852,57 @@ export class PenceDatabase {
       }
     }
 
+    // ========== GraphRAG Hierarchical Communities Migration ==========
+
+    // graph_communities tablosuna level ve parent_id kolonları ekle (yoksa)
+    const commTableInfo = this.db.prepare("PRAGMA table_info(graph_communities)").all() as any[];
+    if (commTableInfo.length > 0 && !commTableInfo.some((col: any) => col.name === 'level')) {
+      logger.info('[Database] 🚀 GraphRAG Hierarchical Migration: Adding level and parent_id columns to graph_communities');
+      try {
+        this.db.exec("ALTER TABLE graph_communities ADD COLUMN level INTEGER DEFAULT 0");
+        this.db.exec("ALTER TABLE graph_communities ADD COLUMN parent_id TEXT");
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_community_level ON graph_communities(level)");
+        this.db.exec("CREATE INDEX IF NOT EXISTS idx_community_parent ON graph_communities(parent_id)");
+        // Backfill: mevcut topluluklar Level 0
+        this.db.prepare("UPDATE graph_communities SET level = 0 WHERE level IS NULL").run();
+        logger.info('[Database] ✅ Hierarchical community kolonları eklendi');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ GraphRAG Hierarchical migration failed:');
+      }
+    }
+
+    // ========== GraphRAG Claim Extraction Migration ==========
+
+    // memory_claims tablosu (yoksa oluştur)
+    const claimsTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_claims'"
+    ).get();
+    if (!claimsTable) {
+      logger.info('[Database] 🚀 GraphRAG Claims Migration: Creating memory_claims table');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS memory_claims (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+            subject TEXT NOT NULL,
+            predicate TEXT NOT NULL,
+            object TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
+            start_date TEXT,
+            end_date TEXT,
+            confidence REAL DEFAULT 0.7,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_claims_memory ON memory_claims(memory_id);
+          CREATE INDEX IF NOT EXISTS idx_claims_subject ON memory_claims(subject);
+          CREATE INDEX IF NOT EXISTS idx_claims_status ON memory_claims(status);
+        `);
+        logger.info('[Database] ✅ memory_claims tablosu oluşturuldu');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ GraphRAG Claims migration failed:');
+      }
+    }
+
       this.setSchemaVersion(PenceDatabase.LATEST_SCHEMA_VERSION);
     })();
   }

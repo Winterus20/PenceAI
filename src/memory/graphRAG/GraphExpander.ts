@@ -369,4 +369,146 @@ export class GraphExpander {
       useCache: options.useCache ?? DEFAULT_USE_CACHE,
     };
   }
+
+  // ========== DRIFT Search ==========
+
+  /**
+   * DRIFT Search: Dinamik, sorgu-odaklı graf genişleme.
+   * 
+   * Sabit maxHops yerine, her adımda bulunan düğümlerin sorguyla
+   * alakasını ölçerek sadece umut vadeden yönlere derinleşir.
+   * "Bu bağlam yeterli mi?" kontrolü ile erken çıkış yapar.
+   * 
+   * @param query - Kullanıcının sorusu (keyword eşleşmesi için)
+   * @param options - Genişletme seçenekleri
+   * @returns GraphExpansionResult
+   */
+  expandDrift(
+    query: string,
+    options: Partial<GraphExpansionOptions> & { isFullPhase?: boolean },
+  ): GraphExpansionResult {
+    const startTime = Date.now();
+    const isFullPhase = options.isFullPhase ?? false;
+    const timeoutMs = isFullPhase ? FULL_PHASE_TIMEOUT_MS : TRAVERSAL_TIMEOUT_MS;
+    const opts = this.normalizeOptions(options);
+    const maxDriftDepth = Math.min(opts.maxDepth + 1, 5); // DRIFT biraz daha derin olabilir
+
+    // Sorgu kelimelerini hazırla (keyword matching için)
+    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
+    const visited = new Set<number>(opts.seedNodeIds);
+    const allNodes = new Map<number, MemoryRow>();
+    const allEdges: MemoryRelationRow[] = [];
+    const hopDistances = new Map<number, number>();
+
+    // Seed node'ları yükle
+    this.loadSeedNodes(opts.seedNodeIds, allNodes);
+    for (const id of opts.seedNodeIds) {
+      hopDistances.set(id, 0);
+    }
+
+    let currentLayer = [...opts.seedNodeIds];
+    let maxHopReached = false;
+    let sufficientContext = false;
+
+    for (let hop = 1; hop <= maxDriftDepth; hop++) {
+      // Timeout kontrolü
+      if (Date.now() - startTime > timeoutMs) {
+        logger.warn('[GraphExpander:DRIFT] Traversal timeout');
+        break;
+      }
+
+      // maxNodes kontrolü
+      if (allNodes.size >= opts.maxNodes) {
+        maxHopReached = true;
+        break;
+      }
+
+      // Early-exit: Yeterli bağlam bulundu mu?
+      if (sufficientContext) {
+        logger.debug(`[GraphExpander:DRIFT] Sufficient context at hop ${hop - 1}, early exit`);
+        break;
+      }
+
+      // Komşuları getir
+      const neighbors = this.getNeighbors(currentLayer, opts.minConfidence, opts.relationTypes);
+      if (neighbors.length === 0) break;
+
+      // 🔧 DRIFT: Her komşuyu query relevance'a göre skorla
+      type ScoredNeighbor = typeof neighbors[number] & { relevanceScore: number };
+      const scoredNeighbors: ScoredNeighbor[] = neighbors
+        .filter(n => !visited.has(n.neighborId))
+        .map(n => {
+          const node = this.loadNode(n.neighborId);
+          let relevanceScore = n.confidence * n.weight;
+
+          // Keyword eşleşme bonusu
+          if (node) {
+            const content = node.content.toLowerCase();
+            for (const word of queryWords) {
+              if (content.includes(word)) relevanceScore += 0.3;
+            }
+            // Kategori eşleşme bonusu
+            if (node.category) {
+              const catLower = node.category.toLowerCase();
+              for (const word of queryWords) {
+                if (catLower.includes(word)) relevanceScore += 0.2;
+              }
+            }
+          }
+
+          return { ...n, relevanceScore };
+        })
+        .sort((a, b) => b.relevanceScore - a.relevanceScore);
+
+      // Sadece en alakalı komşuları seç (pruning)
+      const topNeighbors = scoredNeighbors.slice(0, Math.max(3, Math.ceil(scoredNeighbors.length * 0.3)));
+
+      const nextLayer: number[] = [];
+      let highRelevanceCount = 0;
+
+      for (const neighbor of topNeighbors) {
+        if (allNodes.size >= opts.maxNodes) {
+          maxHopReached = true;
+          break;
+        }
+
+        visited.add(neighbor.neighborId);
+        hopDistances.set(neighbor.neighborId, hop);
+
+        const node = this.loadNode(neighbor.neighborId);
+        if (node) {
+          allNodes.set(neighbor.neighborId, node);
+          if (neighbor.relevanceScore > 0.5) highRelevanceCount++;
+        }
+
+        const edge = this.loadEdge(neighbor.relationId);
+        if (edge) {
+          allEdges.push(edge);
+        }
+
+        nextLayer.push(neighbor.neighborId);
+      }
+
+      currentLayer = nextLayer;
+      if (currentLayer.length === 0) break;
+
+      // Yeterli bağlam kontrolü: Yüksek alakalı düğüm oranı düşükse dur
+      if (hop >= 2 && highRelevanceCount === 0) {
+        sufficientContext = true; // Bir sonraki iterasyonda erken çık
+      }
+    }
+
+    const result: GraphExpansionResult = {
+      nodes: Array.from(allNodes.values()),
+      edges: allEdges,
+      hopDistances,
+      maxHopReached,
+    };
+
+    const elapsed = Date.now() - startTime;
+    logger.debug(`[GraphExpander:DRIFT] Completed in ${elapsed}ms: ${allNodes.size} nodes, ${allEdges.length} edges (query-guided)`);
+
+    return result;
+  }
 }

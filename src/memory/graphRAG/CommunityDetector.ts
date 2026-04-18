@@ -35,6 +35,8 @@ export interface Community {
   modularityScore: number;
   dominantRelationTypes: string[];
   createdAt: Date;
+  level: number;               // 0 = leaf, 1+ = super-community
+  parentId: string | null;     // Üst seviye topluluk ID'si
 }
 
 /** Community detection sonucu */
@@ -44,6 +46,7 @@ export interface CommunityDetectionResult {
   totalEdges: number;
   elapsedMs: number;
   cacheHit: boolean;
+  maxLevel: number;            // Hiyerarşideki en yüksek seviye
 }
 
 /** Veritabanı community satırı */
@@ -53,6 +56,8 @@ interface CommunityRow {
   dominant_relation_types: string;
   created_at: string;
   updated_at: string;
+  level: number | null;
+  parent_id: string | null;
 }
 
 /** Veritabanı community member satırı */
@@ -105,12 +110,14 @@ export class CommunityDetector {
     // Cache kontrolü
     if (opts.useCache && this.isCacheValid()) {
       logger.debug('[CommunityDetector] Cache hit — cached communities returned');
+      const maxLevel = this.cache!.communities.reduce((max, c) => Math.max(max, c.level), 0);
       return {
         communities: this.cache!.communities,
         totalNodes: this.cache!.totalNodes,
         totalEdges: this.cache!.totalEdges,
         elapsedMs: 0,
         cacheHit: true,
+        maxLevel,
       };
     }
 
@@ -125,12 +132,12 @@ export class CommunityDetector {
       totalWeight = graphData.totalWeight;
     } catch {
       logger.warn('[CommunityDetector] Failed to load graph, returning empty communities');
-      return { communities: [], totalNodes: 0, totalEdges: 0, elapsedMs: Date.now() - startTime, cacheHit: false };
+      return { communities: [], totalNodes: 0, totalEdges: 0, elapsedMs: Date.now() - startTime, cacheHit: false, maxLevel: 0 };
     }
 
     if (nodes.length === 0) {
       logger.warn('[CommunityDetector] Empty graph, returning empty communities');
-      return { communities: [], totalNodes: 0, totalEdges: 0, elapsedMs: Date.now() - startTime, cacheHit: false };
+      return { communities: [], totalNodes: 0, totalEdges: 0, elapsedMs: Date.now() - startTime, cacheHit: false, maxLevel: 0 };
     }
 
     // Büyük graph'lerde sampling yap (performans için)
@@ -138,30 +145,40 @@ export class CommunityDetector {
     const sampledNodeIds = new Set(sampledNodes.map(n => n.id));
     const sampledEdges = edges.filter(e => sampledNodeIds.has(e.source) && sampledNodeIds.has(e.target));
 
-    logger.info(`[CommunityDetector] Running community detection on ${sampledNodes.length} nodes, ${sampledEdges.length} edges`);
+    logger.info(`[CommunityDetector] Running hierarchical community detection on ${sampledNodes.length} nodes, ${sampledEdges.length} edges`);
 
-    // Greedy Modularity Optimization
-    const communities = this.greedyModularityOptimization(sampledNodes, sampledEdges, totalWeight, opts);
+    // ========== Hierarchical Detection (Iterative Louvain) ==========
+    
+    // Level 0: Leaf communities (Greedy Modularity)
+    const level0Communities = this.greedyModularityOptimization(sampledNodes, sampledEdges, totalWeight, opts);
+    const filteredLevel0 = this.filterSmallCommunities(level0Communities, opts.minCommunitySize);
 
-    // Küçük community'leri filtrele
-    const filteredCommunities = this.filterSmallCommunities(communities, opts.minCommunitySize);
-
-    // En büyük maxCommunities kadar community'yi al
-    const sortedCommunities = filteredCommunities
+    // Level 0 toplulukları sınırla ve skoru hesapla
+    const sortedLevel0 = filteredLevel0
       .sort((a, b) => b.modularityScore - a.modularityScore)
       .slice(0, opts.maxCommunities);
-
-    // Dominant relation tiplerini hesapla
-    for (const community of sortedCommunities) {
-      community.dominantRelationTypes = this.computeDominantRelationTypes(community, edges);
+    for (const c of sortedLevel0) {
+      c.dominantRelationTypes = this.computeDominantRelationTypes(c, sampledEdges);
+      c.level = 0;
+      c.parentId = null;
     }
 
+    // Level 1: Super-communities (Level 0'ları birleştir)
+    const level1Communities = this.buildSuperCommunities(sortedLevel0, sampledEdges, totalWeight);
+    for (const c of level1Communities) {
+      c.dominantRelationTypes = this.computeDominantRelationTypes(c, sampledEdges);
+    }
+
+    // Tüm seviyeleri birleştir
+    const allCommunities = [...sortedLevel0, ...level1Communities];
+    const maxLevel = allCommunities.reduce((max, c) => Math.max(max, c.level), 0);
+
     // Community'leri veritabanına kaydet
-    this.saveCommunities(sortedCommunities);
+    this.saveCommunities(allCommunities);
 
     // Cache'e kaydet
     this.cache = {
-      communities: sortedCommunities,
+      communities: allCommunities,
       totalNodes: nodes.length,
       totalEdges: edges.length,
       cachedAt: Date.now(),
@@ -169,14 +186,15 @@ export class CommunityDetector {
     this.cacheTimestamp = Date.now();
 
     const elapsed = Date.now() - startTime;
-    logger.info(`[CommunityDetector] Detection completed in ${elapsed}ms: ${sortedCommunities.length} communities found`);
+    logger.info(`[CommunityDetector] Hierarchical detection completed in ${elapsed}ms: L0=${sortedLevel0.length}, L1=${level1Communities.length}`);
 
     return {
-      communities: sortedCommunities,
+      communities: allCommunities,
       totalNodes: nodes.length,
       totalEdges: edges.length,
       elapsedMs: elapsed,
       cacheHit: false,
+      maxLevel,
     };
   }
 
@@ -201,12 +219,55 @@ export class CommunityDetector {
     const communities = this.greedyModularityOptimization(nodes, edges, totalWeight, opts);
     const filteredCommunities = this.filterSmallCommunities(communities, opts.minCommunitySize);
 
-    // Dominant relation tiplerini hesapla
+    // Dominant relation tiplerini hesapla, level 0 olarak işaretle
     for (const community of filteredCommunities) {
       community.dominantRelationTypes = this.computeDominantRelationTypes(community, edges);
+      community.level = 0;
+      community.parentId = null;
     }
 
     return filteredCommunities.sort((a, b) => b.modularityScore - a.modularityScore);
+  }
+
+  /**
+   * Belirli bir seviyedeki toplulukları getir.
+   * 
+   * @param level - Hiyerarşi seviyesi (0 = leaf, 1+ = super)
+   * @returns Community[]
+   */
+  getCommunitiesByLevel(level: number): Community[] {
+    try {
+      const communities = this.db.prepare(`
+        SELECT id, modularity_score, dominant_relation_types, created_at, updated_at, level, parent_id
+        FROM graph_communities
+        WHERE level = ?
+        ORDER BY modularity_score DESC
+      `).all(level) as CommunityRow[];
+
+      const result: Community[] = [];
+      for (const row of communities) {
+        const members = this.db.prepare(`
+          SELECT node_id FROM graph_community_members WHERE community_id = ?
+        `).all(row.id) as CommunityMemberRow[];
+
+        result.push({
+          id: row.id,
+          memberNodeIds: members.map(m => m.node_id),
+          modularityScore: row.modularity_score ?? 0,
+          dominantRelationTypes: row.dominant_relation_types
+            ? JSON.parse(row.dominant_relation_types)
+            : [],
+          createdAt: new Date(row.created_at),
+          level: row.level ?? 0,
+          parentId: row.parent_id ?? null,
+        });
+      }
+
+      return result;
+    } catch (err) {
+      logger.warn({ err }, '[CommunityDetector] getCommunitiesByLevel hatası:');
+      return [];
+    }
   }
 
   /**
@@ -227,7 +288,7 @@ export class CommunityDetector {
       const placeholders = idList.map(() => '?').join(',');
 
       const communities = this.db.prepare(`
-        SELECT id, modularity_score, dominant_relation_types, created_at, updated_at
+        SELECT id, modularity_score, dominant_relation_types, created_at, updated_at, level, parent_id
         FROM graph_communities
         WHERE id IN (${placeholders})
       `).all(...idList) as CommunityRow[];
@@ -246,6 +307,8 @@ export class CommunityDetector {
             ? JSON.parse(row.dominant_relation_types)
             : [],
           createdAt: new Date(row.created_at),
+          level: row.level ?? 0,
+          parentId: row.parent_id ?? null,
         });
       }
 
@@ -268,8 +331,8 @@ export class CommunityDetector {
       this.db.exec('DELETE FROM graph_communities');
 
       const insertCommunity = this.db.prepare(`
-        INSERT INTO graph_communities (id, modularity_score, dominant_relation_types, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO graph_communities (id, modularity_score, dominant_relation_types, created_at, updated_at, level, parent_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
 
       const insertMember = this.db.prepare(`
@@ -285,6 +348,8 @@ export class CommunityDetector {
             JSON.stringify(community.dominantRelationTypes),
             now,
             now,
+            community.level,
+            community.parentId,
           );
 
           for (const nodeId of community.memberNodeIds) {
@@ -294,7 +359,7 @@ export class CommunityDetector {
       });
 
       runSave();
-      logger.debug(`[CommunityDetector] ${communities.length} communities saved to database`);
+      logger.debug(`[CommunityDetector] ${communities.length} communities saved (hierarchical) to database`);
     } catch (err) {
       logger.warn({ err }, '[CommunityDetector] saveCommunities hatası:');
     }
@@ -306,10 +371,10 @@ export class CommunityDetector {
   private loadCachedCommunities(): Community[] | null {
     try {
       const communities = this.db.prepare(`
-        SELECT id, modularity_score, dominant_relation_types, created_at, updated_at
+        SELECT id, modularity_score, dominant_relation_types, created_at, updated_at, level, parent_id
         FROM graph_communities
         WHERE updated_at >= datetime('now', '-6 hours')
-        ORDER BY modularity_score DESC
+        ORDER BY level ASC, modularity_score DESC
       `).all() as CommunityRow[];
 
       if (communities.length === 0) return null;
@@ -328,6 +393,8 @@ export class CommunityDetector {
             ? JSON.parse(row.dominant_relation_types)
             : [],
           createdAt: new Date(row.created_at),
+          level: row.level ?? 0,
+          parentId: row.parent_id ?? null,
         });
       }
 
@@ -514,6 +581,8 @@ export class CommunityDetector {
         modularityScore: 0,
         dominantRelationTypes: [],
         createdAt: new Date(),
+        level: 0,
+        parentId: null,
       };
 
       // Community modularity skorunu hesapla
@@ -522,6 +591,116 @@ export class CommunityDetector {
     }
 
     return result;
+  }
+
+  /**
+   * Level 0 toplulukları birleştirerek Level 1 süper-topluluklar oluştur.
+   * Birbirleriyle güçlü inter-community bağ paylaşan Level 0 toplulukları birleştirilir.
+   */
+  private buildSuperCommunities(
+    level0: Community[],
+    edges: WeightedEdge[],
+    totalWeight: number,
+  ): Community[] {
+    if (level0.length <= 1) return [];
+
+    // Her Level 0 topluluğu "süper-node" olarak temsil et
+    // İki topluluk arasındaki cross-community edge ağırlığını hesapla
+    const communityIndex = new Map<number, string>(); // nodeId → communityId
+    for (const comm of level0) {
+      for (const nodeId of comm.memberNodeIds) {
+        communityIndex.set(nodeId, comm.id);
+      }
+    }
+
+    // Inter-community edge ağırlıklarını topla
+    const interWeights = new Map<string, number>(); // "commA|commB" → total weight
+    for (const edge of edges) {
+      const commA = communityIndex.get(edge.source);
+      const commB = communityIndex.get(edge.target);
+      if (commA && commB && commA !== commB) {
+        const key = [commA, commB].sort().join('|');
+        interWeights.set(key, (interWeights.get(key) ?? 0) + edge.weight);
+      }
+    }
+
+    // Threshold: ortalama inter-community ağırlığın %50'si
+    const allWeights = Array.from(interWeights.values());
+    if (allWeights.length === 0) return [];
+    const avgWeight = allWeights.reduce((s, w) => s + w, 0) / allWeights.length;
+    const mergeThreshold = avgWeight * 0.5;
+
+    // Union-Find ile birleştir
+    const parent = new Map<string, string>();
+    for (const comm of level0) parent.set(comm.id, comm.id);
+
+    const find = (id: string): string => {
+      let root = id;
+      while (parent.get(root) !== root) root = parent.get(root)!;
+      // Path compression
+      let curr = id;
+      while (curr !== root) {
+        const next = parent.get(curr)!;
+        parent.set(curr, root);
+        curr = next;
+      }
+      return root;
+    };
+
+    const union = (a: string, b: string): void => {
+      const rootA = find(a);
+      const rootB = find(b);
+      if (rootA !== rootB) parent.set(rootA, rootB);
+    };
+
+    for (const [key, weight] of interWeights) {
+      if (weight >= mergeThreshold) {
+        const [commA, commB] = key.split('|');
+        union(commA, commB);
+      }
+    }
+
+    // Süper-topluluk gruplarını oluştur
+    const superGroups = new Map<string, string[]>(); // rootId → [commIds]
+    for (const comm of level0) {
+      const root = find(comm.id);
+      if (!superGroups.has(root)) superGroups.set(root, []);
+      superGroups.get(root)!.push(comm.id);
+    }
+
+    // Sadece birden fazla Level 0 topluluk birleşenleri süper-topluluk olarak döndür
+    const level0Map = new Map(level0.map(c => [c.id, c]));
+    const superCommunities: Community[] = [];
+
+    for (const [, childCommIds] of superGroups) {
+      if (childCommIds.length <= 1) continue; // Tek başına kalan topluluk zaten Level 0'da
+
+      const superId = uuidv4();
+      const allMemberIds: number[] = [];
+      for (const childId of childCommIds) {
+        const child = level0Map.get(childId);
+        if (child) {
+          child.parentId = superId; // Level 0'ın parent'ını ayarla
+          allMemberIds.push(...child.memberNodeIds);
+        }
+      }
+
+      const superCommunity: Community = {
+        id: superId,
+        memberNodeIds: [...new Set(allMemberIds)], // Deduplicate
+        modularityScore: 0,
+        dominantRelationTypes: [],
+        createdAt: new Date(),
+        level: 1,
+        parentId: null,
+      };
+
+      superCommunity.modularityScore = this.computeModularity(superCommunity, edges, totalWeight);
+      superCommunities.push(superCommunity);
+    }
+
+    logger.info(`[CommunityDetector] Built ${superCommunities.length} Level-1 super-communities from ${level0.length} Level-0 communities`);
+    return superCommunities;
   }
 
   /**

@@ -32,6 +32,7 @@ import type { GraphCache } from './GraphCache.js';
 import type { GraphRAGFeatureFlag } from './config.js';
 import { TokenPruner, type TokenBudget, type PruningResult } from './TokenPruner.js';
 import { defaultMonitor } from './monitoring.js';
+import { GlobalSearchEngine, type GlobalSearchResult } from './GlobalSearchEngine.js';
 
 /** GraphRAG konfigürasyonu */
 export interface GraphRAGConfig {
@@ -51,6 +52,11 @@ export interface GraphRAGConfig {
   memoryImportanceWeight: number; // Default: 0.5
   memoryAccessCountWeight: number; // Default: 0.3
   memoryConfidenceWeight: number; // Default: 0.2
+
+  // Global Search
+  searchMode: 'local' | 'global' | 'auto'; // Default: 'auto'
+  globalSearchTopK: number;     // Default: 5
+  globalSearchLevel: number;    // Default: 1
 }
 
 /** Graph context bilgisi */
@@ -78,6 +84,8 @@ export interface GraphRAGResult {
   communitySummaries: CommunitySummary[];
   graphContext: GraphContext;
   searchMetadata: SearchMetadata;
+  /** Global search sonucu (sadece global modda dolu) */
+  globalSearchResult?: GlobalSearchResult;
   error?: string;
 }
 
@@ -131,6 +139,9 @@ const DEFAULT_CONFIG: GraphRAGConfig = {
   memoryImportanceWeight: 0.5,
   memoryAccessCountWeight: 0.3,
   memoryConfidenceWeight: 0.2,
+  searchMode: 'auto',
+  globalSearchTopK: 5,
+  globalSearchLevel: 1,
 };
 
 /** Feature flag */
@@ -157,6 +168,7 @@ function computeTokenBudget(config: GraphRAGConfig): TokenBudget {
 export class GraphRAGEngine {
   private config: GraphRAGConfig;
   private tokenPruner: TokenPruner;
+  private globalSearchEngine: GlobalSearchEngine;
 
   constructor(
     private db: Database.Database,
@@ -166,6 +178,7 @@ export class GraphRAGEngine {
     private communitySummarizer: CommunitySummarizer,
     private graphCache: GraphCache,
     private hybridSearchFn: (query: string, limit: number) => Promise<MemoryRow[]>,
+    private llmProvider: import('../../llm/provider.js').LLMProvider,
     config?: Partial<GraphRAGConfig>,
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -177,6 +190,7 @@ export class GraphRAGEngine {
         confidence: this.config.memoryConfidenceWeight,
       },
     });
+    this.globalSearchEngine = new GlobalSearchEngine(db, llmProvider, communityDetector);
   }
 
   /**
@@ -207,6 +221,18 @@ export class GraphRAGEngine {
     if (!GRAPH_RAG_ENABLED) {
       return this.fallbackToStandard(query, config, startTime, true);
     }
+
+    // ========== Search Mode Routing ==========
+    const resolvedMode = config.searchMode === 'auto'
+      ? this.classifySearchMode(query)
+      : config.searchMode;
+
+    if (resolvedMode === 'global') {
+      logger.info(`[GraphRAGEngine] 🌐 Routing to GLOBAL search for query: "${query.substring(0, 80)}..."`);
+      return this.executeGlobalSearch(query, config, startTime);
+    }
+
+    logger.info(`[GraphRAGEngine] 🔍 Routing to LOCAL search for query: "${query.substring(0, 80)}..."`);
 
     try {
       // Phase 1: Standard hybrid search (baseline)
@@ -888,5 +914,87 @@ export class GraphRAGEngine {
     });
 
     return Promise.race([fn(), timeoutPromise]);
+  }
+
+  // ========== Global Search Integration ==========
+
+  /**
+   * Sorguyu 'local' vs 'global' olarak sınıflandır.
+   * Basit heuristic: Geniş, analitik sorular → global; spesifik sorular → local.
+   */
+  private classifySearchMode(query: string): 'local' | 'global' {
+    const q = query.toLowerCase();
+
+    // Global arama tetikleyicileri
+    const globalPatterns = [
+      /\b(genel|tüm|bütün|hepsi|toplam|ana|mak?ro)\b/,
+      /\b(özetle|listele|sırala|analiz|değerlendir)\b/,
+      /\b(temalar?|konular?|projeler?|ilgi\s*alan)\b/,
+      /\b(gidişat|trend|genel\s*(durum|bakış|resim))\b/,
+      /\b(kaç\s*tane|toplam\s*kaç)\b/,
+      /\b(overall|summary|overview|trends?|themes?)\b/,
+      /\b(everything|all\s*(of|my)|entire)\b/,
+    ];
+
+    // Global pattern eşleşmesi
+    let globalScore = 0;
+    for (const pattern of globalPatterns) {
+      if (pattern.test(q)) globalScore++;
+    }
+
+    // Eğer 2+ global tetikleyici varsa veya soru çok genişse…
+    if (globalScore >= 2 || (globalScore >= 1 && q.length > 80)) {
+      return 'global';
+    }
+
+    return 'local';
+  }
+
+  /**
+   * Global Search'i çalıştırıp GraphRAGResult formatına çevirir.
+   */
+  private async executeGlobalSearch(
+    query: string,
+    config: GraphRAGConfig,
+    startTime: number,
+  ): Promise<GraphRAGResult> {
+    try {
+      const globalResult = await this.globalSearchEngine.globalSearch(query, {
+        level: config.globalSearchLevel,
+        topK: config.globalSearchTopK,
+      });
+
+      const duration = Date.now() - startTime;
+
+      // Monitoring
+      defaultMonitor.recordQuery(duration, 0, globalResult.success, false, true);
+
+      return {
+        success: globalResult.success,
+        memories: [],
+        communitySummaries: globalResult.usedSummaries,
+        graphContext: {
+          expandedNodeIds: [],
+          edgeCount: 0,
+          maxHopReached: false,
+          communityCount: globalResult.metadata.filteredCommunities,
+          pageRankApplied: false,
+        },
+        searchMetadata: {
+          duration,
+          cacheHit: false,
+          tokenUsage: 0,
+          fallbackUsed: false,
+          phase: 'fusion',
+        },
+        globalSearchResult: globalResult,
+      };
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ err }, '[GraphRAGEngine] Global search failed, falling back to local:');
+
+      // Global başarısız olursa local'e düş
+      return this.fallbackToStandard(query, config, startTime, true);
+    }
   }
 }

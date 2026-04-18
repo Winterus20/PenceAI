@@ -26,12 +26,17 @@ export interface GraphRAGFeatureFlag {
   fallbackEnabled: boolean;
   
   // RRF Fusion sabitleri
-  rrfKConstant: number;              // Default: 60 (Reciprocal Rank Fusion constant)
+  rrfKConstant: number;              // Default: 60
   
   // Memory önceliklendirme ağırlıkları (TokenPruner)
-  memoryImportanceWeight: number;    // Default: 0.5 (önem skoru ağırlığı)
-  memoryAccessCountWeight: number;   // Default: 0.3 (erişim sayısı ağırlığı)
-  memoryConfidenceWeight: number;    // Default: 0.2 (güven skoru ağırlığı)
+  memoryImportanceWeight: number;    // Default: 0.5
+  memoryAccessCountWeight: number;   // Default: 0.3
+  memoryConfidenceWeight: number;    // Default: 0.2
+
+  // Global Search
+  useGlobalSearch: boolean;          // Default: true
+  globalSearchTopK: number;          // Default: 5
+  globalSearchLevel: number;         // Default: 1
 }
 
 /** Rollout phase enum */
@@ -57,7 +62,10 @@ export const ROLLOUT_PHASE_CONFIG: Record<GraphRAGRolloutPhase, GraphRAGFeatureF
     rrfKConstant: 60,
     memoryImportanceWeight: 0.5,
     memoryAccessCountWeight: 0.3,
-    memoryConfidenceWeight: 0.2
+    memoryConfidenceWeight: 0.2,
+    useGlobalSearch: false,
+    globalSearchTopK: 5,
+    globalSearchLevel: 1,
   },
   [GraphRAGRolloutPhase.SHADOW]: {
     enabled: true,
@@ -72,7 +80,10 @@ export const ROLLOUT_PHASE_CONFIG: Record<GraphRAGRolloutPhase, GraphRAGFeatureF
     rrfKConstant: 60,
     memoryImportanceWeight: 0.5,
     memoryAccessCountWeight: 0.3,
-    memoryConfidenceWeight: 0.2
+    memoryConfidenceWeight: 0.2,
+    useGlobalSearch: false,
+    globalSearchTopK: 5,
+    globalSearchLevel: 1,
   },
   [GraphRAGRolloutPhase.PARTIAL]: {
     enabled: true,
@@ -87,7 +98,10 @@ export const ROLLOUT_PHASE_CONFIG: Record<GraphRAGRolloutPhase, GraphRAGFeatureF
     rrfKConstant: 60,
     memoryImportanceWeight: 0.5,
     memoryAccessCountWeight: 0.3,
-    memoryConfidenceWeight: 0.2
+    memoryConfidenceWeight: 0.2,
+    useGlobalSearch: true,
+    globalSearchTopK: 5,
+    globalSearchLevel: 1,
   },
   [GraphRAGRolloutPhase.FULL]: {
     enabled: true,
@@ -102,7 +116,10 @@ export const ROLLOUT_PHASE_CONFIG: Record<GraphRAGRolloutPhase, GraphRAGFeatureF
     rrfKConstant: 60,
     memoryImportanceWeight: 0.5,
     memoryAccessCountWeight: 0.3,
-    memoryConfidenceWeight: 0.2
+    memoryConfidenceWeight: 0.2,
+    useGlobalSearch: true,
+    globalSearchTopK: 5,
+    globalSearchLevel: 1,
   }
 };
 
