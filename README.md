@@ -32,7 +32,7 @@ Core capabilities include:
 - **Background job queue:** Persistent workflows support memory maintenance, embedding backfill, summarization, and deeper extraction tasks.
 - **Web interface + gateway:** An HTTP/WebSocket server works together with a React-based client with React Query for data fetching and state management.
 - **Multi-provider LLM integration:** Adapters are available for OpenAI, Anthropic, Groq, Mistral, Ollama, NVIDIA, GitHub, and other providers.
-- **Observability & cost tracking:** Langfuse integration with OpenTelemetry provides end-to-end tracing, token usage tracking, and cost estimation across all 8 providers.
+- **Observability & cost tracking:** Custom local metrics system provides token usage tracking and cost estimation natively across all 8 providers without external dependencies.
 - **Multi-channel support:** Telegram, Discord, and WhatsApp channel integrations for broader accessibility.
 - **Token usage analytics:** Real-time cost calculation with provider/model-specific pricing via [`costCalculator.ts`](src/utils/costCalculator.ts).
 
@@ -45,7 +45,7 @@ Core capabilities include:
 - **Vectors:** `sqlite-vec` for embedding storage
 - **Infrastructure:** Docker & Docker Compose
 - **MCP:** `@modelcontextprotocol/sdk` for Model Context Protocol
-- **Observability:** Langfuse + OpenTelemetry for end-to-end tracing
+- **Observability:** Built-in local metrics and tracing system
 - **Embeddings:** `@xenova/transformers` (ONNX) + provider-backed embedding layers
 - **Frontend:** React + Vite
 - **State Management:** Zustand + React Query
@@ -139,18 +139,13 @@ The React-based client lives under [`src/web/react-app`](src/web/react-app). Use
 
 ## Observability
 
-PenceAI supports [Langfuse](https://langfuse.com) for end-to-end LLM observability with OpenTelemetry.
-When Langfuse is enabled, the operations automatically traced include:
-- LLM calls across all 8 providers
+PenceAI uses a built-in local metrics system for observability.
+Operations that are automatically traced and stored locally include:
+- LLM calls and token usage across all 8 providers
+- Cost calculation based on provider/model pricing
 - Agent reasoning, memory retrieval, tool executions, and latency metrics.
 
-Add to your `.env` file to enable:
-```env
-LANGFUSE_ENABLED=true
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_BASE_URL=https://cloud.langfuse.com
-```
+No external API keys are required for observability, ensuring your data remains fully local.
 
 ## Current Status & Roadmap
 
