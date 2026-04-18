@@ -26,7 +26,7 @@ Core capabilities include:
 - **Agent runtime + tool loop:** [`AgentRuntime`](src/agent/runtime.ts) manages reasoning, tool calls, observations, and response generation in a unified flow.
 - **Cognitive memory layer:** [`MemoryManager`](src/memory/manager/index.ts) coordinates conversation history, long-term memory, retrieval orchestration, and maintenance routines.
 - **Episodic / semantic memory separation:** Memories are treated not only by content, but also by their functional role.
-- **GraphRAG (Graph-based Retrieval Augmented Generation):** [`src/memory/graphRAG/`](src/memory/graphRAG/) provides graph-aware retrieval with PageRank scoring, community detection, community summarization, graph expansion, caching, token pruning, and shadow-mode behavior discovery.
+- **GraphRAG (Graph-based Retrieval Augmented Generation):** [`src/memory/graphRAG/`](src/memory/graphRAG/) provides graph-aware retrieval with PageRank scoring, community detection, community summarization, and **deterministic RAG patterns** (Evaluation Gate, Phrase Bonus Scoring) for high-reliability memory recall.
 - **MCP (Model Context Protocol) integration:** [`src/agent/mcp/`](src/agent/mcp/) implements extensible tool ecosystem with 18+ modules including marketplace, security layer, event bus, and unified registry.
 - **Docker Ready:** Built-in multi-stage `Dockerfile` and `docker-compose.yml` to effortlessly deploy on Windows, Mac, or Linux without OS-level C++ compilation issues.
 - **Background job queue:** Persistent workflows support memory maintenance, embedding backfill, summarization, and deeper extraction tasks.

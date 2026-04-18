@@ -14,7 +14,7 @@ import type {
   MemoryRelationRow,
   NeighborResult,
 } from '../types.js';
-import { GraphCache, computeQueryHash } from './GraphCache.js';
+import { GraphCache, computeQueryHash, evaluateBeforePromote } from './GraphCache.js';
 import { logger } from '../../utils/logger.js';
 
 /** Default ayarlar */
@@ -137,19 +137,28 @@ export class GraphExpander {
       maxHopReached,
     };
 
-    // Cache'e kaydet
+    // Cache'e kaydet (Evaluation Gate uygulayarak)
     if (opts.useCache) {
-      const queryHash = computeQueryHash(opts);
-      const cacheEntry = {
-        queryHash,
-        maxDepth: opts.maxDepth,
-        nodeIds: Array.from(allNodes.keys()),
-        relationIds: allEdges.map(e => e.id),
-        score: this.computeResultScore(result),
-        createdAt: new Date(),
-        expiresAt: new Date(Date.now() + 3600 * 1000), // 1 saat TTL
-      };
-      this.cache.set(cacheEntry);
+      const evaluation = evaluateBeforePromote(result, isFullPhase);
+      
+      if (!evaluation.passed) {
+        logger.debug(
+          { failedChecks: evaluation.failedChecks }, 
+          `[GraphExpander] Değerlendirme Kapısı başarısız, önbelleğe kaydedilmedi (nodes: ${result.nodes.length})`
+        );
+      } else {
+        const queryHash = computeQueryHash(opts);
+        const cacheEntry = {
+          queryHash,
+          maxDepth: opts.maxDepth,
+          nodeIds: Array.from(allNodes.keys()),
+          relationIds: allEdges.map(e => e.id),
+          score: this.computeResultScore(result),
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 3600 * 1000), // 1 saat TTL
+        };
+        this.cache.set(cacheEntry);
+      }
     }
 
     const elapsed = Date.now() - startTime;

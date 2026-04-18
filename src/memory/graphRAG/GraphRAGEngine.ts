@@ -263,6 +263,7 @@ export class GraphRAGEngine {
       // Phase 6: Token pruning ve fusion
       const phase6Start = Date.now();
       const fusionResult = await this.runFusion(
+        query,
         {
           initialResults,
           expansion: expansion.result,
@@ -619,6 +620,7 @@ export class GraphRAGEngine {
    * Phase 5: Token pruning ve fusion.
    */
   private async runFusion(
+    query: string,
     results: AllResults,
     config: GraphRAGConfig,
     startTime: number,
@@ -633,6 +635,7 @@ export class GraphRAGEngine {
 
     // RRF fusion ile final ranking (configurable K constant)
     const finalMemories = this.rrfFusion(
+      query,
       results.initialResults,
       pruningResult.prunedMemories,
       results.scoring.scores,
@@ -667,6 +670,7 @@ export class GraphRAGEngine {
    * RRF fusion ile final ranking.
    */
   private rrfFusion(
+    query: string,
     initialResults: MemoryRow[],
     expandedNodes: MemoryRow[],
     scores: Map<number, number>,
@@ -680,7 +684,8 @@ export class GraphRAGEngine {
     for (let rank = 0; rank < initialResults.length; rank++) {
       const node = initialResults[rank];
       const rrfScore = 1 / (K + rank + 1);
-      allNodes.set(node.id, { node, rrfScore });
+      const phraseScore = this.calculatePhraseBonus(query, node.content);
+      allNodes.set(node.id, { node, rrfScore: rrfScore + phraseScore });
     }
 
     // Expanded nodes için RRF score
@@ -694,7 +699,10 @@ export class GraphRAGEngine {
       const node = sortedExpanded[rank];
       const pageRankScore = scores.get(node.id) ?? 0;
       const rrfScore = 1 / (K + rank + 1);
-      const weightedScore = rrfScore * (0.5 + pageRankScore * 0.5);
+      let weightedScore = rrfScore * (0.5 + pageRankScore * 0.5);
+      
+      const phraseScore = this.calculatePhraseBonus(query, node.content);
+      weightedScore += phraseScore;
 
       const existing = allNodes.get(node.id);
       if (existing) {
@@ -709,6 +717,37 @@ export class GraphRAGEngine {
       .sort((a, b) => b.rrfScore - a.rrfScore)
       .slice(0, maxResults)
       .map(item => item.node);
+  }
+
+  /**
+   * Deterministik sıralama iyileştirmesi için RAGOps phrase bonus fonksiyonu.
+   * Eğer sorgunun kalıp kelimeleri aranan metinde yan yanaysa RRF skoruna anında güçlü bir bonus verir.
+   */
+  private calculatePhraseBonus(query: string, chunkText: string): number {
+    const queryWords = query.toLowerCase().trim().split(/\s+/).filter(w => w.length > 2);
+    if (queryWords.length < 2) return 0;
+
+    const lowerChunk = chunkText.toLowerCase();
+    let bonus = 0;
+
+    // 2-gram bonus
+    for (let i = 0; i < queryWords.length - 1; i++) {
+      const bigram = `${queryWords[i]} ${queryWords[i + 1]}`;
+      if (lowerChunk.includes(bigram)) {
+        bonus += 0.05;
+      }
+    }
+
+    // 3-gram bonus
+    for (let i = 0; i < queryWords.length - 2; i++) {
+      const trigram = `${queryWords[i]} ${queryWords[i + 1]} ${queryWords[i + 2]}`;
+      if (lowerChunk.includes(trigram)) {
+        bonus += 0.10;
+      }
+    }
+
+    // Max 0.20 bonus limit
+    return Math.min(bonus, 0.20);
   }
 
   /**

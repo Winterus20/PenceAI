@@ -9,6 +9,49 @@ import type Database from 'better-sqlite3';
 import type { GraphCacheEntry, GraphExpansionOptions, GraphExpansionResult } from '../types.js';
 import { logger } from '../../utils/logger.js';
 
+/**
+ * Değerlendirme Kapısı (Evaluation Gate) Sonucu
+ */
+export interface EvaluationGateResult {
+  passed: boolean;
+  checks: {
+    emptyRetrieval: boolean;
+    confidenceThreshold: boolean;
+    nodeCountValid: boolean;
+  };
+  failedChecks: string[];
+}
+
+/**
+ * Önbelleğe almadan önce (Before Promotion) GraphExpansionResult'ı değerlendirir.
+ * RAGOps Deterministic RAG prensibi: Kalitesiz genişletmeleri önbelleğe alıp sistemi zehirleme.
+ */
+export function evaluateBeforePromote(
+  result: GraphExpansionResult,
+  isFullPhase: boolean = false
+): EvaluationGateResult {
+  let avgConfidence = 0;
+  if (result.edges.length > 0) {
+    avgConfidence = result.edges.reduce((sum, e) => sum + e.confidence, 0) / result.edges.length;
+  }
+
+  const checks = {
+    emptyRetrieval: result.nodes.length > 0,
+    confidenceThreshold: result.edges.length === 0 || avgConfidence >= 0.25,
+    nodeCountValid: result.nodes.length >= (isFullPhase ? 3 : 1),
+  };
+
+  const failedChecks = Object.entries(checks)
+    .filter(([_, passed]) => !passed)
+    .map(([name]) => name);
+
+  return {
+    passed: failedChecks.length === 0,
+    checks,
+    failedChecks,
+  };
+}
+
 /** Default TTL: 1 saat (FULL phase'te 2 saat) */
 const DEFAULT_TTL_SECONDS = 3600;
 const FULL_PHASE_TTL_SECONDS = 7200; // 2 saat
