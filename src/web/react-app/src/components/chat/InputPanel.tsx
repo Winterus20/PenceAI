@@ -1,8 +1,9 @@
 import React, { useRef } from 'react';
-import { Send, Plus, Loader2, X } from 'lucide-react';
+import { Send, Plus, Loader2, X, Command } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { AttachmentItem } from '../../store/agentStore';
+import { useAgentStore } from '../../store/agentStore';
 import { formatFileSize } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -51,9 +52,19 @@ export const InputPanel: React.FC<InputPanelProps> = ({
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
+    const value = e.target.value;
+    setInput(value);
     e.currentTarget.style.height = 'auto';
     e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 160)}px`;
+
+    // Slash command trigger: if user types '/' at start, open command palette
+    if (value === '/') {
+      const store = useAgentStore.getState();
+      if (!store.isCommandPaletteOpen) {
+        store.toggleCommandPalette();
+        setInput('');
+      }
+    }
   };
 
   const resetTextareaHeight = () => {
@@ -145,7 +156,20 @@ export const InputPanel: React.FC<InputPanelProps> = ({
           />
 
           {/* Action Buttons (Send) */}
-          <div className="flex-shrink-0 flex items-center justify-center h-8 w-8 mb-0.5">
+          <div className="flex-shrink-0 flex items-center gap-1 mb-0.5">
+            {/* Cmd+K hint */}
+            {!input.trim() && pendingAttachments.length === 0 && !isReceiving && (
+              <button
+                type="button"
+                onClick={() => useAgentStore.getState().toggleCommandPalette()}
+                className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 mr-1 text-[10px] font-medium text-muted-foreground/40 hover:text-muted-foreground/70 bg-white/[0.03] hover:bg-white/[0.06] border border-white/8 rounded transition-all"
+                title="Komut paleti"
+              >
+                <Command size={9} />
+                K
+              </button>
+            )}
+            <div className="h-8 w-8 flex items-center justify-center">
             {isReceiving ? (
               <Loader2 className="animate-spin w-5 h-5 text-foreground/50" />
             ) : (
@@ -157,6 +181,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
                  <Send className="h-4 w-4 relative right-[1px]" strokeWidth={2} />
               </Button>
             )}
+            </div>
           </div>
         </div>
       </div>

@@ -96,6 +96,7 @@ export const MemoryGraphView = ({
         <MemoryNodeDetails
           node={selectedNode}
           onClose={() => setSelectedNode(null)}
+          onMemoryUpdated={() => void refetch()}
         />
       )}
 

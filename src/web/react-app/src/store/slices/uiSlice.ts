@@ -12,6 +12,8 @@ export const createUISlice: StateCreator<
   theme: 'dark',
   lightbox: { imageUrl: null, imageAlt: '' },
   toast: { message: '', type: 'info', isVisible: false },
+  canvasArtifact: null,
+  isCommandPaletteOpen: false,
 
   setActiveView: (view) => set({ activeView: view }),
   setConfirmRequest: (request) => set({ confirmRequest: request }),
@@ -28,4 +30,7 @@ export const createUISlice: StateCreator<
   hideToast: () => set({
     toast: { message: '', type: 'info', isVisible: false },
   }),
+  setCanvasArtifact: (artifact) => set({ canvasArtifact: artifact }),
+  toggleCommandPalette: () => set((state) => ({ isCommandPaletteOpen: !state.isCommandPaletteOpen })),
 });
+

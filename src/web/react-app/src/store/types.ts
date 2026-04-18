@@ -14,6 +14,14 @@ export interface ToolCallItem {
   isError?: boolean;
 }
 
+export interface MemorySource {
+  id: number;
+  content: string;
+  category?: string;
+  importance?: number;
+  score?: number;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -24,6 +32,7 @@ export interface Message {
   toolCalls?: ToolCallItem[];
   thinking?: string[];
   pending?: boolean;
+  sources?: MemorySource[];
 }
 
 export interface ConversationItem {
@@ -51,6 +60,15 @@ export interface ConfirmRequest {
 
 export type ActiveView = 'chat' | 'channels' | 'memory' | 'settings' | 'mcp-marketplace' | 'metrics';
 export type Theme = 'light' | 'dark';
+
+export interface CanvasArtifact {
+  id: string;
+  title: string;
+  content: string;
+  language?: string;
+  type: 'code' | 'markdown' | 'text' | 'mermaid';
+  createdAt: string;
+}
 
 export interface Channel {
   id: string;
@@ -166,6 +184,8 @@ export interface UISlice {
   theme: Theme;
   lightbox: LightboxState;
   toast: ToastState;
+  canvasArtifact: CanvasArtifact | null;
+  isCommandPaletteOpen: boolean;
   
   setActiveView: (view: ActiveView) => void;
   setConfirmRequest: (request: ConfirmRequest | null) => void;
@@ -175,6 +195,8 @@ export interface UISlice {
   closeLightbox: () => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   hideToast: () => void;
+  setCanvasArtifact: (artifact: CanvasArtifact | null) => void;
+  toggleCommandPalette: () => void;
 }
 
 export interface SettingsSlice {

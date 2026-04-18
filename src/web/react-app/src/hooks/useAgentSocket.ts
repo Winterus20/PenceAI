@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { useAgentStore } from '../store/agentStore';
-import type { ToolCallItem, AttachmentItem, MessageMetrics } from '../store/agentStore';
+import type { ToolCallItem, AttachmentItem, MessageMetrics, MemorySource } from '../store/agentStore';
 import { useStats } from './useStats';
 import { stripThinkTags } from '@/lib/utils';
 
@@ -83,6 +83,7 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
     const currentAssistantMessageId = useRef<string | null>(null);
     const pendingToolCalls = useRef<ToolCallItem[]>([]);
     const pendingThinking = useRef<string[]>([]);
+    const pendingSources = useRef<MemorySource[]>([]);
     const thinkingEnabledRef = useRef(false);
     const onMetricsRef = useRef(onMetrics);
 
@@ -119,6 +120,7 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
         getStore().patchMessage(assistantId, {
             toolCalls: pendingToolCalls.current.length > 0 ? [...pendingToolCalls.current] : undefined,
             thinking: pendingThinking.current.length > 0 ? [...pendingThinking.current] : undefined,
+            sources: pendingSources.current.length > 0 ? [...pendingSources.current] : undefined,
         });
     };
 
@@ -127,6 +129,7 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
         currentAssistantMessageId.current = assistantId;
         pendingToolCalls.current = [];
         pendingThinking.current = [];
+        pendingSources.current = [];
         getStore().setThinking('');
 
         getStore().addMessage({
@@ -219,6 +222,7 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
                         content: data.content ?? '',
                         toolCalls: pendingToolCalls.current.length > 0 ? [...pendingToolCalls.current] : undefined,
                         thinking: pendingThinking.current.length > 0 ? [...pendingThinking.current] : undefined,
+                        sources: pendingSources.current.length > 0 ? [...pendingSources.current] : undefined,
                         pending: false,
                     });
                 } else {
@@ -229,6 +233,7 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
                         timestamp: new Date().toISOString(),
                         toolCalls: pendingToolCalls.current.length > 0 ? [...pendingToolCalls.current] : undefined,
                         thinking: pendingThinking.current.length > 0 ? [...pendingThinking.current] : undefined,
+                        sources: pendingSources.current.length > 0 ? [...pendingSources.current] : undefined,
                     });
                 }
 
@@ -239,6 +244,7 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
                 currentAssistantMessageId.current = null;
                 pendingToolCalls.current = [];
                 pendingThinking.current = [];
+                pendingSources.current = [];
                 getStore().setThinking('');
                 getStore().setReceiving(false);
                 break;
@@ -284,6 +290,7 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
                 currentAssistantMessageId.current = null;
                 pendingToolCalls.current = [];
                 pendingThinking.current = [];
+                pendingSources.current = [];
                 getStore().setThinking('');
                 getStore().setReceiving(false);
                 break;
@@ -360,6 +367,15 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
             }
             case 'iteration':
                 break;
+            case 'memory_retrieval': {
+                // Memory sources used for RAG context
+                const sources = eventData.sources as MemorySource[] | undefined;
+                if (sources && Array.isArray(sources)) {
+                    pendingSources.current = [...pendingSources.current, ...sources];
+                    syncAssistantMeta();
+                }
+                break;
+            }
         }
     };
 

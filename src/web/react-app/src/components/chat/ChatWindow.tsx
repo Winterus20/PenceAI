@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { BrainCircuit, Wrench, Menu, X, PanelLeftOpen } from 'lucide-react';
+import { BrainCircuit, Wrench, Menu, X, PanelLeftOpen, Command } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 import { useAgentSocket } from '../../hooks/useAgentSocket';
 import { useConversations } from '../../hooks/useConversations';
@@ -10,8 +10,10 @@ import { SettingsDialog } from './SettingsDialog';
 import { MemoryDialog } from './MemoryDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { OnboardingDialog } from './OnboardingDialog';
+import { CommandPalette } from './CommandPalette';
 import { Toast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/button';
+import { CanvasPanel } from '@/components/ui/CanvasPanel';
 import { ConversationPanel } from './ConversationPanel';
 import { MessagePanel } from './MessagePanel';
 import { InputPanel } from './InputPanel';
@@ -30,6 +32,8 @@ export const ChatWindow = () => {
     activeView,
     feedbacks,
     toast,
+    canvasArtifact,
+    isCommandPaletteOpen,
     setMessages,
     setActiveView,
     sendFeedback,
@@ -37,6 +41,8 @@ export const ChatWindow = () => {
     updateConversationTitle,
     setMessageMetrics,
     messageMetrics,
+    setCanvasArtifact,
+    toggleCommandPalette,
   } = useAgentStore();
 
   // WebSocket
@@ -88,6 +94,18 @@ export const ChatWindow = () => {
   const [showTools, setShowTools] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // Global keyboard shortcut: Cmd+K / Ctrl+K for command palette
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        toggleCommandPalette();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [toggleCommandPalette]);
 
   // Thinking enabled sync
   const prevThinkingRef = useRef(showThinking);
@@ -238,6 +256,13 @@ export const ChatWindow = () => {
       <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
       <MemoryDialog open={isMemoryOpen} onOpenChange={setIsMemoryOpen} />
       <OnboardingDialog open={onboardingOpen} onCompleted={() => setOnboardingOpen(false)} />
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => toggleCommandPalette()}
+        onAction={(content) => {
+          setInput(content);
+        }}
+      />
 
       <ConfirmDialog
         open={!!confirmRequest}
@@ -325,45 +350,63 @@ export const ChatWindow = () => {
             <Button variant={showTools ? 'secondary' : 'ghost'} size="icon" className={`h-9 w-9 rounded-full transition-colors ${showTools ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' : 'hover:bg-white/10 text-muted-foreground hover:text-foreground'}`} onClick={() => setShowTools((prev) => !prev)} title="Araçlar">
               <Wrench size={16} />
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-full hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => toggleCommandPalette()}
+              title="Komut Paleti (⌘K)"
+            >
+              <Command size={16} />
+            </Button>
           </div>
         </header>
 
         {/* Messages & Input */}
         <div className="flex flex-1 overflow-hidden relative pt-14">
-          <div className="flex w-full flex-col h-full">
-            <MessagePanel
-              messages={messages}
-              showThinking={showThinking}
-              showTools={showTools}
-              isReceiving={isReceiving}
-              activeConversationId={activeConversationId}
-              feedbacks={feedbacks}
-              onRegenerate={handleRegenerate}
-              onQuickAction={handleQuickAction}
-              onEditMessage={handleEditMessage}
-              onSendFeedback={(messageId, type) => sendFeedback(messageId, activeConversationId || '', type)}
-              messageMetrics={messageMetrics}
-            />
-
-            <div
-              className={`w-full mt-auto relative px-4 transition-colors ${isDragOver ? 'bg-primary/5 ring-2 ring-primary/50' : ''}`}
-              onDragOver={(e) => { e.preventDefault(); handleDragOver(); }}
-              onDragLeave={handleDragLeave}
-              onDrop={(e) => {
-                e.preventDefault();
-                handleDrop(Array.from(e.dataTransfer.files || []));
-              }}
-            >
-              <InputPanel
-                input={input}
-                setInput={setInput}
+          <div className="flex w-full h-full">
+            {/* Chat Area */}
+            <div className="flex-1 flex flex-col min-w-0 h-full">
+              <MessagePanel
+                messages={messages}
+                showThinking={showThinking}
+                showTools={showTools}
                 isReceiving={isReceiving}
-                pendingAttachments={pendingAttachments}
-                onRemoveAttachment={removeAttachment}
-                onSend={handleSend}
-                onFileSelection={handleFileSelection}
+                activeConversationId={activeConversationId}
+                feedbacks={feedbacks}
+                onRegenerate={handleRegenerate}
+                onQuickAction={handleQuickAction}
+                onEditMessage={handleEditMessage}
+                onSendFeedback={(messageId, type) => sendFeedback(messageId, activeConversationId || '', type)}
+                messageMetrics={messageMetrics}
               />
+
+              <div
+                className={`w-full mt-auto relative px-4 transition-colors ${isDragOver ? 'bg-primary/5 ring-2 ring-primary/50' : ''}`}
+                onDragOver={(e) => { e.preventDefault(); handleDragOver(); }}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleDrop(Array.from(e.dataTransfer.files || []));
+                }}
+              >
+                <InputPanel
+                  input={input}
+                  setInput={setInput}
+                  isReceiving={isReceiving}
+                  pendingAttachments={pendingAttachments}
+                  onRemoveAttachment={removeAttachment}
+                  onSend={handleSend}
+                  onFileSelection={handleFileSelection}
+                />
+              </div>
             </div>
+
+            {/* Canvas Panel (split-view) */}
+            <CanvasPanel
+              artifact={canvasArtifact}
+              onClose={() => setCanvasArtifact(null)}
+            />
           </div>
         </div>
       </div>

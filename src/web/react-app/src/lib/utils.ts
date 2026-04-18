@@ -40,6 +40,44 @@ export function stripThinkTags(text?: string): string {
 }
 
 /**
+ * Eğer tüm yanıt gereksiz bir markdown kod bloğu içine alınmışsa veya LLM backtick'ten sonra newline koymayı unutmuşsa dıştaki bloğu temizler.
+ */
+export function stripOuterBackticks(text: string): string {
+  if (!text) return '';
+  let current = text.trim();
+  
+  // Matches: ```[info]\n[content]\n```
+  const regex = /^(`{3,})([^\n]*)\n([\s\S]*?)\n\1$/;
+  let match = current.match(regex);
+  
+  while (match) {
+    const infoString = match[2];
+    const content = match[3];
+    
+    const lowerInfo = infoString.trim().toLowerCase();
+    const isMarkdown = lowerInfo === 'markdown' || lowerInfo === 'md' || lowerInfo === 'text';
+    const hasSpaces = infoString.includes(' ');
+    
+    // Eğer dil belirtilmemişse ve içerik belirgin bir şekilde markdown (liste, başlık vb.) içeriyorsa
+    const isNamelessMarkdown = lowerInfo === '' && /^(\s*[-*#]\s|\s*\d+\.\s|\[.*?\]\(.*?\))/m.test(content);
+    
+    if (isMarkdown || hasSpaces || isNamelessMarkdown) {
+      if (hasSpaces && !isMarkdown) {
+          // LLM newline koymayı unutmuş, ilk cümle info string yerine yazılmış
+          current = infoString.trim() + '\n\n' + content.trim();
+      } else {
+          current = content.trim();
+      }
+      match = current.match(regex);
+    } else {
+      break;
+    }
+  }
+  
+  return current;
+}
+
+/**
  * Timestamp'i saat:dakika formatında döndürür
  */
 export function formatTime(timestamp: string): string {

@@ -1,14 +1,16 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, SquarePen, Wrench, BrainCircuit, Paperclip, ChevronDown } from 'lucide-react';
-import type { AttachmentItem, Message, ToolCallItem, MessageMetrics } from '@/store/agentStore';
+import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, SquarePen, BrainCircuit, Paperclip, ChevronDown, Sparkles } from 'lucide-react';
+import type { AttachmentItem, Message, MessageMetrics } from '@/store/agentStore';
 import { cn } from '@/lib/utils';
-import { stripThinkTags, formatTime } from '@/lib/utils';
+import { stripThinkTags, formatTime, stripOuterBackticks } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { CodeBlock } from './CodeBlock';
 import { MetricsPanel } from './MetricsPanel';
+import { ToolCallIndicator } from './ToolCallIndicator';
+import { MemorySourcePills } from './MemorySourcePills';
 
 /* ─── Sub-components ─── */
 
@@ -58,7 +60,7 @@ const InlineMetaBlock: React.FC<{
   visible: boolean;
   children: React.ReactNode;
 }> = ({ icon, title, count, visible, children }) => {
-  const [expanded, setExpanded] = React.useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   if (!visible || count === 0) return null;
 
@@ -99,40 +101,6 @@ const InlineMetaBlock: React.FC<{
   );
 };
 
-const ToolList: React.FC<{ toolCalls: ToolCallItem[] }> = ({ toolCalls }) => {
-  return (
-    <div className="space-y-3">
-      {toolCalls.map((tool, index) => (
-        <div key={`${tool.name}-${index}`} className="border border-border/60 bg-background/40 p-3 rounded-lg">
-          <div className="mb-2 flex items-center justify-between gap-3 text-tool-label">
-            <span className="font-medium text-foreground">{tool.name}</span>
-            <span className={cn(
-              'font-medium',
-              tool.status === 'error'
-                ? 'text-destructive'
-                : tool.status === 'running'
-                  ? 'text-amber-400'
-                  : 'text-emerald-400'
-            )}>
-              {tool.status === 'running' ? 'çalışıyor' : tool.status === 'error' ? 'hata' : 'tamam'}
-            </span>
-          </div>
-          {tool.arguments ? (
-            <pre className="mb-2 overflow-x-auto whitespace-pre-wrap break-words border border-border/50 bg-card/60 p-2 text-xs text-muted-foreground rounded-md">
-              {JSON.stringify(tool.arguments, null, 2)}
-            </pre>
-          ) : null}
-          {tool.result ? (
-            <pre className="overflow-x-auto whitespace-pre-wrap break-words border border-border/50 bg-card/60 p-2 text-xs text-foreground/80 rounded-md">
-              {tool.result}
-            </pre>
-          ) : null}
-        </div>
-      ))}
-    </div>
-  );
-};
-
 /* ─── Main Component ─── */
 
 export interface MessageBubbleProps {
@@ -149,6 +117,7 @@ export interface MessageBubbleProps {
   feedbacks?: Record<string, { type: 'positive' | 'negative' }>;
   conversationId?: string;
   metrics?: MessageMetrics;
+  memorySaved?: boolean;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
@@ -165,6 +134,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
   feedbacks,
   conversationId,
   metrics,
+  memorySaved,
 }) => {
   const isUser = msg.role === 'user';
   const isSystem = msg.role === 'system';
@@ -182,16 +152,34 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
       )}
     >
       {/* Avatar */}
-      <div className="flex-shrink-0 mt-1">
+      <div className="flex-shrink-0 mt-1 relative">
         {isUser ? (
           <div className="h-8 w-8 rounded-full bg-gradient-to-br from-purple-600 to-indigo-500 flex items-center justify-center text-[11px] font-bold text-white uppercase shadow-lg shadow-purple-500/20">
             K
           </div>
         ) : (
-          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-violet-500 via-fuchsia-500 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-purple-500/30 animate-gradient-slow">
+          <div className={cn(
+            "h-8 w-8 rounded-full bg-gradient-to-br from-violet-500 via-fuchsia-500 to-purple-600 flex items-center justify-center text-white shadow-lg shadow-purple-500/30 animate-gradient-slow",
+            memorySaved && "memory-sparkle-ring"
+          )}>
             <BrainCircuit size={15} />
           </div>
         )}
+        {/* Memory saved sparkle */}
+        <AnimatePresence>
+          {memorySaved && !isUser && (
+            <motion.div
+              initial={{ scale: 0, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0, opacity: 0 }}
+              transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+              className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center shadow-lg shadow-amber-500/30"
+              title="Bilgi belleğe kaydedildi"
+            >
+              <Sparkles size={9} className="text-white" />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Content Column */}
@@ -214,16 +202,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
           </InlineMetaBlock>
         ) : null}
 
-        {/* Tools */}
-        {!isUser && !isSystem && msg.toolCalls?.length ? (
-          <InlineMetaBlock
-            icon={<Wrench size={14} />}
-            title="Kullanılan Araçlar"
-            count={msg.toolCalls.length}
-            visible={showTools}
-          >
-            <ToolList toolCalls={msg.toolCalls} />
-          </InlineMetaBlock>
+        {/* Tools — compact pill indicators */}
+        {!isUser && !isSystem && msg.toolCalls?.length && showTools ? (
+          <ToolCallIndicator toolCalls={msg.toolCalls} />
         ) : null}
 
         {/* Bubble */}
@@ -255,7 +236,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
                   },
                 }}
               >
-                {cleanContent}
+                {stripOuterBackticks(cleanContent)}
               </ReactMarkdown>
             ) : (
               <span className="flex items-center gap-2 text-sm italic">
@@ -273,6 +254,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
             )}
           </div>
         </div>
+
+        {/* Memory Source Pills — RAG provenance */}
+        {!isUser && !isSystem && msg.sources?.length ? (
+          <MemorySourcePills sources={msg.sources} />
+        ) : null}
 
         {/* Ghost Actions & Timestamp */}
         <div className={cn("flex items-center gap-2 mt-1.5", isUser ? "flex-row-reverse" : "flex-row")}>
