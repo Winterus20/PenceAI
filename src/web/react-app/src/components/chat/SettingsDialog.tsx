@@ -184,8 +184,12 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
   const handleSave = async () => {
     setStatusText('');
     try {
-      await updateSettings.mutateAsync(form);
-      setStatusText('Ayarlar kaydedildi.');
+      const result = await updateSettings.mutateAsync(form);
+      if (result.requiresRestart) {
+        setStatusText('⚠️ Ayarlar kaydedildi. LLM provider/model değişikliklerinin etkili olması için uygulamayı yeniden başlatın.');
+      } else {
+        setStatusText('Ayarlar kaydedildi.');
+      }
     } catch (error) {
       console.error(error);
       setStatusText('Kaydetme sırasında hata oluştu.');
@@ -261,7 +265,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
 
       <div className="flex flex-col gap-4 border-t border-surface bg-surface px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
         <div className="max-w-3xl text-sm leading-6 text-surface-strong">
-          {statusText || 'Kaydettiğiniz değişiklikler mevcut oturum davranışını anında etkileyebilir.'}
+          {statusText || 'Kaydettiğiniz değişiklikler anında uygulanır. LLM provider/model değişiklikleri yeniden başlatma gerektirir.'}
         </div>
         <Button onClick={handleSave} disabled={settingsLoading || providersLoading || pathsLoading || updateSettings.isPending} className="min-w-[190px] rounded-full px-5 bg-purple-600 text-white hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.4)] transition-all duration-300 border-0">
         <Save className="h-4 w-4" />

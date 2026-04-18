@@ -66,29 +66,29 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
   }, [messages.length, isReceiving]);
 
   const renderMessage = (_index: number, msg: Message) => {
-    const convId = msg.role === 'assistant' ? (activeConversationId ?? '') : '';
-    const metricsForMsg = msg.role === 'assistant' ? (messageMetrics?.[convId] ?? undefined) : undefined;
+    // Metrics'i message ID bazlı anahtarlama ile al
+    const metricsForMsg = msg.role === 'assistant' ? (messageMetrics?.[msg.id] ?? undefined) : undefined;
     if (msg.role === 'assistant' && metricsForMsg) {
-      console.log('[MessageStream] Passing metrics to MessageBubble for msg', msg.id, 'convId:', convId);
+      console.log('[MessageStream] Passing metrics to MessageBubble for msg', msg.id);
     }
     return (
-    <MessageBubble
-      key={msg.id}
-      msg={msg}
-      showThinking={showThinking}
-      showTools={showTools}
-      isReceiving={isReceiving}
-      copiedId={copiedId}
-      onCopy={handleCopy}
-      onFeedback={handleFeedback}
-      onRegenerate={onRegenerate}
-      onEditMessage={onEditMessage}
-      onImageClick={onImageClick}
-      feedbacks={feedbacks}
-      conversationId={msg.role === 'assistant' ? (activeConversationId ?? undefined) : undefined}
-      metrics={metricsForMsg}
-    />
-  );
+      <MessageBubble
+        key={msg.id}
+        msg={msg}
+        showThinking={showThinking}
+        showTools={showTools}
+        isReceiving={isReceiving}
+        copiedId={copiedId}
+        onCopy={handleCopy}
+        onFeedback={handleFeedback}
+        onRegenerate={onRegenerate}
+        onEditMessage={onEditMessage}
+        onImageClick={onImageClick}
+        feedbacks={feedbacks}
+        conversationId={msg.role === 'assistant' ? (activeConversationId ?? undefined) : undefined}
+        metrics={metricsForMsg}
+      />
+    );
   };
 
   /* ─── Empty State ─── */

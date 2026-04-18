@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { MCPServerConfigSchema } from '../../agent/mcp/types.js';
 import { MCPServerRecord, MCPServerLifecycleStatus } from '../../agent/mcp/marketplace-types.js';
 import { getMarketplaceCatalog, searchCatalog, catalogToConfig } from '../../agent/mcp/marketplace-service.js';
 import { MCPClientManager } from '../../agent/mcp/client.js';
@@ -317,6 +318,21 @@ export async function installServer(config: {
   cwd?: string;
   timeout?: number;
 }): Promise<{ success: boolean; server?: MCPServerRecord; error?: string }> {
+  // Güvenlik: MCPServerConfigSchema ile command allowlist doğrulaması
+  const configValidation = MCPServerConfigSchema.safeParse({
+    name: config.name,
+    command: config.command,
+    args: config.args,
+    env: config.env,
+    cwd: config.cwd,
+    timeout: config.timeout,
+  });
+  if (!configValidation.success) {
+    const errors = configValidation.error.issues.map(i => i.message).join('; ');
+    logger.warn({ name: config.name, command: config.command, errors }, '[MCP:service] installServer: config validation failed');
+    return { success: false, error: `Geçersiz MCP server konfigürasyonu: ${errors}` };
+  }
+
   // Duplicate check
   if (installedServers.has(config.name)) {
     return { success: false, error: `Server '${config.name}' zaten kurulu` };
@@ -359,6 +375,21 @@ export async function activateServer(name: string): Promise<{ success: boolean; 
   const server = installedServers.get(name);
   if (!server) {
     return { success: false, error: `Server '${name}' bulunamadı` };
+  }
+
+  // Güvenlik: Aktive etmeden önce command allowlist doğrulaması
+  const configValidation = MCPServerConfigSchema.safeParse({
+    name: server.name,
+    command: server.command,
+    args: server.args,
+    env: server.env,
+    cwd: server.cwd,
+    timeout: server.timeout,
+  });
+  if (!configValidation.success) {
+    const errors = configValidation.error.issues.map(i => i.message).join('; ');
+    logger.warn({ name: server.name, command: server.command, errors }, '[MCP:service] activateServer: config validation failed');
+    return { success: false, error: `Geçersiz MCP server konfigürasyonu: ${errors}` };
   }
 
   // Lazy initialization - mcpManager yoksa oluştur

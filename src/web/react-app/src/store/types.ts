@@ -90,6 +90,10 @@ export interface ToastState {
 }
 
 export interface MessageMetrics {
+  /** Backend'den gelen conversation ID */
+  conversationId?: string;
+  /** Backend'den gelen message ID (benzersiz metrik anahtarı) */
+  messageId?: string;
   performance: {
     total: number;
     retrieval: number;
@@ -143,7 +147,7 @@ export interface ChatSlice {
   updateConversationTitle: (id: string, title: string) => void;
   setActiveConversationId: (id: string | null) => void;
   setStats: (stats: Partial<StatsState>) => void;
-  setMessageMetrics: (payload: { conversationId: string; metrics: MessageMetrics }) => void;
+  setMessageMetrics: (payload: { messageId: string; metrics: MessageMetrics }) => void;
   clearMessages: () => void;
   appendThinking: (text: string) => void;
   toggleConversationSelection: (id: string) => void;

@@ -257,13 +257,28 @@ describe('MetricsCollector', () => {
   });
 
   describe('database not initialized', () => {
-    it('should throw error when database is not set', () => {
+    it('should return empty array when database is not set', () => {
       metricsCollector.setDatabase(null as unknown as Database.Database);
-      
-      // getConversationMetrics hata durumunda empty array döndürür (catch bloğu)
-      expect(() => metricsCollector.getConversationMetrics('test')).not.toThrow();
+
+      // getConversationMetrics DB yokken graceful şekilde empty array döndürür
       const results = metricsCollector.getConversationMetrics('test');
       expect(results).toEqual([]);
+    });
+
+    it('should return empty aggregated metrics when database is not set', () => {
+      metricsCollector.setDatabase(null as unknown as Database.Database);
+
+      const agg = metricsCollector.getAggregatedMetrics(1);
+      expect(agg.totalQueries).toBe(0);
+      expect(agg.totalTokens).toBe(0);
+      expect(agg.totalCost).toBe(0);
+    });
+
+    it('should return empty provider stats when database is not set', () => {
+      metricsCollector.setDatabase(null as unknown as Database.Database);
+
+      const stats = metricsCollector.getProviderStats(7);
+      expect(stats).toEqual({});
     });
   });
 });

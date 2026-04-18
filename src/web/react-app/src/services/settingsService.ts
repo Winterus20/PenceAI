@@ -25,6 +25,12 @@ export interface AppConfig {
   maxTokens: string;
 }
 
+export interface UpdateSettingsResponse {
+  success: boolean;
+  requiresRestart?: boolean;
+  message?: string;
+}
+
 export interface LLMProvider {
   name: string;
   models: string[];
@@ -32,7 +38,7 @@ export interface LLMProvider {
 
 export const settingsService = {
   get: () => api.get<AppConfig>('/settings'),
-  update: (data: Partial<AppConfig>) => api.post<Partial<AppConfig>, AppConfig>('/settings', data),
+  update: (data: Partial<AppConfig>) => api.post<Partial<AppConfig>, UpdateSettingsResponse>('/settings', data),
   getSensitivePaths: () => api.get<string[]>('/settings/sensitive-paths'),
   addSensitivePath: (path: string) => api.post<{ path: string }, string[]>('/settings/sensitive-paths', { path }),
   removeSensitivePath: (path: string) => api.delete<string[]>('/settings/sensitive-paths', { body: JSON.stringify({ path }) }),

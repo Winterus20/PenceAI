@@ -959,32 +959,52 @@ export class AgentRuntime {
         }
 
         // Metrics event'i gönder (frontend UI'da göstermek için)
+        const metricsMessageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const metricsData = {
+          conversationId,
+          messageId: metricsMessageId,
+          performance: {
+            total: Date.now() - startTimeMs,
+            retrieval: perfTimings.retrieval ?? 0,
+            graphRAG: perfTimings.graphRAG ?? 0,
+            llmCalls: Object.entries(perfTimings).filter(([k]) => k.startsWith('llm_call_')).map(([k, v]) => ({ key: k, ms: v })),
+            agentic: Object.entries(perfTimings).filter(([k]) => ['retrievalDecision', 'passageCritique', 'multiHop', 'responseVerification'].includes(k)).reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {} as Record<string, number>),
+            tools: this._sessionTotalToolTime,
+            toolCalls: this._sessionToolCallCount,
+          },
+          cost: {
+            total: sessionTotalCost,
+            promptTokens: sessionTotalPromptTokens,
+            completionTokens: sessionTotalCompletionTokens,
+            totalTokens: sessionTotalPromptTokens + sessionTotalCompletionTokens,
+            breakdown: sessionPerCallDetails,
+          },
+          context: {
+            historyTokens: contextHistoryTokens,
+            userMessageTokens: contextUserMsgTokens,
+            systemPromptTokens: contextSystemPromptTokens,
+          },
+        };
+      
         onEvent?.({
-            type: 'metrics',
-            data: {
-                performance: {
-                    total: Date.now() - startTimeMs,
-                    retrieval: perfTimings.retrieval ?? 0,
-                    graphRAG: perfTimings.graphRAG ?? 0,
-                    llmCalls: Object.entries(perfTimings).filter(([k]) => k.startsWith('llm_call_')).map(([k, v]) => ({ key: k, ms: v })),
-                    agentic: Object.entries(perfTimings).filter(([k]) => ['retrievalDecision', 'passageCritique', 'multiHop', 'responseVerification'].includes(k)).reduce((acc, [k, v]) => { acc[k] = v; return acc; }, {} as Record<string, number>),
-                    tools: this._sessionTotalToolTime,
-                    toolCalls: this._sessionToolCallCount,
-                },
-                cost: {
-                    total: sessionTotalCost,
-                    promptTokens: sessionTotalPromptTokens,
-                    completionTokens: sessionTotalCompletionTokens,
-                    totalTokens: sessionTotalPromptTokens + sessionTotalCompletionTokens,
-                    breakdown: sessionPerCallDetails,
-                },
-                context: {
-                    historyTokens: contextHistoryTokens,
-                    userMessageTokens: contextUserMsgTokens,
-                    systemPromptTokens: contextSystemPromptTokens,
-                },
-            },
+          type: 'metrics',
+          data: metricsData,
         });
+      
+        // Metrics'i veritabanına kaydet (observability endpoint'leri için)
+        try {
+          const { metricsCollector } = await import('../observability/metricsCollector.js');
+          await metricsCollector.recordMetrics({
+            conversationId,
+            messageId: metricsMessageId,
+            timestamp: new Date().toISOString(),
+            performance: metricsData.performance,
+            cost: metricsData.cost,
+            context: metricsData.context,
+          });
+        } catch (metricsErr) {
+          logger.warn({ err: metricsErr }, '[Agent] Metrics DB kaydı başarısız (non-critical)');
+        }
 
         // Kullanıcının mesajından önceki asistan mesajını (bağlam) bul
         let previousAssistantMessage = '';

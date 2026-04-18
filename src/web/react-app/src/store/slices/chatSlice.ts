@@ -79,7 +79,7 @@ export const createChatSlice: StateCreator<
   })),
 
   setMessageMetrics: (payload) => set((state) => ({
-    messageMetrics: { ...state.messageMetrics, [payload.conversationId]: payload.metrics }
+    messageMetrics: { ...state.messageMetrics, [payload.messageId]: payload.metrics }
   })),
 
   clearMessages: () => set({ messages: [], currentThinking: '' }),

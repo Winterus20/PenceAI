@@ -1,5 +1,6 @@
 import express, { Router } from 'express';
 import { logger } from '../../utils/logger.js';
+import { MCPServerConfigSchema } from '../../agent/mcp/types.js';
 import {
   getMarketplace,
   getInstalledServers,
@@ -50,6 +51,22 @@ export function createMCPController(): Router {
       if (!name || !command) {
         return res.status(400).json({ success: false, error: 'name and command required' });
       }
+
+      // Güvenlik: MCPServerConfigSchema ile command allowlist doğrulaması zorunlu
+      const configValidation = MCPServerConfigSchema.safeParse({
+        name,
+        command,
+        args: args || [],
+        env,
+        cwd,
+        timeout,
+      });
+      if (!configValidation.success) {
+        const errors = configValidation.error.issues.map(i => i.message).join('; ');
+        logger.warn({ name, command, errors }, '[MCP:routes] Server config validation failed');
+        return res.status(400).json({ success: false, error: `Geçersiz MCP server konfigürasyonu: ${errors}` });
+      }
+
       const result = await installServer({
         name,
         description: description || '',

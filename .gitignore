@@ -74,7 +74,7 @@ __snapshots__/
 
 # Test output
 junit.xml
-
+AGENTS.md
 # Planning & research documents (local-only)
 FUTURE_IMPLEMENTATION_PLAN.md
 TECHNOLOGY_RESEARCH_REPORT.md

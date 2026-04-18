@@ -123,8 +123,8 @@ export const ROLLOUT_PHASE_CONFIG: Record<GraphRAGRolloutPhase, GraphRAGFeatureF
   }
 };
 
-/** Başlangıç config'i: FULL mode */
-export const CURRENT_ROLLOUT_PHASE = GraphRAGRolloutPhase.FULL;
+/** Başlangıç config'i: SHADOW mode — production'da güvenli rollout için */
+export const CURRENT_ROLLOUT_PHASE = GraphRAGRolloutPhase.SHADOW;
 
 /** Default config — CURRENT_ROLLOUT_PHASE'den türetilir */
 export const DEFAULT_GRAPH_RAG_CONFIG: GraphRAGFeatureFlag = {

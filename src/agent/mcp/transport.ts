@@ -31,7 +31,7 @@ export async function createTransport(
   onEvent?: MCPEventCallback,
   onStatusChange?: (status: 'connected' | 'disconnected' | 'error') => void,
 ): Promise<{ transport: StdioClientTransport | SSEClientTransport; type: TransportType }> {
-  // Stdio transport (varsayılan — local process)
+  // Stdio transport (local process — command allowlist'te olmalı)
   if (isStdioRuntime(config.command)) {
     return createStdioTransport(config, onEvent, onStatusChange);
   }
@@ -41,8 +41,13 @@ export async function createTransport(
     return createSSETransport(config, onEvent, onStatusChange);
   }
 
-  // Varsayılan: stdio (command allowlist'te olmalı, transport tespit edemezse stdio dene)
-  return createStdioTransport(config, onEvent, onStatusChange);
+  // Güvenlik: Tanınmayan komutlar için stdio fallback kaldırıldı.
+  // MCPServerConfigSchema allowlist doğrulaması transport'a gelmeden önce yapılmalıdır.
+  throw new Error(
+    `[MCP:transport] Tanınmayan komut: "${config.command}". ` +
+    `İzin verilen komutlar: npx, node, python, python3, curl. ` +
+    `SSE transport için HTTP/HTTPS URL kullanın.`
+  );
 }
 
 /**

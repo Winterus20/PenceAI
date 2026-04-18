@@ -78,6 +78,11 @@ class MetricsCollector {
     return this.db;
   }
 
+  /** DB hazır mı kontrol et */
+  private isDbReady(): boolean {
+    return this.db !== null;
+  }
+
   /**
    * Mesaj metrics'ini SQLite'a kaydet
    */
@@ -112,6 +117,10 @@ class MetricsCollector {
    * Belirli bir conversation'ın metrics'lerini getir
    */
   getConversationMetrics(conversationId: string): MessageMetrics[] {
+    if (!this.isDbReady()) {
+      logger.warn('[MetricsCollector] getConversationMetrics called before database initialized, returning empty');
+      return [];
+    }
     try {
       const db = this.getDb();
       const rows = db.prepare(`
@@ -130,7 +139,7 @@ class MetricsCollector {
       }));
     } catch (error: unknown) {
       logger.error({ err: error, conversationId }, '[MetricsCollector] Failed to get conversation metrics');
-      throw error;
+      return [];
     }
   }
 
@@ -138,6 +147,10 @@ class MetricsCollector {
    * Tüm metrics'leri getir (limit ile)
    */
   getAllMetrics(limit: number = 100): MessageMetrics[] {
+    if (!this.isDbReady()) {
+      logger.warn('[MetricsCollector] getAllMetrics called before database initialized, returning empty');
+      return [];
+    }
     try {
       const db = this.getDb();
       const rows = db.prepare(`
@@ -164,6 +177,10 @@ class MetricsCollector {
    * Aggrege metrics özeti - son N gün
    */
   getAggregatedMetrics(days: number = 1): AggregatedMetrics {
+    if (!this.isDbReady()) {
+      logger.warn('[MetricsCollector] getAggregatedMetrics called before database initialized, returning empty');
+      return this.emptyAggregatedMetrics();
+    }
     try {
       const db = this.getDb();
       const rows = db.prepare(`
@@ -192,6 +209,10 @@ class MetricsCollector {
    * Provider bazlı istatistikler
    */
   getProviderStats(days: number = 7): Record<string, { count: number; totalTokens: number; totalCost: number; avgLatency: number }> {
+    if (!this.isDbReady()) {
+      logger.warn('[MetricsCollector] getProviderStats called before database initialized, returning empty');
+      return {};
+    }
     try {
       const db = this.getDb();
       const rows = db.prepare(`

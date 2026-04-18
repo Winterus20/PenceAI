@@ -42,10 +42,12 @@ export const ChatWindow = () => {
   // WebSocket
   const { sendMessage, regenerateLastResponse, setThinkingEnabled, respondToConfirmation } = useAgentSocket((metrics) => {
     console.log('[Metrics] Received metrics event:', JSON.stringify(metrics, null, 2).substring(0, 500));
-    if (activeConversationId) {
-      setMessageMetrics({ conversationId: activeConversationId, metrics });
-      console.log('[Metrics] Stored metrics for conversation:', activeConversationId);
-    }
+    // Metrics'i son assistant mesajına bağla (messageId bazlı anahtarlama)
+    const state = useAgentStore.getState();
+    const lastAssistantMsg = [...state.messages].reverse().find(m => m.role === 'assistant');
+    const targetMessageId = metrics.messageId || lastAssistantMsg?.id || `fallback-${Date.now()}`;
+    setMessageMetrics({ messageId: targetMessageId, metrics });
+    console.log('[Metrics] Stored metrics for message:', targetMessageId);
   });
 
   // Custom Hooks

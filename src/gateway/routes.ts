@@ -128,52 +128,68 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     });
 
     app.post('/api/settings', async (req, res) => {
-        const body = req.body;
-        const updates: Record<string, string> = {};
-
-        const map: Record<string, string> = {
-          defaultLLMProvider: 'DEFAULT_LLM_PROVIDER',
-          defaultLLMModel: 'DEFAULT_LLM_MODEL',
-          defaultUserName: 'DEFAULT_USER_NAME',
-          openaiApiKey: 'OPENAI_API_KEY',
-          anthropicApiKey: 'ANTHROPIC_API_KEY',
-          minimaxApiKey: 'MINIMAX_API_KEY',
-          githubToken: 'GITHUB_TOKEN',
-          groqApiKey: 'GROQ_API_KEY',
-          mistralApiKey: 'MISTRAL_API_KEY',
-          nvidiaApiKey: 'NVIDIA_API_KEY',
-          ollamaBaseUrl: 'OLLAMA_BASE_URL',
-          allowShellExecution: 'ALLOW_SHELL_EXECUTION',
-          systemPrompt: 'SYSTEM_PROMPT',
-          autonomousStepLimit: 'AUTONOMOUS_STEP_LIMIT',
-          memoryDecayThreshold: 'MEMORY_DECAY_THRESHOLD',
-          semanticSearchThreshold: 'SEMANTIC_SEARCH_THRESHOLD',
-          logLevel: 'LOG_LEVEL',
-          embeddingProvider: 'EMBEDDING_PROVIDER',
-          embeddingModel: 'EMBEDDING_MODEL',
-          braveSearchApiKey: 'BRAVE_SEARCH_API_KEY',
-          // Gelişmiş Model Ayarları
-          temperature: 'TEMPERATURE',
-          maxTokens: 'MAX_TOKENS',
-        };
-
-        for (const [key, val] of Object.entries(body)) {
-            if (map[key]) {
-                if (typeof val === 'string' && (val.includes('***') || val.includes('••••'))) continue;
-                updates[map[key]] = String(val);
-            }
-        }
-
-        try {
-            await secureUpdateEnv(updates);
-            reloadConfig();
-            logger.info('[Gateway] ⚙️ Ayarlar güncellendi.');
-            res.json({ success: true });
-        } catch (err: any) {
-            logger.error({ err }, '[Gateway] .env güncellemesi başarısız oldu');
-            res.status(500).json({ error: '.env dosyası güncellenemedi.' });
-        }
-    });
+    const body = req.body;
+    const updates: Record<string, string> = {};
+  
+    const map: Record<string, string> = {
+      defaultLLMProvider: 'DEFAULT_LLM_PROVIDER',
+      defaultLLMModel: 'DEFAULT_LLM_MODEL',
+      defaultUserName: 'DEFAULT_USER_NAME',
+      openaiApiKey: 'OPENAI_API_KEY',
+      anthropicApiKey: 'ANTHROPIC_API_KEY',
+      minimaxApiKey: 'MINIMAX_API_KEY',
+      githubToken: 'GITHUB_TOKEN',
+      groqApiKey: 'GROQ_API_KEY',
+      mistralApiKey: 'MISTRAL_API_KEY',
+      nvidiaApiKey: 'NVIDIA_API_KEY',
+      ollamaBaseUrl: 'OLLAMA_BASE_URL',
+      allowShellExecution: 'ALLOW_SHELL_EXECUTION',
+      systemPrompt: 'SYSTEM_PROMPT',
+      autonomousStepLimit: 'AUTONOMOUS_STEP_LIMIT',
+      memoryDecayThreshold: 'MEMORY_DECAY_THRESHOLD',
+      semanticSearchThreshold: 'SEMANTIC_SEARCH_THRESHOLD',
+      logLevel: 'LOG_LEVEL',
+      embeddingProvider: 'EMBEDDING_PROVIDER',
+      embeddingModel: 'EMBEDDING_MODEL',
+      braveSearchApiKey: 'BRAVE_SEARCH_API_KEY',
+      // Gelişmiş Model Ayarları
+      temperature: 'TEMPERATURE',
+      maxTokens: 'MAX_TOKENS',
+    };
+  
+    // LLM provider/model değişiklikleri runtime'ı etkilemez (startup'ta oluşturulur)
+    const llmKeys = new Set(['DEFAULT_LLM_PROVIDER', 'DEFAULT_LLM_MODEL']);
+    let requiresRestart = false;
+  
+    for (const [key, val] of Object.entries(body)) {
+      if (map[key]) {
+        if (typeof val === 'string' && (val.includes('***') || val.includes('••••'))) continue;
+        updates[map[key]] = String(val);
+        if (llmKeys.has(map[key])) requiresRestart = true;
+      }
+    }
+  
+    try {
+      await secureUpdateEnv(updates);
+  
+      // process.env'i güncelle — reloadConfig() process.env üzerinden okur
+      for (const [key, value] of Object.entries(updates)) {
+        process.env[key] = value;
+      }
+  
+      reloadConfig();
+      logger.info('[Gateway] ⚙️ Ayarlar güncellendi.');
+  
+      if (requiresRestart) {
+        res.json({ success: true, requiresRestart: true, message: 'LLM provider/model değişiklikleri yeniden başlatma gerektirir.' });
+      } else {
+        res.json({ success: true, requiresRestart: false });
+      }
+    } catch (err: any) {
+      logger.error({ err }, '[Gateway] .env güncellemesi başarısız oldu');
+      res.status(500).json({ error: '.env dosyası güncellenemedi.' });
+    }
+  });
 
     // ============ Onboarding Bio İşleme API ============
 
