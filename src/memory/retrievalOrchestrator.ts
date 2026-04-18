@@ -84,7 +84,7 @@ export type {
     RetrievalBehaviorDiscoveryShadowPlan,
     MemoryRelationNeighbor,
 } from './retrieval/types.js';
-import { GraphRAGEngine, type GraphRAGResult, BehaviorDiscoveryShadow } from './graphRAG/index.js';
+import { GraphRAGEngine, type GraphRAGResult } from './graphRAG/index.js';
 import { logger } from '../utils/logger.js';
 
 function estimateMemoryTokenCount(memories: MemoryRow[]): number {
@@ -423,6 +423,8 @@ export class MemoryRetrievalOrchestrator {
                 });
                 if (result.success) {
                     graphRAGResult = result;
+                    // Shadow mode bitti: GraphRAG sonuçlarını ana sonuçlara (active) enjekte et
+                    logger.info(`[GraphRAG] Full Mode: Injecting ${result.memories.length} graph-aware memories into active set`);
                 } else {
                     logger.warn({ msg: 'GraphRAG retrieval returned unsuccessful result', error: result.error });
                 }
@@ -438,6 +440,13 @@ export class MemoryRetrievalOrchestrator {
             Promise.resolve(this.deps.getMemoriesDueForReview(reviewLimit * (recipe.preferReviewSignals ? 2 : 1))),
             Promise.resolve(this.deps.getFollowUpCandidates(followUpDays, followUpLimit)),
         ]);
+
+        // GraphRAG sonuçlarını active kümesine ekle ve mükerrerleri temizle
+        if (graphRAGResult && graphRAGResult.memories.length > 0) {
+            const existingIds = new Set(searchResult.active.map(m => m.id));
+            const uniqueGraphMemories = graphRAGResult.memories.filter(m => !existingIds.has(m.id));
+            searchResult.active = [...uniqueGraphMemories, ...searchResult.active];
+        }
 
         if (getConfig().agenticRAGEnabled && !skipHeavyRetrieval && searchResult.active.length > 0) {
             logger.info({ msg: '[Agentic RAG] Evaluating initial passages' });
@@ -644,25 +653,6 @@ export class MemoryRetrievalOrchestrator {
             review: this.scoringPipeline.buildExplanations('review', reviewRankedEntries, rankedReviewMemories, selectionContext),
             followUp: this.scoringPipeline.buildExplanations('follow_up', followUpRankedEntries, rankedFollowUpCandidates, selectionContext),
         };
-
-        if (this.deps.behaviorDiscoveryShadow && graphRAGResult) {
-            const startTime = Date.now();
-            const baselineResults = relevantMemories.map(m => ({ id: m.id, score: 0 }));
-            const experimentalResults = graphRAGResult.memories.map(m => ({ id: m.id, score: 0 }));
-
-            this.deps.behaviorDiscoveryShadow.runComparison(
-                query,
-                baselineResults,
-                experimentalResults,
-                recipe.useGraphRAG ? 'graph_rag' : 'spreading_activation',
-            ).catch(() => {});
-
-            const duration = Date.now() - startTime;
-            const metrics = this.deps.behaviorDiscoveryShadow.getMetrics();
-            if (metrics.comparisons.length > 0) {
-                metrics.comparisons[metrics.comparisons.length - 1].duration = duration;
-            }
-        }
 
         const behaviorDiscoveryTrace = this.behaviorDiscovery.buildTrace(
             behaviorDiscoveryConfig,

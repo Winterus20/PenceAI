@@ -86,7 +86,26 @@ export function useMemoryGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  
+  const [isReady, setIsReady] = useState(false);
+
+  // Gözlemci: Ekran boyutu 0'dan büyük olana kadar D3.js'i beklet
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+          setIsReady(true);
+        }
+      }
+    });
+    observer.observe(containerRef.current);
+    // İlk render'da zaten boyutu varsa hemen hazır et
+    if (containerRef.current.clientWidth > 0 && containerRef.current.clientHeight > 0) {
+      setIsReady(true);
+    }
+    return () => observer.disconnect();
+  }, []);
+
   // React Query'den graph verisini al (with enriched options)
   const { data: graphData, isLoading: loading, error: fetchError, refetch: rqRefetch } = useMemoryGraphQuery({
     limit,
@@ -200,6 +219,9 @@ export function useMemoryGraph({
     const width = container.clientWidth;
     const height = container.clientHeight;
 
+    // KESİN ÇÖZÜM: Ekran boyutu 0 iken (sekme kapalıyken) D3'ün yüklenmesini YASAKLA!
+    if (width === 0 || height === 0) return;
+
     svg.selectAll('*').remove();
 
     // Set SVG dimensions
@@ -223,14 +245,14 @@ export function useMemoryGraph({
     });
 
     // Create container group for zoom/pan
-    const g = svg.append('g');
+    const g = svg.append('g').attr('class', 'zoom-group');
     gRef.current = g;
 
-    // Create link and node groups
+    // Create link and node groups inside g
     linkGroupRef.current = g.append('g').attr('class', 'links');
     nodeGroupRef.current = g.append('g').attr('class', 'nodes');
 
-    // Zoom behavior
+    // Zoom behavior - NO transitions for instant camera positioning
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.2, 4])
@@ -241,25 +263,47 @@ export function useMemoryGraph({
     zoomRef.current = zoom;
     svg.call(zoom);
 
-    // Initial zoom to fit
-    const initialTransform = d3
-      .zoomIdentity
+    // Initial zoom - instant, no animation (critical for hidden container first render)
+    const initialTransform = d3.zoomIdentity
       .translate(width / 2, height / 2)
       .scale(0.8)
       .translate(-width / 2, -height / 2);
-    svg.transition().duration(500).call(zoom.transform, initialTransform);
+    svg.call(zoom.transform, initialTransform);
 
     isInitializedRef.current = true;
 
     // Handle window resize
+    let lastWidth = width;
+    let lastHeight = height;
+
     const handleResize = () => {
       const newWidth = container.clientWidth;
       const newHeight = container.clientHeight;
+
+      if (newWidth === 0 || newHeight === 0) return;
+
       svg.attr('width', newWidth).attr('height', newHeight);
+
+      // If opening from a hidden state (0x0), update the zoom camera to the new center
+      // Use .call(zoom.transform, ...) without transition for instant update
+      if (lastWidth === 0 || lastHeight === 0) {
+        const recalcTransform = d3.zoomIdentity
+          .translate(newWidth / 2, newHeight / 2)
+          .scale(0.8)
+          .translate(-newWidth / 2, -newHeight / 2);
+        
+        // CRITICAL: Pass null as transition to disable interpolation (no flying animation)
+        svg.call(zoom.transform, recalcTransform);
+      }
+
       if (simulationRef.current) {
+        // Move the center of gravity to the new screen center
         simulationRef.current.force('center', d3.forceCenter(newWidth / 2, newHeight / 2));
         simulationRef.current.alpha(0.3).restart();
       }
+
+      lastWidth = newWidth;
+      lastHeight = newHeight;
     };
 
     const resizeObserver = new ResizeObserver(() => {
@@ -270,7 +314,7 @@ export function useMemoryGraph({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [loading]);
+  }, [loading, isReady]);
 
   // D3 incremental rendering with join pattern
   useEffect(() => {
@@ -320,6 +364,16 @@ export function useMemoryGraph({
 
     const nodes = filteredData.nodes;
     const links = filteredData.links;
+
+    // İlk açılışta düğümlerin (0,0) noktasından sol üst köşeden uçarak gelmesini engellemek için
+    // onları doğrudan ekranın tam ortasında (merkezde) başlatıyoruz.
+    nodes.forEach(node => {
+      if (node.x === undefined || node.y === undefined) {
+        // Eğer daha önce hesaplanmış bir konumu yoksa, tam ortadan doğsun
+        node.x = width > 0 ? width / 2 : 400;
+        node.y = height > 0 ? height / 2 : 300;
+      }
+    });
 
     // Create or update force simulation
     const simulation = d3
@@ -388,11 +442,9 @@ export function useMemoryGraph({
         return null;
       });
 
-    // Update existing links
+    // Update existing links - NO transition on initial render to prevent flying from corner
     link
       .merge(linkEnter)
-      .transition()
-      .duration(300)
       .attr('stroke', (d) => EDGE_COLORS[d.type] || '#475569')
       .attr('stroke-opacity', (d) => (d.type === 'has_entity' ? 0.2 : Math.max(0.3, d.confidence * 0.8)))
       .attr('stroke-width', (d) => getEdgeWidth(d));
@@ -487,20 +539,16 @@ export function useMemoryGraph({
     // Merge enter + update
     const nodeMerge = nodeEnter.merge(node);
 
-    // Update existing node colors (for category changes)
+    // Update existing node colors (for category changes) - instant, no animation
     nodeMerge.each(function (d) {
       const g = d3.select(this);
       const shape = g.select<SVGElement>('.node-shape');
       if (d.type === 'memory') {
         shape
-          .transition()
-          .duration(300)
           .attr('fill', CATEGORY_COLORS[d.category || ''] || '#6366f1')
           .attr('stroke', CATEGORY_COLORS[d.category || ''] || '#6366f1');
       } else if (d.type === 'entity') {
         shape
-          .transition()
-          .duration(300)
           .attr('fill', ENTITY_TYPE_COLORS[d.entityType || ''] || '#64748b');
       }
     });
@@ -569,8 +617,7 @@ export function useMemoryGraph({
     if (svgRef.current && zoomRef.current && containerRef.current) {
       const width = containerRef.current.clientWidth;
       const height = containerRef.current.clientHeight;
-      const initialTransform = d3
-        .zoomIdentity
+      const initialTransform = d3.zoomIdentity
         .translate(width / 2, height / 2)
         .scale(0.8)
         .translate(-width / 2, -height / 2);
@@ -579,11 +626,19 @@ export function useMemoryGraph({
   }, []);
 
   const handleFitToScreen = useCallback(() => {
-    if (svgRef.current && zoomRef.current) {
+    if (svgRef.current && zoomRef.current && containerRef.current) {
+      const width = containerRef.current.clientWidth;
+      const height = containerRef.current.clientHeight;
       d3.select(svgRef.current)
         .transition()
         .duration(500)
-        .call(zoomRef.current.transform, d3.zoomIdentity.translate(0, 0).scale(1));
+        .call(
+          zoomRef.current.transform,
+          d3.zoomIdentity
+            .translate(width / 2, height / 2)
+            .scale(1)
+            .translate(-width / 2, -height / 2)
+        );
     }
   }, []);
 
