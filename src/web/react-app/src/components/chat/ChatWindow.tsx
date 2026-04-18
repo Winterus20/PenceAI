@@ -43,6 +43,11 @@ export const ChatWindow = () => {
     messageMetrics,
     setCanvasArtifact,
     toggleCommandPalette,
+    editingMessage,
+    setEditingMessage,
+    clearEditingMessage,
+    updateMessageContent,
+    removeMessagesAfter,
   } = useAgentStore();
 
   // WebSocket
@@ -190,34 +195,33 @@ export const ChatWindow = () => {
     const contentToSend = resolvedOverride ?? input;
     const trimmedContent = contentToSend.trim();
 
-    console.debug('[ChatWindow] handleSend:start', {
-      inputLength: contentToSend.length,
-      trimmedLength: trimmedContent.length,
-      pendingAttachments: pendingAttachments.length,
-      isReceiving,
-      activeConversationId,
-      usedOverride: resolvedOverride !== undefined,
-    });
-
     if ((!trimmedContent && pendingAttachments.length === 0) || isReceiving) {
-      console.debug('[ChatWindow] handleSend:blocked', {
-        reason: !trimmedContent && pendingAttachments.length === 0 ? 'empty-payload' : 'receiving-in-progress',
-        inputSnapshot: contentToSend,
-        pendingAttachments: pendingAttachments.length,
-        isReceiving,
-        usedOverride: resolvedOverride !== undefined,
-      });
       return;
     }
 
-    console.debug('[ChatWindow] handleSend:dispatch', {
-      inputSnapshot: contentToSend,
-      pendingAttachments: pendingAttachments.length,
-      activeConversationId,
-      usedOverride: resolvedOverride !== undefined,
-    });
+    // if we are in editing mode, handle history rewrite
+    if (editingMessage.messageId) {
+      const { messageId } = editingMessage;
+      
+      // 1. Update the message content in store
+      updateMessageContent(messageId, contentToSend);
+      
+      // 2. Remove all subsequent messages (since history is changed)
+      removeMessagesAfter(messageId);
+      
+      // 3. Clear editing state
+      clearEditingMessage();
+      
+      // 4. Trigger regeneration from that message
+      // Note: we don't call sendMessage because that would add a *new* message. 
+      // We want the backend to see the updated history and respond to identifying the context.
+      // regenerateLastResponse uses the content of the last user message in store.
+      regenerateLastResponse(contentToSend, activeConversationId ?? undefined);
+    } else {
+      // Normal send
+      sendMessage(contentToSend, pendingAttachments, activeConversationId ?? undefined);
+    }
 
-    sendMessage(contentToSend, pendingAttachments, activeConversationId ?? undefined);
     setInput('');
     clearAttachments();
   };
@@ -247,8 +251,9 @@ export const ChatWindow = () => {
     regenerateLastResponse(lastUserMessage.content, activeConversationId ?? undefined);
   };
 
-  const handleEditMessage = (content: string) => {
+  const handleEditMessage = (messageId: string, content: string) => {
     setInput(content);
+    setEditingMessage({ messageId, content });
   };
 
   return (

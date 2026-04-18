@@ -153,10 +153,16 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
             this.worker = null;
         }
 
-        const workerUrl = new URL('./embedding-worker.ts', import.meta.url);
-        this.worker = new Worker(workerUrl, {
-            execArgv: ['--import', 'tsx'],
-        });
+        const isTsNode = import.meta.url.endsWith('.ts');
+        const workerExt = isTsNode ? '.ts' : '.js';
+        const workerUrl = new URL(`./embedding-worker${workerExt}`, import.meta.url);
+        
+        const workerOptions: any = {};
+        if (isTsNode) {
+            workerOptions.execArgv = ['--import', 'tsx'];
+        }
+
+        this.worker = new Worker(workerUrl, workerOptions);
 
         // Worker'dan gelen yanıtları karşıla
         this.worker.on('message', (msg: EmbeddingResponse) => {

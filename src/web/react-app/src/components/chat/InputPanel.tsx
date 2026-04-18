@@ -28,6 +28,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
   onFileSelection,
   onSent,
 }) => {
+  const { editingMessage, clearEditingMessage } = useAgentStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -84,10 +85,38 @@ export const InputPanel: React.FC<InputPanelProps> = ({
     onRemoveAttachment(index);
   };
 
+  const handleCancelEdit = () => {
+    clearEditingMessage();
+    setInput('');
+    resetTextareaHeight();
+  };
+
   return (
     <div className="w-full flex justify-center pb-6 pt-2 z-40 relative">
       <div className="max-w-3xl w-full flex flex-col relative bg-[#1c1c1c]/90 backdrop-blur-md rounded-[28px] border border-border/40 focus-within:border-purple-500/30 focus-within:ring-2 focus-within:ring-purple-500/10 focus-within:bg-[#1f1f1f]/95 transition-all duration-300 shadow-xl">
         
+        {/* Editing indicator */}
+        <AnimatePresence>
+          {editingMessage.messageId && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="px-4 py-2 border-b border-white/5 flex items-center justify-between text-xs"
+            >
+              <div className="flex items-center gap-2 text-purple-400 font-medium">
+                <Send size={12} className="rotate-[-45deg]" />
+                Mesaj düzenleniyor...
+              </div>
+              <button 
+                onClick={handleCancelEdit}
+                className="text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-white/5"
+              >
+                Vazgeç
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
         {/* Attachments preview area */}
         <AnimatePresence>
           {pendingAttachments.length > 0 && (

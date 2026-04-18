@@ -123,8 +123,6 @@ Docker lifecycle commands:
 
 ## Architecture Summary
 
-*(For a deep-dive, see `architecture_overview.md` in the knowledge base).*
-
 ### 1. Agent Runtime
 [`src/agent/runtime.ts`](src/agent/runtime.ts) manages reasoning, tool calls, observations, and writes results back to conversation history.
 

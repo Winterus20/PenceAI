@@ -11,7 +11,7 @@ export interface MessagePanelProps {
   feedbacks: Record<string, FeedbackState>;
   onRegenerate: () => void;
   onQuickAction: (content: string) => void;
-  onEditMessage: (content: string) => void;
+  onEditMessage: (messageId: string, content: string) => void;
   onSendFeedback: (messageId: string, type: 'positive' | 'negative') => void;
   messageMetrics: Record<string, MessageMetrics | null>;
 }
