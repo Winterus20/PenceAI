@@ -1,5 +1,5 @@
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 function Write-Step($msg) { Write-Host "  -> " -ForegroundColor Cyan -NoNewline; Write-Host $msg }
 function Write-Ok($msg)   { Write-Host "  OK " -ForegroundColor Green -NoNewline; Write-Host $msg }
@@ -185,7 +185,7 @@ Set-Location $ProjectRoot
 
 Write-Step "Root bagimliliklari kuruluyor (bu birkac dakika surebilir)..."
 $npmRootLog = Join-Path $env:TEMP "penceai_npm_root.log"
-$npmOutput = & npm install 2>&1
+$npmOutput = cmd /c "npm install 2>&1"
 $npmRootExit = $LASTEXITCODE
 $npmOutput | Out-File -FilePath $npmRootLog -Encoding UTF8
 if ($npmRootExit -ne 0) {
@@ -203,7 +203,7 @@ Write-Ok "Root bagimliliklari"
 Write-Step "Frontend bagimliliklari kuruluyor..."
 $npmFrontLog = Join-Path $env:TEMP "penceai_npm_front.log"
 Push-Location "src\web\react-app"
-$npmOutput = & npm install 2>&1
+$npmOutput = cmd /c "npm install 2>&1"
 $npmFrontExit = $LASTEXITCODE
 $npmOutput | Out-File -FilePath $npmFrontLog -Encoding UTF8
 Pop-Location
@@ -308,7 +308,7 @@ Write-Host "[5/8] Proje derleniyor..." -ForegroundColor White
 
 Write-Step "TypeScript + Frontend build (bu birkac dakika surebilir)..."
 $buildLog = Join-Path $env:TEMP "penceai_build.log"
-$buildOutput = & npm run build 2>&1
+$buildOutput = cmd /c "npm run build 2>&1"
 $buildExit = $LASTEXITCODE
 $buildOutput | Out-File -FilePath $buildLog -Encoding UTF8
 if ($buildExit -ne 0) {
