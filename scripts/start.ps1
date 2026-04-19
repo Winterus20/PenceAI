@@ -4,25 +4,20 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
 
-$Cyan = "`e[36m"
-$Red = "`e[31m"
-$Yellow = "`e[33m"
-$Reset = "`e[0m"
-
 function Stop-WithPause($msg) {
-    Write-Host "${Red}Hata:${Reset} $msg"
+    Write-Host "Hata: $msg" -ForegroundColor Red
     Write-Host ""
-    Write-Host "${Yellow}Pencere kapanmasin diye bekleniyor...${Reset}"
+    Write-Host "Pencere kapanmasin diye bekleniyor..." -ForegroundColor Yellow
     Read-Host "Cikmak icin Enter'a basin"
     exit 1
 }
 
 if (-not (Test-Path (Join-Path $ProjectRoot ".env"))) {
-    Stop-WithPause ".env dosyasi bulunamadi. Once kuruluma ihtiyaciniz var: scripts\setup.ps1"
+    Stop-WithPause ".env dosyasi bulunamadi. Once kuruluma ihtiyaciniz var: scripts\setup.bat"
 }
 
 if (-not (Test-Path (Join-Path $ProjectRoot "dist\gateway\index.js"))) {
-    Stop-WithPause "Build bulunamadi (dist\gateway\index.js). Once: npm run build veya scripts\setup.ps1"
+    Stop-WithPause "Build bulunamadi (dist\gateway\index.js). Once: npm run build veya scripts\setup.bat"
 }
 
 Set-Location $ProjectRoot
