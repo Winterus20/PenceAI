@@ -13,6 +13,21 @@ ok()    { echo -e "${GREEN}  OK${RESET} $1"; }
 warn()  { echo -e "${YELLOW}  !!${RESET} $1"; }
 err()   { echo -e "${RED}  XX${RESET} $1"; }
 
+set_env_value() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    local tmp="${file}.tmp.$$"
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ "$line" == "${key}="* ]]; then
+            echo "${key}=${value}"
+        else
+            echo "$line"
+        fi
+    done < "$file" > "$tmp"
+    mv "$tmp" "$file"
+}
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -29,7 +44,7 @@ if ! command -v node &>/dev/null; then
     err "Node.js bulunamadi!"
     echo ""
     echo "  Lutfen Node.js 22 veya uzerini kurun:"
-    echo "  ${CYAN}https://nodejs.org/${RESET}"
+    echo -e "  ${CYAN}https://nodejs.org/${RESET}"
     echo ""
     echo "  nvm kullaniyorsaniz:"
     echo "  nvm install 22 && nvm use 22"
@@ -43,7 +58,7 @@ if [ "$NODE_MAJOR" -lt 22 ]; then
     err "Node.js $NODE_VERSION bulundu — 22.0.0 veya uzeri gerekiyor."
     echo ""
     echo "  Guncellemek icin:"
-    echo "  ${CYAN}https://nodejs.org/${RESET}"
+    echo -e "  ${CYAN}https://nodejs.org/${RESET}"
     exit 1
 fi
 
@@ -55,8 +70,8 @@ echo -e "${BOLD}[2/6] Bağımlılıklar kuruluyor...${RESET}"
 
 cd "$PROJECT_ROOT"
 
-step "Root bağımlılıkları kuruluyor (bu birkas dakika surebilir)..."
-if ! npm install --silent 2>/dev/null; then
+step "Root bağımlılıkları kuruluyor (bu birkac dakika surebilir)..."
+if ! npm install 2>&1 | tail -5; then
     err "npm install basarisiz oldu. Yukaridaki hatalari kontrol edin."
     exit 1
 fi
@@ -64,7 +79,7 @@ ok "Root bağımlılıkları"
 
 step "Frontend bağımlılıkları kuruluyor..."
 cd "$PROJECT_ROOT/src/web/react-app"
-if ! npm install --silent 2>/dev/null; then
+if ! npm install 2>&1 | tail -5; then
     err "Frontend npm install basarisiz oldu."
     exit 1
 fi
@@ -127,31 +142,21 @@ if [ "$sel_default" = "ollama" ]; then
     read -p "  Ollama sunucu adresi [http://localhost:11434]: " ollama_url
     ollama_url="${ollama_url:-http://localhost:11434}"
 
-    if [[ "$(uname)" == "Darwin" ]]; then
-        SED_INPLACE="sed -i ''"
-    else
-        SED_INPLACE="sed -i"
-    fi
-
-    $SED_INPLACE "s|^OLLAMA_BASE_URL=.*|OLLAMA_BASE_URL=${ollama_url}|" "$ENV_FILE"
-    $SED_INPLACE "s|^DEFAULT_LLM_PROVIDER=.*|DEFAULT_LLM_PROVIDER=ollama|" "$ENV_FILE"
+    set_env_value "$ENV_FILE" "OLLAMA_BASE_URL" "$ollama_url"
+    set_env_value "$ENV_FILE" "DEFAULT_LLM_PROVIDER" "ollama"
 
     ok "Ollama yapilandirildi: $ollama_url"
 else
-    read -p "  ${sel_key} degerini girin: " api_key
+    echo "  ${sel_key} degerini girin: (girdiniz gizli tutulacaktir)"
+    read -s -p "  " api_key
+    echo ""
 
     if [ -z "$api_key" ]; then
         warn "API anahtari bos birakildi. Kurulumdan sonra .env dosyasini el ile duzenleyin."
         echo -e "  ${CYAN}\$EDITOR .env${RESET}"
     else
-        if [[ "$(uname)" == "Darwin" ]]; then
-            SED_INPLACE="sed -i ''"
-        else
-            SED_INPLACE="sed -i"
-        fi
-
-        $SED_INPLACE "s|^${sel_key}=.*|${sel_key}=${api_key}|" "$ENV_FILE"
-        $SED_INPLACE "s|^DEFAULT_LLM_PROVIDER=.*|DEFAULT_LLM_PROVIDER=${sel_default}|" "$ENV_FILE"
+        set_env_value "$ENV_FILE" "$sel_key" "$api_key"
+        set_env_value "$ENV_FILE" "DEFAULT_LLM_PROVIDER" "$sel_default"
 
         MASKED="${api_key:0:8}..."
         ok "API anahtari kaydedildi (${sel_key}=${MASKED})"
@@ -162,12 +167,12 @@ fi
 echo ""
 echo -e "${BOLD}[5/6] Proje derleniyor...${RESET}"
 
-step "TypeScript + Frontend build..."
+step "TypeScript + Frontend build (bu birkac dakika surebilir)..."
 if ! npm run build; then
     err "Build basarisiz oldu. Yukaridaki hatalari kontrol edin."
     echo ""
     echo "  Gelistirme modunda baslatmayi deneyebilirsiniz:"
-    echo "  ${CYAN}npm run dev${RESET}"
+    echo -e "  ${CYAN}npm run dev${RESET}"
     exit 1
 fi
 ok "Build tamamlandi"
@@ -181,14 +186,14 @@ echo ""
 echo -e "${GREEN}${BOLD}  PenceAI hazir!${RESET}"
 echo ""
 echo "  Baslatmak icin:"
-echo "    ${CYAN}npm start${RESET}              (Production modu)"
-echo "    ${CYAN}npm run dev${RESET}             (Gelistirme modu, hot-reload)"
-echo "    ${CYAN}./scripts/start.sh${RESET}       (Alternatif baslatma)"
+echo -e "    ${CYAN}npm start${RESET}              (Production modu)"
+echo -e "    ${CYAN}npm run dev${RESET}             (Gelistirme modu, hot-reload)"
+echo -e "    ${CYAN}./scripts/start.sh${RESET}       (Alternatif baslatma)"
 echo ""
-echo "  Dashboard: ${CYAN}http://localhost:3001${RESET}"
+echo -e "  Dashboard: ${CYAN}http://localhost:3001${RESET}"
 echo ""
 echo "  Yapilandirmayi degistirmek icin:"
-echo "    ${CYAN}\$EDITOR .env${RESET}"
+echo -e "    ${CYAN}\$EDITOR .env${RESET}"
 echo ""
 echo "========================================"
 echo ""

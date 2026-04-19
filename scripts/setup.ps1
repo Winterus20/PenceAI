@@ -18,6 +18,30 @@ function Test-Command($cmd) {
     catch { return $false }
 }
 
+function Set-EnvValue {
+    param(
+        [string]$FilePath,
+        [string]$Key,
+        [string]$Value
+    )
+    $lines = [System.IO.File]::ReadAllLines($FilePath)
+    $newLines = [System.Collections.ArrayList]::new()
+    $prefix = "${Key}="
+    $found = $false
+    foreach ($line in $lines) {
+        if ($line.StartsWith($prefix)) {
+            $newLines.Add("${Key}=${Value}") | Out-Null
+            $found = $true
+        } else {
+            $newLines.Add($line) | Out-Null
+        }
+    }
+    if (-not $found) {
+        $newLines.Add("${Key}=${Value}") | Out-Null
+    }
+    [System.IO.File]::WriteAllLines($FilePath, $newLines)
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
 
@@ -27,7 +51,7 @@ Write-Host "${Bold}    PenceAI Kurulum Sihirbazi${Reset}"
 Write-Host "${Bold}========================================${Reset}"
 Write-Host ""
 
-# ── Node.js ──────────────────────────────────────────────────────
+# -- Node.js -----------------------------------------------------------
 Write-Host "${Bold}[1/6] Node.js kontrol ediliyor...${Reset}"
 
 if (-not (Test-Command "node")) {
@@ -45,7 +69,7 @@ $nodeVersion = (node -v) -replace '^v', ''
 $nodeMajor = [int]($nodeVersion.Split('.')[0])
 
 if ($nodeMajor -lt 22) {
-    Write-Err "Node.js $nodeVersion bulundu — 22.0.0 veya uzeri gerekiyor."
+    Write-Err "Node.js $nodeVersion bulundu - 22.0.0 veya uzeri gerekiyor."
     Write-Host ""
     Write-Host "  Guncellemek icin:"
     Write-Host "  ${Cyan}https://nodejs.org/${Reset}"
@@ -54,32 +78,63 @@ if ($nodeMajor -lt 22) {
 
 Write-Ok "Node.js v$nodeVersion bulundu"
 
-# ── npm ──────────────────────────────────────────────────────────
+# -- npm ---------------------------------------------------------------
 Write-Host ""
-Write-Host "${Bold}[2/6] Bağımlılıklar kuruluyor...${Reset}"
+Write-Host "${Bold}[2/6] Bagimliliklar kuruluyor...${Reset}"
 
 Set-Location $ProjectRoot
 
-Write-Step "Root bağımlılıkları kuruluyor (bu birkas dakika surebilir)..."
-npm install 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "npm install basarisiz oldu. Yukarıdaki hatalari kontrol edin."
+Write-Step "Root bagimliliklari kuruluyor (bu birkac dakika surebilir)..."
+$npmRootLog = [System.IO.Path]::GetTempFileName()
+try {
+    npm install 2>&1 | Tee-Object -FilePath $npmRootLog | ForEach-Object {
+        if ($_ -match "^(npm warn|added|removed|changed|up to date)" -or $_ -match "^\d+ package") {
+            Write-Host "  $_"
+        }
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "npm install basarisiz oldu. Son 20 satir:"
+        Get-Content $npmRootLog | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
+        Remove-Item $npmRootLog -Force -ErrorAction SilentlyContinue
+        exit 1
+    }
+} catch {
+    Write-Err "npm install basarisiz oldu. Son 20 satir:"
+    Get-Content $npmRootLog | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
+    Remove-Item $npmRootLog -Force -ErrorAction SilentlyContinue
     exit 1
 }
-Write-Ok "Root bağımlılıkları"
+Remove-Item $npmRootLog -Force -ErrorAction SilentlyContinue
+Write-Ok "Root bagimliliklari"
 
-Write-Step "Frontend bağımlılıkları kuruluyor..."
+Write-Step "Frontend bagimliliklari kuruluyor..."
 Push-Location "src\web\react-app"
-npm install 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "Frontend npm install basarisiz oldu."
+$npmFrontLog = [System.IO.Path]::GetTempFileName()
+try {
+    npm install 2>&1 | Tee-Object -FilePath $npmFrontLog | ForEach-Object {
+        if ($_ -match "^(npm warn|added|removed|changed|up to date)" -or $_ -match "^\d+ package") {
+            Write-Host "  $_"
+        }
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Frontend npm install basarisiz oldu. Son 20 satir:"
+        Get-Content $npmFrontLog | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
+        Remove-Item $npmFrontLog -Force -ErrorAction SilentlyContinue
+        Pop-Location
+        exit 1
+    }
+} catch {
+    Write-Err "Frontend npm install basarisiz oldu. Son 20 satir:"
+    Get-Content $npmFrontLog | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
+    Remove-Item $npmFrontLog -Force -ErrorAction SilentlyContinue
     Pop-Location
     exit 1
 }
+Remove-Item $npmFrontLog -Force -ErrorAction SilentlyContinue
 Pop-Location
-Write-Ok "Frontend bağımlılıkları"
+Write-Ok "Frontend bagimliliklari"
 
-# ── .env ─────────────────────────────────────────────────────────
+# -- .env --------------------------------------------------------------
 Write-Host ""
 Write-Host "${Bold}[3/6] .env dosyasi yapilandiriliyor...${Reset}"
 
@@ -93,7 +148,7 @@ if (-not (Test-Path $envFile)) {
     Write-Warn ".env dosyasi zaten mevcut, mevcut dosya korunuyor"
 }
 
-# ── API Key ──────────────────────────────────────────────────────
+# -- API Key -----------------------------------------------------------
 Write-Host ""
 Write-Host "${Bold}[4/6] LLM API anahtari yapilandiriliyor${Reset}"
 Write-Host ""
@@ -135,46 +190,60 @@ if ($selected.Default -eq "ollama") {
     $ollamaUrl = Read-Host "  Ollama sunucu adresi [http://localhost:11434]"
     if ([string]::IsNullOrWhiteSpace($ollamaUrl)) { $ollamaUrl = "http://localhost:11434" }
 
-    $envContent = Get-Content $envFile -Raw
-    $envContent = $envContent -replace "OLLAMA_BASE_URL=.*", "OLLAMA_BASE_URL=$ollamaUrl"
-    $envContent = $envContent -replace "DEFAULT_LLM_PROVIDER=.*", "DEFAULT_LLM_PROVIDER=ollama"
-    Set-Content -Path $envFile -Value $envContent -NoNewline
+    Set-EnvValue -FilePath $envFile -Key "OLLAMA_BASE_URL" -Value $ollamaUrl
+    Set-EnvValue -FilePath $envFile -Key "DEFAULT_LLM_PROVIDER" -Value "ollama"
 
     Write-Ok "Ollama yapilandirildi: $ollamaUrl"
 } else {
-    $apiKey = Read-Host "  $($selected.Key) degerini girin"
+    Write-Host "  $($selected.Key) degerini girin: (girdiniz gizli tutulacaktir)" -ForegroundColor DarkGray
+    $secureKey = Read-Host "  " -AsSecureString
+    $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
+    $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
 
     if ([string]::IsNullOrWhiteSpace($apiKey)) {
         Write-Warn "API anahtari bos birakildi. Kurulumdan sonra .env dosyasini el ile duzenleyin."
-        Write-Host "  ${Cyan}notepad $envFile${Reset}" -NoNewline
-        Write-Host ""
+        Write-Host "  ${Cyan}notepad $envFile${Reset}"
     } else {
-        $envContent = Get-Content $envFile -Raw
-        $pattern = "$($selected.Key)=.*"
-        $replacement = "$($selected.Key)=$apiKey"
-        $envContent = $envContent -replace $pattern, $replacement
-        $envContent = $envContent -replace "DEFAULT_LLM_PROVIDER=.*", "DEFAULT_LLM_PROVIDER=$($selected.Default)"
-        Set-Content -Path $envFile -Value $envContent -NoNewline
-        Write-Ok "API anahtari kaydedildi ($($selected.Key)=$($apiKey.Substring(0, [Math]::Min(8, $apiKey.Length)))...)"
+        Set-EnvValue -FilePath $envFile -Key $selected.Key -Value $apiKey
+        Set-EnvValue -FilePath $envFile -Key "DEFAULT_LLM_PROVIDER" -Value $selected.Default
+
+        $masked = $apiKey.Substring(0, [Math]::Min(8, $apiKey.Length)) + "..."
+        Write-Ok "API anahtari kaydedildi ($($selected.Key)=$masked)"
     }
 }
 
-# ── Build ────────────────────────────────────────────────────────
+# -- Build -------------------------------------------------------------
 Write-Host ""
 Write-Host "${Bold}[5/6] Proje derleniyor...${Reset}"
 
-Write-Step "TypeScript + Frontend build..."
-npm run build 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "Build basarisiz oldu. Yukarıdaki hatalari kontrol edin."
-    Write-Host ""
-    Write-Host "  Gelistirme modunda baslatmayi deneyebilirsiniz:"
-    Write-Host "  ${Cyan}npm run dev${Reset}"
+Write-Step "TypeScript + Frontend build (bu birkac dakika surebilir)..."
+$buildLog = [System.IO.Path]::GetTempFileName()
+try {
+    npm run build 2>&1 | Tee-Object -FilePath $buildLog | ForEach-Object {
+        if ($_ -match "(error|Error|failed|Building|built|Compil)" -or $_ -match "^\s*(src/|dist/)") {
+            Write-Host "  $_"
+        }
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Build basarisiz oldu. Son 20 satir:"
+        Get-Content $buildLog | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
+        Remove-Item $buildLog -Force -ErrorAction SilentlyContinue
+        Write-Host ""
+        Write-Host "  Gelistirme modunda baslatmayi deneyebilirsiniz:"
+        Write-Host "  ${Cyan}npm run dev${Reset}"
+        exit 1
+    }
+} catch {
+    Write-Err "Build basarisiz oldu. Son 20 satir:"
+    Get-Content $buildLog | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
+    Remove-Item $buildLog -Force -ErrorAction SilentlyContinue
     exit 1
 }
+Remove-Item $buildLog -Force -ErrorAction SilentlyContinue
 Write-Ok "Build tamamlandi"
 
-# ── Summary ──────────────────────────────────────────────────────
+# -- Summary -----------------------------------------------------------
 Write-Host ""
 Write-Host "${Bold}[6/6] Kurulum tamamlandi!${Reset}"
 Write-Host ""
