@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { BrainCircuit, Wrench, Menu, X, PanelLeftOpen, Command } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { useAgentStore } from '../../store/agentStore';
@@ -7,11 +7,6 @@ import { useConversations } from '../../hooks/useConversations';
 import { useMessageBuilder } from '../../hooks/useMessageBuilder';
 import { useFileUpload } from '../../hooks/useFileUpload';
 import { useConversationFilters } from '../../hooks/useConversationFilters';
-import { SettingsDialog } from './SettingsDialog';
-import { MemoryDialog } from './MemoryDialog';
-import { ConfirmDialog } from './ConfirmDialog';
-import { OnboardingDialog } from './OnboardingDialog';
-import { CommandPalette } from './CommandPalette';
 import { Toast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/button';
 import { CanvasPanel } from '@/components/ui/CanvasPanel';
@@ -20,6 +15,12 @@ import { MessagePanel } from './MessagePanel';
 import { InputPanel } from './InputPanel';
 import hotToast from 'react-hot-toast';
 import { AnimatePresence, motion } from 'framer-motion';
+
+const SettingsDialog = lazy(() => import('./SettingsDialog').then(m => ({ default: m.SettingsDialog })));
+const MemoryDialog = lazy(() => import('./MemoryDialog').then(m => ({ default: m.MemoryDialog })));
+const ConfirmDialog = lazy(() => import('./ConfirmDialog').then(m => ({ default: m.ConfirmDialog })));
+const OnboardingDialog = lazy(() => import('./OnboardingDialog').then(m => ({ default: m.OnboardingDialog })));
+const CommandPalette = lazy(() => import('./CommandPalette').then(m => ({ default: m.CommandPalette })));
 
 export const ChatWindow = () => {
   // Agent Store
@@ -253,23 +254,25 @@ export const ChatWindow = () => {
 
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden selection:bg-primary/20">
-      <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
-      <MemoryDialog open={isMemoryOpen} onOpenChange={setIsMemoryOpen} />
-      <OnboardingDialog open={onboardingOpen} onCompleted={() => setOnboardingOpen(false)} />
-      <CommandPalette
-        isOpen={isCommandPaletteOpen}
-        onClose={() => toggleCommandPalette()}
-        onAction={(content) => {
-          setInput(content);
-        }}
-      />
+      <Suspense fallback={null}><SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} /></Suspense>
+      <Suspense fallback={null}><MemoryDialog open={isMemoryOpen} onOpenChange={setIsMemoryOpen} /></Suspense>
+      <Suspense fallback={null}><OnboardingDialog open={onboardingOpen} onCompleted={() => setOnboardingOpen(false)} /></Suspense>
+      <Suspense fallback={null}>
+        <CommandPalette
+          isOpen={isCommandPaletteOpen}
+          onClose={() => toggleCommandPalette()}
+          onAction={(content) => {
+            setInput(content);
+          }}
+        />
+      </Suspense>
 
-      <ConfirmDialog
+      <Suspense fallback={null}><ConfirmDialog
         open={!!confirmRequest}
         confirmRequest={confirmRequest}
         onApprove={() => confirmRequest && respondToConfirmation(confirmRequest.id, true)}
         onDeny={() => confirmRequest && respondToConfirmation(confirmRequest.id, false)}
-      />
+      /></Suspense>
 
       {/* Desktop Sidebar */}
       <AnimatePresence initial={false}>

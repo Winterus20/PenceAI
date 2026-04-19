@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -14,7 +14,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { CodeBlock } from '../chat/CodeBlock';
+
+const CodeBlock = lazy(() => import('../chat/CodeBlock').then(m => ({ default: m.CodeBlock })));
 
 /* ─── Types ─── */
 
@@ -205,7 +206,7 @@ export const CanvasPanel: React.FC<CanvasPanelProps> = ({ artifact, onClose, cla
                       if (inline) {
                         return <code className="bg-card/70 px-1.5 py-0.5 text-sm rounded">{children}</code>;
                       }
-                      return <CodeBlock className={className}>{children}</CodeBlock>;
+                      return <Suspense fallback={<code className="bg-card/70 px-1.5 py-0.5 text-sm rounded">{children}</code>}><CodeBlock className={className}>{children}</CodeBlock></Suspense>;
                     },
                   }}
                 >

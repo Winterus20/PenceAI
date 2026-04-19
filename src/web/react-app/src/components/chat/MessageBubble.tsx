@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, lazy, Suspense } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -7,10 +7,11 @@ import type { AttachmentItem, Message, MessageMetrics } from '@/store/agentStore
 import { cn } from '@/lib/utils';
 import { stripThinkTags, formatTime, stripOuterBackticks } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { CodeBlock } from './CodeBlock';
 import { MetricsPanel } from './MetricsPanel';
 import { ToolCallIndicator } from './ToolCallIndicator';
 import { MemorySourcePills } from './MemorySourcePills';
+
+const CodeBlock = lazy(() => import('./CodeBlock').then(m => ({ default: m.CodeBlock })));
 
 /* ─── Sub-components ─── */
 
@@ -232,7 +233,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
                       return <code className="bg-card/70 px-1.5 py-0.5 text-sm rounded">{children}</code>;
                     }
 
-                    return <CodeBlock className={className}>{children}</CodeBlock>;
+                    return <Suspense fallback={<code className="bg-card/70 px-1.5 py-0.5 text-sm rounded">{children}</code>}><CodeBlock className={className}>{children}</CodeBlock></Suspense>;
                   },
                 }}
               >

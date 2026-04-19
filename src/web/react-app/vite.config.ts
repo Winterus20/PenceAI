@@ -3,7 +3,6 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -14,6 +13,24 @@ export default defineConfig({
   build: {
     outDir: "../../../dist/web/public",
     emptyOutDir: true,
+    target: 'es2020',
+    cssCodeSplit: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react-dom') || id.includes('react/')) return 'vendor-react';
+            if (id.includes('@radix-ui')) return 'vendor-radix';
+            if (id.includes('@tanstack/react-query')) return 'vendor-query';
+            if (id.includes('framer-motion')) return 'vendor-animation';
+            if (id.includes('d3-selection') || id.includes('d3-zoom') || id.includes('d3-force') || id.includes('d3-drag')) return 'vendor-d3';
+            if (id.includes('react-syntax-highlighter') || id.includes('prismjs') || id.includes('refractor')) return 'vendor-syntax';
+            if (id.includes('react-markdown') || id.includes('remark') || id.includes('rehype') || id.includes('unified') || id.includes('micromark') || id.includes('mdast') || id.includes('vfile')) return 'vendor-markdown';
+            if (id.includes('zustand') || id.includes('lucide-react') || id.includes('react-virtuoso') || id.includes('react-hot-toast') || id.includes('class-variance-authority') || id.includes('clsx') || id.includes('tailwind-merge')) return 'vendor-utils';
+          }
+        },
+      },
+    },
   },
   server: {
     port: 5173,

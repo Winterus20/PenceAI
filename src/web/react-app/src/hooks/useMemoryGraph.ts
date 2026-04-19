@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import * as d3 from 'd3';
+import { select, type Selection } from 'd3-selection';
+import { zoom as d3Zoom, zoomIdentity } from 'd3-zoom';
+import type { ZoomBehavior } from 'd3-zoom';
+import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force';
+import type { Simulation } from 'd3-force';
+import { drag } from 'd3-drag';
 import { useMemoryGraphQuery, type GraphNode as QueryGraphNode, type GraphEdge as QueryGraphEdge, type MemoryGraph as QueryMemoryGraph, type EnrichedMemoryGraph, type MemoryGraphMetadata } from '@/hooks/queries/useMemoryGraph';
 
 // Re-export types for backward compatibility
@@ -116,11 +121,11 @@ export function useMemoryGraph({
   const error = fetchError ? 'Bellek grafiği yüklenemedi' : null;
 
   // D3 refs for simulation and zoom
-  const simulationRef = useRef<d3.Simulation<GraphNode, GraphEdge> | null>(null);
-  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
-  const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
-  const linkGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
-  const nodeGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const simulationRef = useRef<Simulation<GraphNode, GraphEdge> | null>(null);
+  const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const gRef = useRef<Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const linkGroupRef = useRef<Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const nodeGroupRef = useRef<Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const isInitializedRef = useRef(false);
 
   // Community color mapper
@@ -215,7 +220,7 @@ export function useMemoryGraph({
     if (!containerRef.current || !svgRef.current || isInitializedRef.current) return;
 
     const container = containerRef.current;
-    const svg = d3.select(svgRef.current);
+    const svg = select(svgRef.current);
     const width = container.clientWidth;
     const height = container.clientHeight;
 
@@ -253,22 +258,21 @@ export function useMemoryGraph({
     nodeGroupRef.current = g.append('g').attr('class', 'nodes');
 
     // Zoom behavior - NO transitions for instant camera positioning
-    const zoom = d3
-      .zoom<SVGSVGElement, unknown>()
+    const zoomBehavior = d3Zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.2, 4])
       .on('zoom', (event) => {
         g.attr('transform', event.transform);
       });
 
-    zoomRef.current = zoom;
-    svg.call(zoom);
+    zoomRef.current = zoomBehavior;
+    svg.call(zoomBehavior);
 
     // Initial zoom - instant, no animation (critical for hidden container first render)
-    const initialTransform = d3.zoomIdentity
+    const initialTransform = zoomIdentity
       .translate(width / 2, height / 2)
       .scale(0.8)
       .translate(-width / 2, -height / 2);
-    svg.call(zoom.transform, initialTransform);
+    svg.call(zoomRef.current!.transform, initialTransform);
 
     isInitializedRef.current = true;
 
@@ -287,18 +291,18 @@ export function useMemoryGraph({
       // If opening from a hidden state (0x0), update the zoom camera to the new center
       // Use .call(zoom.transform, ...) without transition for instant update
       if (lastWidth === 0 || lastHeight === 0) {
-        const recalcTransform = d3.zoomIdentity
+        const recalcTransform = zoomIdentity
           .translate(newWidth / 2, newHeight / 2)
           .scale(0.8)
           .translate(-newWidth / 2, -newHeight / 2);
         
         // CRITICAL: Pass null as transition to disable interpolation (no flying animation)
-        svg.call(zoom.transform, recalcTransform);
+        svg.call(zoomRef.current!.transform, recalcTransform);
       }
 
       if (simulationRef.current) {
         // Move the center of gravity to the new screen center
-        simulationRef.current.force('center', d3.forceCenter(newWidth / 2, newHeight / 2));
+        simulationRef.current.force('center', forceCenter(newWidth / 2, newHeight / 2));
         simulationRef.current.alpha(0.3).restart();
       }
 
@@ -376,32 +380,29 @@ export function useMemoryGraph({
     });
 
     // Create or update force simulation
-    const simulation = d3
-      .forceSimulation<GraphNode>(nodes)
+    const simulation = forceSimulation<GraphNode>(nodes)
       .force(
         'link',
-        d3
-          .forceLink<GraphNode, GraphEdge>(links)
+        forceLink<GraphNode, GraphEdge>(links)
           .id((d) => d.id)
           .distance((d) => (d.type === 'has_entity' ? 60 : 120))
           .strength((d) => (d.type === 'has_entity' ? 0.8 : d.confidence * 0.5))
       )
       .force(
         'charge',
-        d3.forceManyBody<GraphNode>().strength((d) => (d.type === 'entity' ? -150 : -250))
+        forceManyBody<GraphNode>().strength((d) => (d.type === 'entity' ? -150 : -250))
       )
-      .force('center', d3.forceCenter(width / 2, height / 2))
+      .force('center', forceCenter(width / 2, height / 2))
       .force(
         'collision',
-        d3.forceCollide<GraphNode>().radius((d) => (d.type === 'entity' ? 20 : 30))
+        forceCollide<GraphNode>().radius((d) => (d.type === 'entity' ? 20 : 30))
       );
 
     simulationRef.current = simulation;
 
     // Drag behavior
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const drag: any = d3
-      .drag()
+    const dragBehavior: any = drag()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .on('start', (event: any, d: any) => {
         if (!event.active) simulation.alphaTarget(0.3).restart();
@@ -458,7 +459,7 @@ export function useMemoryGraph({
     const node = nodeGroupRef.current.selectAll<SVGGElement, GraphNode>('g').data(nodes, (d) => d.id);
 
     // Enter - create new node groups
-    const nodeEnter = node.enter().append('g').style('cursor', 'pointer').call(drag);
+    const nodeEnter = node.enter().append('g').style('cursor', 'pointer').call(dragBehavior);
 
     // Memory nodes - rounded rectangles (only for new nodes)
     nodeEnter
@@ -541,7 +542,7 @@ export function useMemoryGraph({
 
     // Update existing node colors (for category changes) - instant, no animation
     nodeMerge.each(function (d) {
-      const g = d3.select(this);
+      const g = select(this);
       const shape = g.select<SVGElement>('.node-shape');
       if (d.type === 'memory') {
         shape
@@ -559,7 +560,7 @@ export function useMemoryGraph({
     // Hover and click interactions (using event delegation pattern)
     nodeMerge
       .on('mouseover', function (_event, d) {
-        d3.select(this).raise();
+        select(this).raise();
         linkMerge.attr('stroke-opacity', (l) => {
           const sourceId = typeof l.source === 'object' ? (l.source as GraphNode).id : l.source;
           const targetId = typeof l.target === 'object' ? (l.target as GraphNode).id : l.target;
@@ -603,13 +604,13 @@ export function useMemoryGraph({
   // Zoom controls
   const handleZoomIn = useCallback(() => {
     if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current).transition().duration(300).call(zoomRef.current.scaleBy, 1.5);
+      select(svgRef.current).transition().duration(300).call(zoomRef.current.scaleBy, 1.5);
     }
   }, []);
 
   const handleZoomOut = useCallback(() => {
     if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current).transition().duration(300).call(zoomRef.current.scaleBy, 0.67);
+      select(svgRef.current).transition().duration(300).call(zoomRef.current.scaleBy, 0.67);
     }
   }, []);
 
@@ -617,11 +618,11 @@ export function useMemoryGraph({
     if (svgRef.current && zoomRef.current && containerRef.current) {
       const width = containerRef.current.clientWidth;
       const height = containerRef.current.clientHeight;
-      const initialTransform = d3.zoomIdentity
+      const initialTransform = zoomIdentity
         .translate(width / 2, height / 2)
         .scale(0.8)
         .translate(-width / 2, -height / 2);
-      d3.select(svgRef.current).transition().duration(500).call(zoomRef.current.transform, initialTransform);
+      select(svgRef.current).transition().duration(500).call(zoomRef.current.transform, initialTransform);
     }
   }, []);
 
@@ -629,12 +630,12 @@ export function useMemoryGraph({
     if (svgRef.current && zoomRef.current && containerRef.current) {
       const width = containerRef.current.clientWidth;
       const height = containerRef.current.clientHeight;
-      d3.select(svgRef.current)
+      select(svgRef.current)
         .transition()
         .duration(500)
         .call(
           zoomRef.current.transform,
-          d3.zoomIdentity
+          zoomIdentity
             .translate(width / 2, height / 2)
             .scale(1)
             .translate(-width / 2, -height / 2)

@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { Settings, BookOpen, Store, Radio, BarChart3, Menu, X } from 'lucide-react';
-import { SettingsDialog } from './SettingsDialog';
-import { MemoryDialog } from './MemoryDialog';
 import { UsageStatsCard } from '@/components/settings/UsageStatsCard';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { ActiveView } from '../../store/agentStore';
+
+const SettingsDialog = lazy(() => import('./SettingsDialog').then(m => ({ default: m.SettingsDialog })));
+const MemoryDialog = lazy(() => import('./MemoryDialog').then(m => ({ default: m.MemoryDialog })));
 
 interface SidebarMenuProps {
   setActiveView: (view: ActiveView) => void;
@@ -90,8 +91,8 @@ export function SidebarMenu({ setActiveView }: SidebarMenuProps) {
       </div>
 
       {/* Dialogs */}
-      <SettingsDialog open={activeDialog === 'settings'} onOpenChange={(open) => !open && setActiveDialog(null)} />
-      <MemoryDialog open={activeDialog === 'memory'} onOpenChange={(open) => !open && setActiveDialog(null)} />
+      <Suspense fallback={null}><SettingsDialog open={activeDialog === 'settings'} onOpenChange={(open) => !open && setActiveDialog(null)} /></Suspense>
+      <Suspense fallback={null}><MemoryDialog open={activeDialog === 'memory'} onOpenChange={(open) => !open && setActiveDialog(null)} /></Suspense>
       <DialogWrapper open={activeDialog === 'usage'} onOpenChange={(open) => !open && setActiveDialog(null)} title="Kullanım İstatistikleri">
         <UsageStatsCard />
       </DialogWrapper>
