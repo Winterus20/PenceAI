@@ -34,6 +34,7 @@ export const OnboardingDialog = ({ open, onCompleted }: OnboardingDialogProps) =
       onCompleted();
     } catch (error) {
       console.error('Onboarding kaydedilemedi:', error);
+      onCompleted();
     } finally {
       setSaving(false);
     }
