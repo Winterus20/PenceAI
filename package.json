@@ -32,7 +32,9 @@
     "graphrag:readiness": "tsx src/cli/maintenance.ts graphrag-readiness",
     "graphrag:go-full": "tsx src/cli/maintenance.ts graphrag-go-full",
     "graphrag:emergency-rollback": "tsx src/cli/maintenance.ts graphrag-emergency-rollback",
-    "graphrag:metrics": "tsx src/cli/maintenance.ts graphrag-metrics"
+    "graphrag:metrics": "tsx src/cli/maintenance.ts graphrag-metrics",
+    "setup:win": "powershell -ExecutionPolicy Bypass -File scripts/setup.ps1",
+    "setup:unix": "bash scripts/setup.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

@@ -67,7 +67,36 @@ Core capabilities include:
 
 ## Setup & Deployment
 
-### Method 1: Docker Compose (Recommended)
+### Quick Start (One Command)
+
+The easiest way to get started — the setup script handles everything automatically:
+
+| OS | Command |
+|---|---|
+| **Windows** | `scripts\setup.ps1` |
+| **Linux / macOS** | `bash scripts/setup.sh` |
+
+```bash
+git clone <repo-url> && cd PenceAI
+
+# Windows (PowerShell)
+scripts\setup.ps1
+
+# Linux / macOS
+bash scripts/setup.sh
+```
+
+The setup script will:
+1. Check Node.js ≥ 22 is installed
+2. Install all dependencies (root + frontend)
+3. Create your `.env` file from `.env.example`
+4. Prompt you to choose an LLM provider and enter your API key
+5. Build the project (TypeScript + Vite frontend)
+6. Show you how to start the application
+
+If you prefer **Docker** (no Node.js needed on host), see Method 1 below.
+
+### Method 1: Docker Compose (Recommended without Node.js)
 
 Using Docker avoids native C++ compilation issues (`better-sqlite3`, `sqlite-vec`) and provides an isolated runtime that works the same on every OS.
 
@@ -243,6 +272,8 @@ At least **one** LLM API key must be set. The `DEFAULT_LLM_PROVIDER` determines 
 
 | Command | Description |
 |---|---|
+| `scripts\setup.ps1` *(Win)* / `bash scripts/setup.sh` *(Unix)* | One-command setup wizard |
+| `scripts\start.ps1` *(Win)* / `bash scripts/start.sh` *(Unix)* | Start production server |
 | `npm run dev` | Development mode (backend + frontend with hot-reload) |
 | `npm run dev:backend-only` | Backend only with hot-reload |
 | `npm run build` | Production build (TypeScript + Vite) |
