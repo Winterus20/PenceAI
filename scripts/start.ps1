@@ -21,4 +21,7 @@ if (-not (Test-Path (Join-Path $ProjectRoot "dist\gateway\index.js"))) {
 }
 
 Set-Location $ProjectRoot
+Write-Host "PenceAI baslatiliyor..." -ForegroundColor Cyan
+Write-Host "Proje dizini: $ProjectRoot" -ForegroundColor Gray
+Write-Host ""
 node dist/gateway/index.js
