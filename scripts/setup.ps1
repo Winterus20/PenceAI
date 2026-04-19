@@ -184,20 +184,16 @@ Write-Host "[2/8] Bagimliliklar kuruluyor..." -ForegroundColor White
 Set-Location $ProjectRoot
 
 Write-Step "Root bagimliliklari kuruluyor (bu birkac dakika surebilir)..."
-$npmRootLog = [System.IO.Path]::GetTempFileName()
-try {
-    npm install 2>&1 | Tee-Object -FilePath $npmRootLog | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "npm install basarisiz oldu (cikis kodu: $LASTEXITCODE)"
-        Write-Host ""
-        Get-Content $npmRootLog | ForEach-Object { Write-Host "  $_" }
-        Remove-Item $npmRootLog -Force -ErrorAction SilentlyContinue
-        Stop-WithPause "Kurulum durduruldu."
-    }
-} catch {
-    Write-Err "npm install basarisiz oldu"
+$npmRootLog = Join-Path $env:TEMP "penceai_npm_root.log"
+$npmOutput = & npm install 2>&1
+$npmRootExit = $LASTEXITCODE
+$npmOutput | Out-File -FilePath $npmRootLog -Encoding UTF8
+if ($npmRootExit -ne 0) {
+    Write-Err "npm install basarisiz oldu (cikis kodu: $npmRootExit)"
     Write-Host ""
-    Get-Content $npmRootLog | ForEach-Object { Write-Host "  $_" }
+    if (Test-Path $npmRootLog) {
+        Get-Content $npmRootLog -Encoding UTF8 | ForEach-Object { Write-Host "  $_" }
+    }
     Remove-Item $npmRootLog -Force -ErrorAction SilentlyContinue
     Stop-WithPause "Kurulum durduruldu."
 }
@@ -205,28 +201,22 @@ Remove-Item $npmRootLog -Force -ErrorAction SilentlyContinue
 Write-Ok "Root bagimliliklari"
 
 Write-Step "Frontend bagimliliklari kuruluyor..."
+$npmFrontLog = Join-Path $env:TEMP "penceai_npm_front.log"
 Push-Location "src\web\react-app"
-$npmFrontLog = [System.IO.Path]::GetTempFileName()
-try {
-    npm install 2>&1 | Tee-Object -FilePath $npmFrontLog | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "Frontend npm install basarisiz oldu (cikis kodu: $LASTEXITCODE)"
-        Write-Host ""
-        Get-Content $npmFrontLog | ForEach-Object { Write-Host "  $_" }
-        Remove-Item $npmFrontLog -Force -ErrorAction SilentlyContinue
-        Pop-Location
-        Stop-WithPause "Kurulum durduruldu."
-    }
-} catch {
-    Write-Err "Frontend npm install basarisiz oldu"
+$npmOutput = & npm install 2>&1
+$npmFrontExit = $LASTEXITCODE
+$npmOutput | Out-File -FilePath $npmFrontLog -Encoding UTF8
+Pop-Location
+if ($npmFrontExit -ne 0) {
+    Write-Err "Frontend npm install basarisiz oldu (cikis kodu: $npmFrontExit)"
     Write-Host ""
-    Get-Content $npmFrontLog | ForEach-Object { Write-Host "  $_" }
+    if (Test-Path $npmFrontLog) {
+        Get-Content $npmFrontLog -Encoding UTF8 | ForEach-Object { Write-Host "  $_" }
+    }
     Remove-Item $npmFrontLog -Force -ErrorAction SilentlyContinue
-    Pop-Location
     Stop-WithPause "Kurulum durduruldu."
 }
 Remove-Item $npmFrontLog -Force -ErrorAction SilentlyContinue
-Pop-Location
 Write-Ok "Frontend bagimliliklari"
 
 # -- .env --------------------------------------------------------------
@@ -317,23 +307,16 @@ Write-Host ""
 Write-Host "[5/8] Proje derleniyor..." -ForegroundColor White
 
 Write-Step "TypeScript + Frontend build (bu birkac dakika surebilir)..."
-$buildLog = [System.IO.Path]::GetTempFileName()
-try {
-    npm run build 2>&1 | Tee-Object -FilePath $buildLog | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "Build basarisiz oldu (cikis kodu: $LASTEXITCODE)"
-        Write-Host ""
-        Get-Content $buildLog | ForEach-Object { Write-Host "  $_" }
-        Write-Host ""
-        Write-Host "  Gelistirme modunda baslatmayi deneyebilirsiniz:"
-        Write-Host "  npm run dev" -ForegroundColor Cyan
-        Remove-Item $buildLog -Force -ErrorAction SilentlyContinue
-        Stop-WithPause "Kurulum durduruldu."
-    }
-} catch {
-    Write-Err "Build basarisiz oldu"
+$buildLog = Join-Path $env:TEMP "penceai_build.log"
+$buildOutput = & npm run build 2>&1
+$buildExit = $LASTEXITCODE
+$buildOutput | Out-File -FilePath $buildLog -Encoding UTF8
+if ($buildExit -ne 0) {
+    Write-Err "Build basarisiz oldu (cikis kodu: $buildExit)"
     Write-Host ""
-    Get-Content $buildLog | ForEach-Object { Write-Host "  $_" }
+    if (Test-Path $buildLog) {
+        Get-Content $buildLog -Encoding UTF8 | ForEach-Object { Write-Host "  $_" }
+    }
     Write-Host ""
     Write-Host "  Gelistirme modunda baslatmayi deneyebilirsiniz:"
     Write-Host "  npm run dev" -ForegroundColor Cyan
