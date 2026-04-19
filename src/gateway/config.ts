@@ -84,6 +84,16 @@ const ConfigSchema = z.object({
   temperature: z.coerce.number().min(0).max(2).catch(0.7).default(0.7),
   maxTokens: z.coerce.number().min(256).max(128000).catch(4096).default(4096),
 
+  // Hooks
+  enableHooks: z.coerce.boolean().default(true),
+  hookSecurityMonitor: z.coerce.boolean().default(true),
+  hookOutputSanitizer: z.coerce.boolean().default(true),
+  hookConsoleLogDetector: z.enum(['ask', 'approve', 'block']).catch('ask').default('ask'),
+  hookObservationCapture: z.coerce.boolean().default(true),
+  hookDevServerBlocker: z.coerce.boolean().default(true),
+  hookContextBudgetGuard: z.coerce.boolean().default(true),
+  hookSessionSummary: z.coerce.boolean().default(true),
+
   // Agentic RAG
   agenticRAGEnabled: z.coerce.boolean().default(true),
   agenticRAGMaxHops: z.coerce.number().min(1).max(5).default(3),
@@ -139,6 +149,16 @@ export function loadConfig(): AppConfig {
         logLevel: process.env.LOG_LEVEL,
         temperature: process.env.TEMPERATURE,
         maxTokens: process.env.MAX_TOKENS,
+
+        // Hooks
+        enableHooks: process.env.ENABLE_HOOKS,
+        hookSecurityMonitor: process.env.HOOK_SECURITY_MONITOR,
+        hookOutputSanitizer: process.env.HOOK_OUTPUT_SANITIZER,
+        hookConsoleLogDetector: process.env.HOOK_CONSOLE_LOG_DETECTOR,
+        hookObservationCapture: process.env.HOOK_OBSERVATION_CAPTURE,
+        hookDevServerBlocker: process.env.HOOK_DEV_SERVER_BLOCKER,
+        hookContextBudgetGuard: process.env.HOOK_CONTEXT_BUDGET_GUARD,
+        hookSessionSummary: process.env.HOOK_SESSION_SUMMARY,
 
         // Agentic RAG
         agenticRAGEnabled: process.env.AGENTIC_RAG_ENABLED,

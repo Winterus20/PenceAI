@@ -22,6 +22,12 @@ export interface MCPEvents {
   'tools:discovered': { serverName: string; tools: string[] };
   // Generic error
   'error': { serverName: string; error: string };
+  // Hook lifecycle events
+  'hook:preToolUse': { toolName: string; args: Record<string, unknown>; sessionId: string; callCount: number };
+  'hook:postToolUse': { toolName: string; args: Record<string, unknown>; sessionId: string; callCount: number; result: unknown };
+  'hook:postToolUseFailure': { toolName: string; args: Record<string, unknown>; sessionId: string; callCount: number; error: string };
+  'hook:sessionStart': { sessionId: string };
+  'hook:sessionEnd': { sessionId: string; callCount: number };
 }
 
 export type MCPEventType = keyof MCPEvents;

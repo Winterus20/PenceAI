@@ -190,3 +190,26 @@ export {
   validateRegistryCommand,
   sanitizeRegistryUrl,
 } from './command-validator.js';
+
+// ============================================================
+// Hook Execution Engine (Faz 6 — Tamamlandı)
+// ============================================================
+
+export {
+  HookRegistry,
+  getHookRegistry,
+  resetHookRegistry,
+} from './hooks.js';
+
+export {
+  registerBuiltInHooks,
+} from './builtInHooks.js';
+
+export type {
+  HookEvent,
+  HookDecision,
+  HookContext,
+  HookResult,
+  MCPHook,
+  HookExecutionReport,
+} from './hookTypes.js';

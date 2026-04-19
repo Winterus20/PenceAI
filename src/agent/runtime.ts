@@ -6,6 +6,7 @@ import type { PromptContextBundle } from '../memory/manager/types.js';
 import type { ConfirmCallback } from './tools.js';
 import { ToolManager } from './toolManager.js';
 import { logger } from '../utils/index.js';
+import { getHookRegistry } from './mcp/hooks.js';
 import type { FeedbackManager } from '../autonomous/urgeFilter.js';
 import type { TaskQueue } from '../autonomous/queue.js';
 import { TaskPriority } from '../autonomous/queue.js';
@@ -244,6 +245,21 @@ constructor(llm: LLMProvider, memory: MemoryManager) {
 
         this.toolManager.ensureTools(this.memory, confirmCallback, this.memoryExtractor.createMergeFn(message.senderName || 'Kullanıcı'));
 
+        // Hook: Session tracking for tool manager
+        this.toolManager.setSessionId(conversationId);
+
+        // Hook: UserPromptSubmit
+        const config = getConfig();
+        if (config.enableHooks) {
+            const hookRegistry = getHookRegistry();
+            await hookRegistry.executePhase('UserPromptSubmit', {
+                toolName: '*',
+                args: { content: message.content.substring(0, 500) },
+                sessionId: conversationId,
+                callCount: 0,
+            });
+        }
+
         // --- Sliding Window Context Budaması (Atomik Çift-Korumalı) ---
         // assistant(toolCalls) + tool(toolResults) çiftleri bölünemez birim olarak ele alınır.
         // Böylece MiniMax/OpenAI'da "tool result not found" veya "does not follow" hataları önlenir.
@@ -435,6 +451,19 @@ const graphRAGResult = await this.graphRAGManager.retrieve(
                 extractionResult.contextUserName
             ).catch(err => {
                 logger.error({ err: err }, '[Agent] Hafif bellek çıkarımı hatası:');
+            });
+        }
+
+        // Hook: SessionEnd
+        if (config.enableHooks) {
+            const hookRegistry = getHookRegistry();
+            hookRegistry.executePhase('SessionEnd', {
+                toolName: '*',
+                args: {},
+                sessionId: conversationId,
+                callCount: this.toolManager.sessionToolCallCount,
+            }).catch(err => {
+                logger.debug({ err }, '[Agent] SessionEnd hook error (non-blocking)');
             });
         }
 

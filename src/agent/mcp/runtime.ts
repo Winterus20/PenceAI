@@ -15,12 +15,16 @@ import { getUnifiedToolRegistry } from './registry.js';
 import { getMCPEventBus } from './eventBus.js';
 import { setMCPManager } from '../../gateway/services/mcpService.js';
 import { MCPConfigWatcher } from './watcher.js';
+import { getHookRegistry } from './hooks.js';
+import { registerBuiltInHooks } from './builtInHooks.js';
 import { logger } from '../../utils/logger.js';
 
 /** Module-level MCP manager instance */
 let _mcpManager: MCPClientManager | null = null;
 /** Module-level MCP config watcher */
 let _mcpWatcher: MCPConfigWatcher | null = null;
+/** Module-level hook registry initialization flag */
+let _hooksInitialized = false;
 
 import type { MCPServerConfig } from './types.js';
 
@@ -71,6 +75,47 @@ export async function initializeMCP(activeServers: MCPServerConfig[] = []): Prom
     // Watcher başlat (hot reload için)
     _mcpWatcher = new MCPConfigWatcher(manager);
     _mcpWatcher.start();
+
+    // Hook Execution Engine başlat
+    if (!_hooksInitialized) {
+      const hookRegistry = getHookRegistry();
+      registerBuiltInHooks(hookRegistry);
+
+      // Event bus ile hook'ları bağla
+      const eventBus = getMCPEventBus();
+
+      eventBus.on('tool:call_start', (payload) => {
+        eventBus.emit('hook:preToolUse', {
+          toolName: payload.toolName,
+          args: payload.arguments ?? {},
+          sessionId: payload.serverName,
+          callCount: 0,
+        });
+      });
+
+      eventBus.on('tool:call_end', (payload) => {
+        eventBus.emit('hook:postToolUse', {
+          toolName: payload.toolName,
+          args: {},
+          sessionId: payload.serverName,
+          callCount: 0,
+          result: payload.result,
+        });
+      });
+
+      eventBus.on('tool:call_error', (payload) => {
+        eventBus.emit('hook:postToolUseFailure', {
+          toolName: payload.toolName,
+          args: {},
+          sessionId: payload.serverName,
+          callCount: 0,
+          error: payload.error,
+        });
+      });
+
+      _hooksInitialized = true;
+      logger.info('[MCP:runtime] Hook Execution Engine initialized');
+    }
 
     return manager;
   } catch (error) {

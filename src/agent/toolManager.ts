@@ -5,6 +5,9 @@ import { createBuiltinTools } from './tools.js';
 import { getBuiltinToolDefinitions } from './prompt.js';
 import { getUnifiedToolRegistry } from './mcp/registry.js';
 import { isMCPEnabled } from './mcp/config.js';
+import { getHookRegistry } from './mcp/hooks.js';
+import { getConfig } from '../gateway/config.js';
+import type { HookContext } from './mcp/hookTypes.js';
 import { MemoryManager } from '../memory/manager.js';
 import type { MetricsTracker } from './metricsTracker.js';
 import { logger } from '../utils/index.js';
@@ -23,12 +26,20 @@ export class ToolManager {
 
     private _sessionTotalToolTime = 0;
     private _sessionToolCallCount = 0;
+    private _sessionId = '';
+    private _hookCallCounter = 0;
 
     constructor(mcpEnabled?: boolean) {
         this._mcpEnabled = mcpEnabled ?? isMCPEnabled();
         if (this._mcpEnabled) {
             logger.info('[ToolManager] MCP integration enabled');
         }
+    }
+
+    /** Set session ID for hook context */
+    setSessionId(sessionId: string): void {
+        this._sessionId = sessionId;
+        this._hookCallCounter = 0;
     }
 
     ensureTools(memory: MemoryManager, confirmCallback: ConfirmCallback | undefined, mergeFn: (old: string, new_: string) => Promise<string>): void {
@@ -87,12 +98,49 @@ export class ToolManager {
         onEvent?: AgentEventCallback,
         metricsTracker?: MetricsTracker,
     ): Promise<Array<{ toolCallId: string; name: string; result: string; isError: boolean }>> {
+        const config = getConfig();
+        const hookRegistry = config.enableHooks ? getHookRegistry() : null;
+
         const promises = toolCalls.map(async (tc) => {
             let result: string;
             let isError = false;
             const toolCallIndex = metricsTracker
                 ? metricsTracker.incrementToolCallCount()
                 : ++this._sessionToolCallCount;
+
+            // PreToolUse Hook
+            if (hookRegistry) {
+                const hookContext: HookContext = {
+                    toolName: tc.name,
+                    args: tc.arguments,
+                    sessionId: this._sessionId,
+                    callCount: this._hookCallCounter++,
+                };
+                const hookReport = await hookRegistry.executePhase('PreToolUse', hookContext);
+
+                if (hookReport.finalDecision === 'block') {
+                    const blockedResult = hookReport.results.find(r => r.decision === 'block');
+                    const reason = blockedResult?.reason || 'Blocked by security hook';
+                    logger.warn({ toolName: tc.name, reason }, '[ToolManager] Tool call blocked by hook');
+                    result = `⛔ ${reason}`;
+                    isError = true;
+                    onEvent?.({
+                        type: 'tool_end',
+                        data: { name: tc.name, result: result.substring(0, 500), isError },
+                    });
+                    return { toolCallId: tc.id, name: tc.name, result, isError };
+                }
+
+                // Input modification from hooks
+                if (hookReport.modifiedArgs) {
+                    tc = { ...tc, arguments: hookReport.modifiedArgs };
+                    logger.info({ toolName: tc.name }, '[ToolManager] Tool input modified by hook');
+                }
+
+                if (hookReport.finalDecision === 'ask') {
+                    logger.info({ toolName: tc.name }, '[ToolManager] Hook recommends user approval (ask)');
+                }
+            }
 
             onEvent?.({
                 type: 'tool_start',
@@ -118,6 +166,28 @@ export class ToolManager {
             } catch (err: unknown) {
                 result = `Hata: ${err instanceof Error ? err.message : String(err)}`;
                 isError = true;
+
+                // PostToolUseFailure Hook
+                if (hookRegistry) {
+                    await hookRegistry.executePhase('PostToolUseFailure', {
+                        toolName: tc.name,
+                        args: tc.arguments,
+                        sessionId: this._sessionId,
+                        callCount: toolCallIndex,
+                        error: result,
+                    });
+                }
+            }
+
+            // PostToolUse Hook
+            if (hookRegistry && !isError) {
+                await hookRegistry.executePhase('PostToolUse', {
+                    toolName: tc.name,
+                    args: tc.arguments,
+                    sessionId: this._sessionId,
+                    callCount: toolCallIndex,
+                    result,
+                });
             }
 
             const duration = Date.now() - toolStart;
