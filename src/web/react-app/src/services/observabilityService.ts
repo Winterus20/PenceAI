@@ -4,7 +4,7 @@
  * Yerel metrics endpoint'leri ile iletişim kurar.
  */
 
-const API_BASE = '/api';
+import { api } from '@/lib/api-client';
 
 export interface MetricsEntry {
   conversationId: string;
@@ -77,25 +77,6 @@ export interface TracesResponse {
   }>;
 }
 
-export interface TraceDetailResponse {
-  success: boolean;
-  trace: {
-    id: string;
-    name: string;
-    timestamp: string;
-    latency: number;
-    cost: number;
-    totalTokens: number;
-    observations: Array<{
-      id: string;
-      name: string;
-      model?: string;
-      usage: { input: number; output: number };
-      cost: number;
-      level: string;
-    }>;
-  };
-}
 
 export interface ProviderStatsResponse {
   success: boolean;
@@ -114,32 +95,24 @@ export interface ErrorStatsResponse {
   errorRate: number;
 }
 
-async function apiGet<T>(endpoint: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${endpoint}`);
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
-  }
-  return response.json();
-}
-
 export async function getAllMetrics(limit: number = 100): Promise<{ success: boolean; metrics: MetricsEntry[] }> {
-  return apiGet(`/metrics/all?limit=${limit}`);
+  return api.get('/metrics/all', { query: { limit } });
 }
 
 export async function getConversationMetrics(conversationId: string): Promise<{ success: boolean; metrics: MetricsEntry[] }> {
-  return apiGet(`/metrics/${conversationId}`);
+  return api.get(`/metrics/${conversationId}`);
 }
 
 export async function getMetricsSummary(days: number = 1): Promise<{ success: boolean } & AggregatedMetrics> {
-  return apiGet(`/metrics/summary?days=${days}`);
+  return api.get('/metrics/summary', { query: { days } });
 }
 
 export async function getProviderStats(days: number = 7): Promise<ProviderStatsResponse> {
-  return apiGet(`/metrics/provider-stats?days=${days}`);
+  return api.get('/metrics/provider-stats', { query: { days } });
 }
 
 export async function getErrorStats(): Promise<ErrorStatsResponse> {
-  return apiGet(`/metrics/error-stats`);
+  return api.get('/metrics/error-stats');
 }
 
 // Backward compatibility - eski ObservabilityDialog için wrapper'lar
@@ -199,6 +172,3 @@ export async function getRecentTraces(limit: number = 50): Promise<TracesRespons
   };
 }
 
-export async function getTraceDetail(_traceId: string): Promise<TraceDetailResponse | null> {
-  return null;
-}

@@ -30,8 +30,17 @@ export const createSettingsSlice: StateCreator<
   setSelectedChannel: (id) => set({ selectedChannel: id }),
   fetchChannels: async () => {
     try {
-      const channels = await api.get('/channels');
-      set({ channels: Array.isArray(channels) ? channels : [] });
+      const rawChannels = await api.get('/channels');
+      // Backend getChannelStatus() returns { type, name, connected } — transform to frontend Channel shape
+      const channels = (Array.isArray(rawChannels) ? rawChannels : []).map((ch: any) => ({
+        id: ch.id || ch.type || String(ch.name).toLowerCase().replace(/\s+/g, '-'),
+        name: ch.name,
+        type: ch.type,
+        connected: ch.connected,
+        messageCount: ch.messageCount,
+        lastActivity: ch.lastActivity,
+      }));
+      set({ channels });
     } catch (error) {
       console.error('Kanallar alınamadı:', error);
       set({ channels: [] });

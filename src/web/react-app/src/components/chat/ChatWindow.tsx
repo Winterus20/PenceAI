@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrainCircuit, Wrench, Menu, X, PanelLeftOpen, Command } from 'lucide-react';
+import { api } from '@/lib/api-client';
 import { useAgentStore } from '../../store/agentStore';
 import { useAgentSocket } from '../../hooks/useAgentSocket';
 import { useConversations } from '../../hooks/useConversations';
@@ -124,12 +125,7 @@ export const ChatWindow = () => {
   // Rename conversation handler
   const handleRenameConversation = useCallback(async (id: string, title: string) => {
     try {
-      const response = await fetch(`/api/conversations/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      });
-      if (!response.ok) throw new Error('Rename failed');
+      await api.patch(`/conversations/${id}`, { title });
       if (updateConversationTitle) {
         updateConversationTitle(id, title);
       }
@@ -151,8 +147,7 @@ export const ChatWindow = () => {
   useEffect(() => {
     const loadOnboardingState = async () => {
       try {
-        const response = await fetch('/api/settings');
-        const settings = await response.json();
+        const settings = await api.get<{ defaultUserName?: string }>('/settings');
         if (!settings.defaultUserName || settings.defaultUserName === 'Kullanıcı') {
           setOnboardingOpen(true);
         }

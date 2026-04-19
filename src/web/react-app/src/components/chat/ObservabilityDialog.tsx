@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Observability Dialog
  *
  * Yerel observability metriklerini ve trace'lerini gösterir.
@@ -30,12 +30,11 @@ import * as VisuallyHidden from '@radix-ui/react-visually-hidden';
 import * as Tabs from '@radix-ui/react-tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { 
-  useObservabilitySummary, 
-  useRecentTraces, 
-  useProviderStats, 
+import {
+  useObservabilitySummary,
+  useRecentTraces,
+  useProviderStats,
   useErrorStats,
-  useTraceDetail,
 } from '@/hooks/queries/useObservability';
 import { metaBadgeClassName } from '@/styles/dialog';
 import { formatRelativeTime } from '@/lib/utils';
@@ -60,15 +59,6 @@ const formatTokens = (tokens: number | undefined | null): string => {
   if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
   if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`;
   return tokens.toString();
-};
-
-const getLevelColor = (level: string): string => {
-  switch (level) {
-    case 'ERROR': return 'text-red-400';
-    case 'WARNING': return 'text-yellow-400';
-    case 'DEBUG': return 'text-blue-400';
-    default: return 'text-green-400';
-  }
 };
 
 const getLevelIcon = (level: string) => {
@@ -251,7 +241,6 @@ const DetailTab = () => {
   const { data: errorStats } = useErrorStats();
   const [expanded, setExpanded] = useState(false);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
-  const { data: traceDetail, isLoading: detailLoading } = useTraceDetail(selectedTraceId);
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredTraces = traces?.traces?.filter(trace => 
@@ -362,49 +351,21 @@ const DetailTab = () => {
               {/* Trace Detail Expanded */}
               {selectedTraceId === trace.id && (
                 <div className="ml-4 rounded-md border border-surface bg-surface-xs p-3">
-                  {traceDetail?.trace ? (
-                    <div className="space-y-2">
-                      {traceDetail.trace.observations.map((obs) => (
-                        <div key={obs.id} className="rounded-sm bg-white/5 px-3 py-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              {getLevelIcon(obs.level)}
-                              <span className="text-xs font-medium text-foreground">{obs.name}</span>
-                              <span className={metaBadgeClassName}>{obs.model || 'unknown'}</span>
-                            </div>
-                            <span className={`flex items-center gap-1 text-xs ${getLevelColor(obs.level)}`}>
-                              {obs.level}
-                            </span>
-                          </div>
-                          <div className="mt-2 flex items-center gap-4 text-xs text-surface-subtle">
-                            <span>Input: {obs.usage.input} token</span>
-                            <span>Output: {obs.usage.output} token</span>
-                            <span>Cost: {formatCost(obs.cost)}</span>
-                          </div>
+                  <div className="space-y-2">
+                    {trace.observations.map((obs, idx) => (
+                      <div key={idx} className="rounded-sm bg-white/5 px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          {getLevelIcon(obs.level)}
+                          <span className="text-xs font-medium text-foreground">{obs.name}</span>
+                          <span className={metaBadgeClassName}>{obs.model || 'unknown'}</span>
                         </div>
-                      ))}
-                    </div>
-                  ) : detailLoading ? (
-                    <div className="flex items-center justify-center py-4">
-                      <Loader2 className="h-4 w-4 animate-spin text-purple-400" />
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {trace.observations.map((obs, idx) => (
-                        <div key={idx} className="rounded-sm bg-white/5 px-3 py-2">
-                          <div className="flex items-center gap-2">
-                            {getLevelIcon(obs.level)}
-                            <span className="text-xs font-medium text-foreground">{obs.name}</span>
-                            <span className={metaBadgeClassName}>{obs.model || 'unknown'}</span>
-                          </div>
-                          <div className="mt-2 flex items-center gap-4 text-xs text-surface-subtle">
-                            <span>{obs.tokens || 0} token</span>
-                            <span>Cost: {formatCost(obs.cost)}</span>
-                          </div>
+                        <div className="mt-2 flex items-center gap-4 text-xs text-surface-subtle">
+                          <span>{obs.tokens || 0} token</span>
+                          <span>Cost: {formatCost(obs.cost)}</span>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

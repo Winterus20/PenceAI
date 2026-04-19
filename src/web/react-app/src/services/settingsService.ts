@@ -13,6 +13,7 @@ export interface AppConfig {
   nvidiaApiKey: string;
   ollamaBaseUrl: string;
   systemPrompt: string;
+  baseSystemPrompt?: string;
   allowShellExecution: boolean;
   braveSearchApiKey: string;
   embeddingProvider: string;

@@ -51,16 +51,12 @@ interface WsConfirmRequestMessage {
 	description: string;
 }
 
-interface WsToolUseMessage {
-	type: 'tool_use';
-}
-
 interface WsMetricsMessage {
 	type: 'metrics';
 	data: MessageMetrics;
 }
 
-type WsMessage = WsTokenMessage | WsResponseMessage | WsAgentEventMessage | WsClearStreamMessage | WsReplaceStreamMessage | WsErrorMessage | WsStatsMessage | WsConfirmRequestMessage | WsToolUseMessage | WsMetricsMessage;
+type WsMessage = WsTokenMessage | WsResponseMessage | WsAgentEventMessage | WsClearStreamMessage | WsReplaceStreamMessage | WsErrorMessage | WsStatsMessage | WsConfirmRequestMessage | WsMetricsMessage;
 
 // Agent event data tipleri
 interface ThinkingEventData {
@@ -265,9 +261,6 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
                 }
                 break;
 
-            case 'tool_use':
-                break;
-
             case 'error':
               flushAndClearTokens();
               toast.error(data.message || 'Bilinmeyen bir hata oluştu');
@@ -434,7 +427,12 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
         createAssistantPlaceholder();
         console.debug('[useAgentSocket] sendChatPayload:placeholder-created');
 
-        const wsMsg: { type: 'chat'; content: string; attachments?: AttachmentItem[]; conversationId?: string; newConversation?: boolean } = { type: 'chat', content };
+        const userName = getStore().userName;
+        const wsMsg: { type: 'chat'; content: string; userName?: string; attachments?: AttachmentItem[]; conversationId?: string; newConversation?: boolean } = { type: 'chat', content };
+      
+        if (userName) {
+          wsMsg.userName = userName;
+        }
 
         if (attachments.length > 0) {
             wsMsg.attachments = attachments.map(att => ({

@@ -9,12 +9,6 @@ export interface ConversationItem {
   message_count?: number;
 }
 
-export interface ConversationDetail {
-  id: string;
-  title: string;
-  messages: Message[];
-}
-
 export interface Message {
   id: string;
   role: string;
@@ -24,7 +18,6 @@ export interface Message {
 
 export const conversationService = {
   getAll: () => api.get<ConversationItem[]>('/conversations'),
-  getById: (id: string) => api.get<ConversationDetail>(`/conversations/${id}`),
   getMessages: (id: string) => api.get<Message[]>(`/conversations/${id}/messages`),
   delete: (id: string) => api.delete<void>(`/conversations/${id}`),
 };

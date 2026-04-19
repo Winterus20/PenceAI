@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api-client';
 
 export interface UsageStatsResponse {
   period: string;
@@ -15,11 +16,7 @@ export interface UsageStatsResponse {
 export function useUsageStats(period: string = 'week') {
   return useQuery<UsageStatsResponse>({
     queryKey: ['usage-stats', period],
-    queryFn: () =>
-      fetch(`/api/usage/stats?period=${period}`).then((res) => {
-        if (!res.ok) throw new Error('Usage stats alınamadı');
-        return res.json();
-      }),
+    queryFn: () => api.get<UsageStatsResponse>('/usage/stats', { query: { period } }),
     refetchInterval: 60000, // Her dakika güncelle
     staleTime: 30000, // 30 saniye taze kabul et
   });

@@ -393,7 +393,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     });
 
     // ============ Metrics API ============
-
+  
     // GET /api/metrics/all — Tüm metrics'leri getir (limit ile)
     app.get('/api/metrics/all', (req, res) => {
       try {
@@ -405,18 +405,10 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         res.status(500).json({ success: false, error: err.message });
       }
     });
-
-    // GET /api/metrics/:conversationId — Belirli conversation'ın metrics'leri
-    app.get('/api/metrics/:conversationId', (req, res) => {
-      try {
-        const metrics = metricsCollector.getConversationMetrics(req.params.conversationId);
-        res.json({ success: true, metrics });
-      } catch (error: unknown) {
-        const err = error as Error;
-        res.status(500).json({ success: false, error: err.message });
-      }
-    });
-
+  
+    // Static routes MUST be registered BEFORE the parameterized :conversationId route,
+    // otherwise Express matches /metrics/summary as :conversationId="summary" etc.
+  
     // GET /api/metrics/summary — Aggrege metrics özeti
     app.get('/api/metrics/summary', (req, res) => {
       try {
@@ -428,7 +420,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         res.status(500).json({ success: false, error: err.message });
       }
     });
-
+  
     // GET /api/metrics/provider-stats — Provider bazlı istatistikler
     app.get('/api/metrics/provider-stats', (req, res) => {
       try {
@@ -440,12 +432,23 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         res.status(500).json({ success: false, error: err.message });
       }
     });
-
+  
     // GET /api/metrics/error-stats — Hata istatistikleri
     app.get('/api/metrics/error-stats', (req, res) => {
       try {
         const stats = metricsCollector.getErrorStats();
         res.json({ success: true, ...stats });
+      } catch (error: unknown) {
+        const err = error as Error;
+        res.status(500).json({ success: false, error: err.message });
+      }
+    });
+  
+    // GET /api/metrics/:conversationId — Belirli conversation'ın metrics'leri
+    app.get('/api/metrics/:conversationId', (req, res) => {
+      try {
+        const metrics = metricsCollector.getConversationMetrics(req.params.conversationId);
+        res.json({ success: true, metrics });
       } catch (error: unknown) {
         const err = error as Error;
         res.status(500).json({ success: false, error: err.message });

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Loader2, Sparkles } from 'lucide-react';
+import { api } from '@/lib/api-client';
 import {
   Dialog,
   DialogContent,
@@ -26,17 +27,9 @@ export const OnboardingDialog = ({ open, onCompleted }: OnboardingDialogProps) =
 
     setSaving(true);
     try {
-      await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ defaultUserName: name.trim() }),
-      });
+      await api.post('/settings', { defaultUserName: name.trim() });
 
-      await fetch('/api/onboarding/process', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bio: bio.trim(), userName: name.trim() }),
-      });
+      await api.post('/onboarding/process', { bio: bio.trim(), userName: name.trim() });
 
       onCompleted();
     } catch (error) {

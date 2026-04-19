@@ -105,21 +105,25 @@ export function attachDashboardWebSocketUpgrade(
     dashboardPassword: string | undefined,
 ): void {
     server.on('upgrade', (req: IncomingMessage, socket: Duplex, head) => {
-        const url = new URL(req.url || '', `http://${req.headers.host}`);
-        if (url.pathname !== '/ws') {
-            socket.destroy();
-            return;
-        }
-
-        if (!isDashboardRequestAuthorized(
-            dashboardPassword,
-            req.headers.authorization,
-            req.headers['sec-websocket-protocol'],
-        )) {
-            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-            socket.destroy();
-            return;
-        }
+      const url = new URL(req.url || '', `http://${req.headers.host}`);
+      if (url.pathname !== '/ws') {
+        socket.destroy();
+        return;
+      }
+  
+      // Dev modunda localhost bağlantıları için auth bypass (Vite proxy gibi)
+      const remoteAddress = req.socket.remoteAddress;
+      const isLocalhost = remoteAddress === '127.0.0.1' || remoteAddress === '::1' || remoteAddress === '::ffff:127.0.0.1';
+  
+      if (!isLocalhost && !isDashboardRequestAuthorized(
+        dashboardPassword,
+        req.headers.authorization,
+        req.headers['sec-websocket-protocol'],
+      )) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
 
         wss.handleUpgrade(req, socket, head, (ws) => {
             wss.emit('connection', ws, req);

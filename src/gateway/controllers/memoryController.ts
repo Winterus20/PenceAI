@@ -87,17 +87,20 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
   });
 
   expressRouter.post('/memories', async (req, res) => {
-      const { content, category, importance } = req.body;
-      if (!content || typeof content !== 'string') {
-          return res.status(400).json({ error: 'İçerik (content) zorunludur' });
-      }
-      try {
-          const added = await memory.addMemory(content, category || 'general', importance || 5);
-          broadcastStats();
-          res.json({ success: true, memoryId: added.id, isUpdate: added.isUpdate });
-      } catch (err: any) {
-          res.status(500).json({ error: err.message });
-      }
+    const { content, category, importance } = req.body;
+    if (!content || typeof content !== 'string') {
+      return res.status(400).json({ error: 'İçerik (content) zorunludur' });
+    }
+    try {
+      const added = await memory.addMemory(content, category || 'general', importance || 5);
+      broadcastStats();
+      // Fetch the full memory row so the frontend receives a complete MemoryItem
+      const db = memory.getDatabase();
+      const memoryRow = db.prepare(`SELECT * FROM memories WHERE id = ?`).get(added.id);
+      res.json({ success: true, memory: memoryRow ?? { id: added.id }, isUpdate: added.isUpdate });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   expressRouter.put('/memories/:id', async (req, res) => {

@@ -1,4 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
+import toast from 'react-hot-toast';
+import { api } from '@/lib/api-client';
 
 /**
  * Ayarlar form tipi
@@ -119,15 +121,15 @@ export function useSettingsForm(open: boolean): UseSettingsFormReturn {
       setStatusText('');
 
       try {
-        const [providersRes, settingsRes, sensitivePathsRes] = await Promise.all([
-          fetch('/api/llm/providers'),
-          fetch('/api/settings'),
-          fetch('/api/settings/sensitive-paths'),
+        const [providersResult, settingsResult, sensitivePathsResult] = await Promise.allSettled([
+          api.get('/llm/providers'),
+          api.get('/settings'),
+          api.get('/settings/sensitive-paths'),
         ]);
-
-        const providersData = providersRes.ok ? await providersRes.json() : [];
-        const settingsData = settingsRes.ok ? await settingsRes.json() : {};
-        const sensitivePathsData = sensitivePathsRes.ok ? await sensitivePathsRes.json() : [];
+  
+        const providersData = providersResult.status === 'fulfilled' ? providersResult.value : [];
+        const settingsData = settingsResult.status === 'fulfilled' ? settingsResult.value : {};
+        const sensitivePathsData = sensitivePathsResult.status === 'fulfilled' ? sensitivePathsResult.value : [];
 
         setProviders(providersData);
         setSensitivePaths(Array.isArray(sensitivePathsData) ? sensitivePathsData : []);
@@ -196,17 +198,15 @@ export function useSettingsForm(open: boolean): UseSettingsFormReturn {
     setStatusText('');
 
     try {
-      const response = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
-
-      if (!response.ok) {
-        throw new Error('Ayarlar kaydedilemedi.');
+      const result = await api.post<SettingsForm, { success: boolean; requiresRestart?: boolean }>('/settings', form);
+  
+      if (result.requiresRestart) {
+        toast.success('Ayarlar kaydedildi.', { icon: '⚠️' });
+        toast('Yapılan değişikliklerin etkili olması için arka uç yeniden başlatılmalıdır.', { duration: 6000, icon: '🔄' });
+        setStatusText('Ayarlar kaydedildi. Yeniden başlatma gerekiyor.');
+      } else {
+        setStatusText('Ayarlar kaydedildi.');
       }
-
-      setStatusText('Ayarlar kaydedildi.');
     } catch (error) {
       console.error(error);
       setStatusText('Kaydetme sırasında hata oluştu.');
@@ -220,21 +220,11 @@ export function useSettingsForm(open: boolean): UseSettingsFormReturn {
     if (!newSensitivePath.trim()) return;
     setPathLoading(true);
     try {
-      const response = await fetch('/api/settings/sensitive-paths', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: newSensitivePath.trim() }),
-      });
-      if (response.ok) {
-        const paths = await response.json();
-        setSensitivePaths(Array.isArray(paths) ? paths : []);
-        setNewSensitivePath('');
-      } else {
-        const err = await response.json();
-        alert(err.error || 'Eklenemedi');
-      }
-    } catch (error) {
-      console.error('Hassas dizin eklenemedi:', error);
+      const paths = await api.post<{ path: string }, string[]>('/settings/sensitive-paths', { path: newSensitivePath.trim() });
+      setSensitivePaths(Array.isArray(paths) ? paths : []);
+      setNewSensitivePath('');
+    } catch (error: any) {
+      alert(error?.data?.error || 'Eklenemedi');
     } finally {
       setPathLoading(false);
     }
@@ -244,15 +234,10 @@ export function useSettingsForm(open: boolean): UseSettingsFormReturn {
   const handleRemoveSensitivePath = useCallback(async (pathToRemove: string) => {
     setPathLoading(true);
     try {
-      const response = await fetch('/api/settings/sensitive-paths', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+      const paths = await api.delete<string[]>('/settings/sensitive-paths', {
         body: JSON.stringify({ path: pathToRemove }),
       });
-      if (response.ok) {
-        const paths = await response.json();
-        setSensitivePaths(Array.isArray(paths) ? paths : []);
-      }
+      setSensitivePaths(Array.isArray(paths) ? paths : []);
     } catch (error) {
       console.error('Hassas dizin kaldırılamadı:', error);
     } finally {

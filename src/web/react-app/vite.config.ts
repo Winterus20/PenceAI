@@ -35,8 +35,15 @@ export default defineConfig({
               console.error('[Vite Proxy] WebSocket proxy hatası:', err.message);
             }
           });
-          proxy.on('proxyReqWs', (_proxyReq, _req, _socket, _options, _head) => {
-            console.log('[Vite Proxy] WebSocket bağlantısı kuruluyor...');
+          proxy.on('proxyReqWs', (proxyReq, req, _socket, _options, _head) => {
+          	// Auth header'larını WebSocket proxy'ye ilet
+          	if (req.headers.authorization) {
+          		proxyReq.setHeader('Authorization', req.headers.authorization);
+          	}
+          	if (req.headers['sec-websocket-protocol']) {
+          		proxyReq.setHeader('sec-websocket-protocol', req.headers['sec-websocket-protocol'] as string);
+          	}
+          	console.log('[Vite Proxy] WebSocket bağlantısı kuruluyor...');
           });
         },
       }

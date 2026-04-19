@@ -14,7 +14,7 @@ const validLLMProviders = ['openai', 'anthropic', 'ollama', 'minimax', 'github',
 const validEmbeddingProviders = ['minimax', 'openai', 'voyage', 'none'] as const;
 
 const ConfigSchema = z.object({
-  port: z.coerce.number().default(3000),
+  port: z.coerce.number().default(3001),
   host: z.string().default('localhost'),
   dbPath: z.string().optional(),
   projectRoot: z.string().optional(),
