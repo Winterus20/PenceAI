@@ -80,7 +80,7 @@ $configPort = 3001
 $envFile = Join-Path $ProjectRoot ".env"
 $envPortLine = Select-String -Path $envFile -Pattern "^PORT=" -ErrorAction SilentlyContinue
 if ($envPortLine) {
-    $configPort = [int]($envPortLine.Line -replace '^PORT=', '')
+    $configPort = [int](($envPortLine.Line -replace '^PORT=', '').Trim())
 }
 
 Write-Step "Port $configPort kontrol ediliyor..."

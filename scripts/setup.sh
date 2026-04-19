@@ -158,8 +158,8 @@ if [ ${#MISSING_SYS[@]} -gt 0 ]; then
         command -v curl &>/dev/null || PKGS="$PKGS curl"
 
         if [ -n "$PKGS" ]; then
-            step "apt-get install -y$PKGS"
-            if apt-get install -y $PKGS 2>&1 | tail -5; then
+            step "sudo apt-get install -y$PKGS"
+            if sudo apt-get install -y $PKGS 2>&1 | tail -5; then
                 ok "Sistem paketleri yuklendi"
             else
                 err "apt ile paket kurulumu basarisiz. sudo ile calisiyor musunuz?"
@@ -176,8 +176,8 @@ if [ ${#MISSING_SYS[@]} -gt 0 ]; then
         command -v curl &>/dev/null || PKGS="$PKGS curl"
 
         if [ -n "$PKGS" ]; then
-            step "dnf install -y$PKGS"
-            if dnf install -y $PKGS 2>&1 | tail -5; then
+            step "sudo dnf install -y$PKGS"
+            if sudo dnf install -y $PKGS 2>&1 | tail -5; then
                 ok "Sistem paketleri yuklendi"
             else
                 err "dnf ile paket kurulumu basarisiz. sudo ile calisiyor musunuz?"
@@ -194,8 +194,8 @@ if [ ${#MISSING_SYS[@]} -gt 0 ]; then
         command -v curl &>/dev/null || PKGS="$PKGS curl"
 
         if [ -n "$PKGS" ]; then
-            step "yum install -y$PKGS"
-            if yum install -y $PKGS 2>&1 | tail -5; then
+            step "sudo yum install -y$PKGS"
+            if sudo yum install -y $PKGS 2>&1 | tail -5; then
                 ok "Sistem paketleri yuklendi"
             else
                 err "yum ile paket kurulumu basarisiz. sudo ile calisiyor musunuz?"
@@ -251,6 +251,15 @@ else
     if [ "$NODE_MAJOR" -lt 22 ]; then
         err "Node.js $NODE_VERSION bulundu - 22.0.0 veya uzeri gerekiyor."
         NEEDS_UPGRADE=true
+    elif [ "$NODE_MAJOR" -gt 22 ]; then
+        warn "Node.js $NODE_VERSION bulundu - Node.js 22 LTS onerilir (bazı native modullerin prebuilt binary si yok)"
+        echo ""
+        read -rp "Node.js 22 LTS'ye gecmek ister misiniz? (e/H) " confirm_node
+        if [ "$confirm_node" = "e" ] || [ "$confirm_node" = "E" ]; then
+            NEEDS_UPGRADE=true
+        else
+            echo -e "  ${YELLOW}Mevcut Node.js v${NODE_VERSION} ile devam ediliyor.${RESET}"
+        fi
     else
         ok "Node.js v${NODE_VERSION} bulundu"
     fi
@@ -298,7 +307,7 @@ if [ "$NEEDS_INSTALL" = true ] || [ "$NEEDS_UPGRADE" = true ]; then
     if [ "$INSTALLED" = false ] && command -v apt-get &>/dev/null; then
         step "apt uzerinden yukleniyor (NodeSource)..."
         if curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh 2>/dev/null; then
-            if bash /tmp/nodesource_setup.sh 2>&1 | tail -3 && apt-get install -y nodejs 2>&1 | tail -3; then
+            if bash /tmp/nodesource_setup.sh 2>&1 | tail -3 && sudo apt-get install -y nodejs 2>&1 | tail -3; then
                 INSTALLED=true
                 ok "apt ile Node.js 22 yuklendi"
             fi
@@ -319,7 +328,7 @@ if [ "$NEEDS_INSTALL" = true ] || [ "$NEEDS_UPGRADE" = true ]; then
     if [ "$INSTALLED" = false ] && command -v dnf &>/dev/null; then
         step "dnf uzerinden yukleniyor..."
         if curl -fsSL https://rpm.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh 2>/dev/null; then
-            if bash /tmp/nodesource_setup.sh 2>&1 | tail -3 && dnf install -y nodejs 2>&1 | tail -3; then
+            if bash /tmp/nodesource_setup.sh 2>&1 | tail -3 && sudo dnf install -y nodejs 2>&1 | tail -3; then
                 INSTALLED=true
                 ok "dnf ile Node.js 22 yuklendi"
             fi
@@ -331,7 +340,7 @@ if [ "$NEEDS_INSTALL" = true ] || [ "$NEEDS_UPGRADE" = true ]; then
     if [ "$INSTALLED" = false ] && command -v yum &>/dev/null; then
         step "yum uzerinden yukleniyor..."
         if curl -fsSL https://rpm.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh 2>/dev/null; then
-            if bash /tmp/nodesource_setup.sh 2>&1 | tail -3 && yum install -y nodejs 2>&1 | tail -3; then
+            if bash /tmp/nodesource_setup.sh 2>&1 | tail -3 && sudo yum install -y nodejs 2>&1 | tail -3; then
                 INSTALLED=true
                 ok "yum ile Node.js 22 yuklendi"
             fi
@@ -370,32 +379,38 @@ echo -e "${BOLD}[3/9] Bagimliliklar kuruluyor...${RESET}"
 cd "$PROJECT_ROOT"
 
 step "Root bagimliliklari kuruluyor (bu birkac dakika surebilir)..."
-npm install 2>&1 | tee /tmp/penceai_npm_root.log
-NPM_EXIT=${PIPESTATUS[0]:-$?}
+NPM_ROOT_LOG=$(mktemp /tmp/penceai_npm_root.XXXXXX.log)
+set +e
+npm install 2>&1 | tee "$NPM_ROOT_LOG"
+NPM_EXIT=${PIPESTATUS[0]}
+set -e
 if [ "$NPM_EXIT" -ne 0 ]; then
     err "npm install basarisiz oldu (cikis kodu: $NPM_EXIT)"
     echo ""
-    cat /tmp/penceai_npm_root.log
-    rm -f /tmp/penceai_npm_root.log
+    cat "$NPM_ROOT_LOG"
+    rm -f "$NPM_ROOT_LOG"
     stop_with_pause "Kurulum durduruldu."
 fi
-grep -E "^(npm warn|added|removed|changed|up to date|[0-9]+ package)" /tmp/penceai_npm_root.log || true
-rm -f /tmp/penceai_npm_root.log
+grep -E "^(npm warn|added|removed|changed|up to date|[0-9]+ package)" "$NPM_ROOT_LOG" || true
+rm -f "$NPM_ROOT_LOG"
 ok "Root bagimliliklari"
 
 step "Frontend bagimliliklari kuruluyor..."
 cd "$PROJECT_ROOT/src/web/react-app"
-npm install 2>&1 | tee /tmp/penceai_npm_front.log
-NPM_EXIT=${PIPESTATUS[0]:-$?}
+NPM_FRONT_LOG=$(mktemp /tmp/penceai_npm_front.XXXXXX.log)
+set +e
+npm install 2>&1 | tee "$NPM_FRONT_LOG"
+NPM_EXIT=${PIPESTATUS[0]}
+set -e
 if [ "$NPM_EXIT" -ne 0 ]; then
     err "Frontend npm install basarisiz oldu (cikis kodu: $NPM_EXIT)"
     echo ""
-    cat /tmp/penceai_npm_front.log
-    rm -f /tmp/penceai_npm_front.log
+    cat "$NPM_FRONT_LOG"
+    rm -f "$NPM_FRONT_LOG"
     stop_with_pause "Kurulum durduruldu."
 fi
-grep -E "^(npm warn|added|removed|changed|up to date|[0-9]+ package)" /tmp/penceai_npm_front.log || true
-rm -f /tmp/penceai_npm_front.log
+grep -E "^(npm warn|added|removed|changed|up to date|[0-9]+ package)" "$NPM_FRONT_LOG" || true
+rm -f "$NPM_FRONT_LOG"
 cd "$PROJECT_ROOT"
 ok "Frontend bagimliliklari"
 
@@ -486,20 +501,23 @@ echo ""
 echo -e "${BOLD}[6/9] Proje derleniyor...${RESET}"
 
 step "TypeScript + Frontend build (bu birkac dakika surebilir)..."
-npm run build 2>&1 | tee /tmp/penceai_build.log
-BUILD_EXIT=${PIPESTATUS[0]:-$?}
+BUILD_LOG=$(mktemp /tmp/penceai_build.XXXXXX.log)
+set +e
+npm run build 2>&1 | tee "$BUILD_LOG"
+BUILD_EXIT=${PIPESTATUS[0]}
+set -e
 if [ "$BUILD_EXIT" -ne 0 ]; then
     err "Build basarisiz oldu (cikis kodu: $BUILD_EXIT)"
     echo ""
-    cat /tmp/penceai_build.log
+    cat "$BUILD_LOG"
     echo ""
     echo "  Gelistirme modunda baslatmayi deneyebilirsiniz:"
     echo -e "  ${CYAN}npm run dev${RESET}"
-    rm -f /tmp/penceai_build.log
+    rm -f "$BUILD_LOG"
     stop_with_pause "Kurulum durduruldu."
 fi
-grep -E "(error|Error|failed|Building|built|Compil|^\s*(src/|dist/))" /tmp/penceai_build.log || true
-rm -f /tmp/penceai_build.log
+grep -E "(error|Error|failed|Building|built|Compil|^\s*(src/|dist/))" "$BUILD_LOG" || true
+rm -f "$BUILD_LOG"
 ok "Build tamamlandi"
 
 # -- Database directory ------------------------------------------------
@@ -521,7 +539,7 @@ echo -e "${BOLD}[8/9] Port kontrolu yapiliyor...${RESET}"
 CONFIG_PORT=3001
 env_port_line=$(grep -E "^PORT=" "$ENV_FILE" 2>/dev/null || true)
 if [ -n "$env_port_line" ]; then
-    CONFIG_PORT="${env_port_line#PORT=}"
+    CONFIG_PORT="$(echo "${env_port_line#PORT=}" | tr -d '[:space:]')"
 fi
 
 if ! test_port_available "$CONFIG_PORT"; then

@@ -87,7 +87,7 @@ ok "Build dosyalari mevcut"
 CONFIG_PORT=3001
 env_port_line=$(grep -E "^PORT=" "$PROJECT_ROOT/.env" 2>/dev/null || true)
 if [ -n "$env_port_line" ]; then
-    CONFIG_PORT="${env_port_line#PORT=}"
+    CONFIG_PORT="$(echo "${env_port_line#PORT=}" | tr -d '[:space:]')"
 fi
 
 step "Port $CONFIG_PORT kontrol ediliyor..."
@@ -126,6 +126,13 @@ echo -e "${DARKGRAY}Durdurmak icin Ctrl+C basin${RESET}"
 echo ""
 
 # Trap for graceful shutdown message
-trap 'echo ""; echo -e "${YELLOW}PenceAI durduruldu.${RESET}"; echo -e "${DARKGRAY}Cikis kodu: $?${RESET}"; echo ""' EXIT
+cleanup() {
+    echo ""
+    echo -e "${YELLOW}PenceAI durduruldu.${RESET}"
+    echo -e "${DARKGRAY}Cikis kodu: $EXIT_CODE${RESET}"
+    echo ""
+}
+trap 'EXIT_CODE=$?; cleanup' EXIT
 
-exec node dist/gateway/index.js
+node dist/gateway/index.js
+EXIT_CODE=$?

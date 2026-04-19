@@ -26,7 +26,7 @@ function Set-EnvValue {
         [string]$Value
     )
     if (-not (Test-Path $FilePath)) {
-        "${Key}=${Value}" | Out-File -FilePath $FilePath -Encoding UTF8
+        [System.IO.File]::WriteAllLines($FilePath, @("${Key}=${Value}"))
         return
     }
     $lines = [System.IO.File]::ReadAllLines($FilePath)
@@ -258,8 +258,14 @@ if (-not (Test-Command "node")) {
         Write-Err "Node.js $nodeVersion bulundu - 22.0.0 veya uzeri gerekiyor."
         $needsUpgrade = $true
     } elseif ($nodeMajor -gt 22) {
-        Write-Warn "Node.js $nodeVersion bulundu - Node.js 22 LTS onerilir (daha yeni surumlerde native moduller derleme gerektirir)"
-        $needsUpgrade = $true
+        Write-Warn "Node.js $nodeVersion bulundu - Node.js 22 LTS onerilir (bazı native modullerin prebuilt binary si yok)"
+        Write-Host ""
+        $confirmNode = Read-Host "Node.js 22 LTS'ye gecmek ister misiniz? (e/H)"
+        if ($confirmNode -eq "e" -or $confirmNode -eq "E") {
+            $needsUpgrade = $true
+        } else {
+            Write-Host "  Mevcut Node.js v$nodeVersion ile devam ediliyor." -ForegroundColor Yellow
+        }
     } else {
         Write-Ok "Node.js v$nodeVersion bulundu"
     }
@@ -534,14 +540,22 @@ try {
     $proc = [System.Diagnostics.Process]::new()
     $proc.StartInfo = $psi
 
+    $buildLines = [System.Collections.ArrayList]::new()
+
     $proc.OutputDataReceived.Add_DataReceived({
         param($sender, $e)
-        if ($e.Data) { Write-Host "    $($e.Data)" }
+        if ($e.Data) {
+            Write-Host "    $($e.Data)"
+            $buildLines.Add($e.Data) | Out-Null
+        }
     }) | Out-Null
 
     $proc.ErrorDataReceived.Add_DataReceived({
         param($sender, $e)
-        if ($e.Data) { Write-Host "    $($e.Data)" -ForegroundColor DarkGray }
+        if ($e.Data) {
+            Write-Host "    $($e.Data)" -ForegroundColor DarkGray
+            $buildLines.Add($e.Data) | Out-Null
+        }
     }) | Out-Null
 
     $proc.Start() | Out-Null
@@ -549,8 +563,7 @@ try {
     $proc.BeginErrorReadLine()
     $proc.WaitForExit()
 
-    $buildOutput = $proc.StandardOutput.ReadToEnd() + $proc.StandardError.ReadToEnd()
-    $buildOutput | Out-File -FilePath $buildLog -Encoding UTF8
+    [System.IO.File]::WriteAllLines($buildLog, $buildLines)
 
     if ($proc.ExitCode -ne 0) {
         Write-Err "Build basarisiz oldu (cikis kodu: $($proc.ExitCode))"
@@ -583,7 +596,7 @@ Write-Host "[8/9] Port kontrolu yapiliyor..." -ForegroundColor White
 $configPort = 3001
 $envPortLine = Select-String -Path $envFile -Pattern "^PORT=" -ErrorAction SilentlyContinue
 if ($envPortLine) {
-    $configPort = [int]($envPortLine.Line -replace '^PORT=', '')
+    $configPort = [int](($envPortLine.Line -replace '^PORT=', '').Trim())
 }
 
 if (-not (Test-PortAvailable -Port $configPort)) {
