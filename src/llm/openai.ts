@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { LLMProvider, type ChatOptions } from './provider.js';
 import type { LLMMessage, LLMResponse, ToolCall, LLMToolDefinition } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
+import { extractThinkingFromTags } from '../utils/thinkTags.js';
 
 interface NormalizedMessage {
     role: 'user' | 'assistant';
@@ -224,11 +225,14 @@ export class OpenAIProvider extends LLMProvider {
         const reqOpts: OpenAI.Chat.ChatCompletionCreateParams = {
             model, messages: openaiMessages,
             tools: effectiveTools?.length ? effectiveTools : undefined,
-            temperature: model.startsWith('o1') ? 1 : (options?.temperature ?? 0.7),
+            temperature: model.startsWith('o1') || model.startsWith('o3') ? 1 : (options?.temperature ?? 0.7),
         };
         if (options?.maxTokens) {
-            if (model.startsWith('o1')) reqOpts.max_completion_tokens = options.maxTokens;
+            if (model.startsWith('o1') || model.startsWith('o3')) reqOpts.max_completion_tokens = options.maxTokens;
             else reqOpts.max_tokens = options.maxTokens;
+        }
+        if (options?.thinking && (model.startsWith('o1') || model.startsWith('o3'))) {
+            (reqOpts as unknown as Record<string, unknown>).reasoning_effort = 'high';
         }
 
         const response = await this.createChatCompletionWithToolFallback(reqOpts);
@@ -240,13 +244,25 @@ export class OpenAIProvider extends LLMProvider {
             arguments: (() => { try { return JSON.parse(tc.function.arguments); } catch { return {}; } })()
         }));
 
+        let content = choice.message.content || '';
+        let thinkingContent: string | undefined;
+
+        if (options?.thinking) {
+            const extracted = extractThinkingFromTags(content);
+            if (extracted.thinking) {
+                thinkingContent = extracted.thinking;
+                content = extracted.cleanContent;
+            }
+        }
+
         let finishReason: LLMResponse['finishReason'] = 'stop';
         if (choice.finish_reason === 'tool_calls') finishReason = 'tool_calls';
         else if (choice.finish_reason === 'length') finishReason = 'length';
 
         return {
-            content: choice.message.content || '',
+            content,
             toolCalls,
+            thinkingContent,
             finishReason,
             usage: response.usage ? {
                 promptTokens: response.usage.prompt_tokens,
@@ -265,12 +281,15 @@ export class OpenAIProvider extends LLMProvider {
         const reqOpts: OpenAI.Chat.ChatCompletionCreateParamsStreaming = {
             model, messages: openaiMessages,
             tools: effectiveTools?.length ? effectiveTools : undefined,
-            temperature: model.startsWith('o1') ? 1 : (options?.temperature ?? 0.7),
+            temperature: model.startsWith('o1') || model.startsWith('o3') ? 1 : (options?.temperature ?? 0.7),
             stream: true,
         };
         if (options?.maxTokens) {
-            if (model.startsWith('o1')) reqOpts.max_completion_tokens = options.maxTokens;
+            if (model.startsWith('o1') || model.startsWith('o3')) reqOpts.max_completion_tokens = options.maxTokens;
             else reqOpts.max_tokens = options.maxTokens;
+        }
+        if (options?.thinking && (model.startsWith('o1') || model.startsWith('o3'))) {
+            (reqOpts as unknown as Record<string, unknown>).reasoning_effort = 'high';
         }
 
         const stream = await this.createChatCompletionWithToolFallbackStream(reqOpts);
@@ -306,7 +325,16 @@ export class OpenAIProvider extends LLMProvider {
             .sort(([a], [b]) => a - b)
             .map(([, tc]: [number, any]) => ({ id: tc.id, name: tc.name, arguments: (() => { try { return JSON.parse(tc.argsStr || '{}'); } catch { return {}; } })() })) : undefined;
 
-        return { content, toolCalls: toolCalls?.length ? toolCalls : undefined, finishReason: toolCalls?.length ? 'tool_calls' : 'stop' };
+        let thinkingContent: string | undefined;
+        if (options?.thinking) {
+            const extracted = extractThinkingFromTags(content);
+            if (extracted.thinking) {
+                thinkingContent = extracted.thinking;
+                content = extracted.cleanContent;
+            }
+        }
+
+        return { content, thinkingContent, toolCalls: toolCalls?.length ? toolCalls : undefined, finishReason: toolCalls?.length ? 'tool_calls' : 'stop' };
     }
 
     async healthCheck(): Promise<boolean> {

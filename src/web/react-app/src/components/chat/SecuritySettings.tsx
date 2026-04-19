@@ -4,13 +4,13 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { fieldClassName, selectClassName } from '@/styles/dialog';
 
-const sectionClassName = 'section-surface rounded-[26px] border-surface';
+const sectionClassName = 'section-surface rounded-xl border-surface';
 const labelClassName = 'space-y-2 text-sm text-surface-strong';
 
 const SettingsSection = ({ title, description, icon, children }: { title: string; description: string; icon: React.ReactNode; children: React.ReactNode }) => (
   <section className={sectionClassName}>
     <div className="flex items-start gap-3 px-5 pb-4 pt-5 sm:px-6">
-      <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl bg-surface-xl text-surface">
+      <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-muted text-foreground">
         {icon}
       </div>
       <div className="space-y-1.5">
@@ -71,7 +71,7 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
             ))}
           </select>
         </label>
-        <label className="section-surface flex items-start gap-3 rounded-[22px] border-surface px-4 py-4 text-sm text-surface-strong shadow-none transition-colors hover:bg-surface-sm">
+        <label className="section-surface flex items-start gap-3 rounded-xl border-surface px-4 py-4 text-sm text-surface-strong transition-colors hover:bg-surface-sm">
           <input
             className="mt-1 h-4 w-4 rounded border-surface bg-transparent accent-current"
             type="checkbox"
@@ -110,13 +110,12 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
             <Button
               onClick={() => onAddSensitivePath()}
               disabled={pathLoading || !newSensitivePath.trim()}
-              className="h-11 min-w-[100px] rounded-2xl px-4"
+              className="h-10 min-w-[100px] rounded-md px-4"
             >
               {pathLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Ekle
             </Button>
           </div>
-          <div className="max-h-[200px] overflow-y-auto rounded-xl border border-surface bg-surface-xs">
+          <div className="max-h-[200px] overflow-y-auto rounded-md border border-surface bg-surface-xs">
           {sensitivePaths.length === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-surface-muted">
               Henüz hassas dizin eklenmemiş.

@@ -257,21 +257,19 @@
   }
 
   .glass-panel {
-    background: linear-gradient(180deg, hsl(0 0% 10% / 0.985), hsl(0 0% 8% / 0.992));
-    border: 1px solid hsl(0 0% 100% / 0.06);
-    box-shadow: 0 26px 72px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.025);
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   }
 
   .section-surface {
-    background: linear-gradient(180deg, hsl(0 0% 100% / 0.022), hsl(0 0% 100% / 0.014));
-    border: 1px solid hsl(0 0% 100% / 0.055);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    background-color: hsl(var(--background) / 0.5);
+    border: 1px solid hsl(var(--border));
   }
 
   .field-surface {
-    background: hsl(0 0% 100% / 0.02);
-    border: 1px solid hsl(0 0% 100% / 0.06);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    background-color: hsl(var(--background));
+    border: 1px solid hsl(var(--input));
   }
 
   .subtle-scrollbar {

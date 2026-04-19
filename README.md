@@ -52,74 +52,203 @@ Core capabilities include:
 - **Testing:** Jest + Playwright + Testing Library
 - **Logging:** Pino
 
-## Setup & Deployment
+## Prerequisites
 
-PenceAI supports two primary methods of installation: **Docker (Recommended)** or **Manual Node.js Setup**.
+| Requirement | Docker | Manual |
+|---|---|---|
+| **Node.js** ≥ 22 | Not needed on host | Required |
+| **npm** | Not needed on host | Required |
+| **Python 3 + C++ build tools** | Not needed on host | Required (for `better-sqlite3`, `sqlite-vec`) |
+| **Docker** | Required | Not needed |
+
+> **Windows users:** Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (C++ workload) before `npm install` if you see native compilation errors.
+>
+> **Linux users:** `sudo apt install build-essential python3` (Debian/Ubuntu) or equivalent.
+
+## Setup & Deployment
 
 ### Method 1: Docker Compose (Recommended)
 
-Using Docker mitigates any operating system incompatibilities (especially with native C++ packages like `better-sqlite3` and `sqlite-vec`) and provides an isolated runtime.
+Using Docker avoids native C++ compilation issues (`better-sqlite3`, `sqlite-vec`) and provides an isolated runtime that works the same on every OS.
 
-1. Ensure **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** or Docker Engine is installed and running.
-2. Clone the repository and prepare your environment file:
-   ```bash
-   cp .env.example .env
-   ```
-3. Edit `.env` to include your desired LLM API Keys (e.g. `OPENAI_API_KEY`).
-4. Build the image and start the application in the background:
-   ```bash
-   docker compose up -d --build
-   ```
-5. Access the web dashboard at **http://localhost:3001**!
-   *(Note: The database is persistently mapped to your local `./data` folder, thus memory survives container restarts).*
+```bash
+# 1. Clone the repository
+git clone <repo-url> && cd PenceAI
+
+# 2. Create your .env from the example
+cp .env.example .env
+
+# 3. Edit .env — at minimum, set an LLM API key
+#    Example: OPENAI_API_KEY=sk-...
+nano .env   # or use any editor
+
+# 4. Build and start
+docker compose up -d --build
+```
+
+Access the dashboard at **http://localhost:3001**
+
+The database is persistently stored in `./data` on the host, so it survives container restarts.
+
+Common Docker commands:
+```bash
+docker compose up -d --build    # Build & start
+docker compose down             # Stop & remove
+docker compose logs -f          # Follow logs
+docker compose restart           # Restart
+```
+
+> **Connection troubleshooting:** If you can't reach http://localhost:3001, make sure `HOST=0.0.0.0` is set in your `.env` file. The default is `0.0.0.0` (listens on all interfaces). Setting `HOST=localhost` inside Docker will prevent external access.
 
 ### Method 2: Manual Node.js Setup
 
-If you prefer to run the application natively on your host:
+```bash
+# 1. Clone the repository
+git clone <repo-url> && cd PenceAI
 
-1. Requirements: Node.js `>= 22`, npm, and available Python/Build-Tools for native module compilation.
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Prepare environment variables:
-   ```bash
-   cp .env.example .env
-   ```
-4. Start the development server (runs both frontend and backend):
-   ```bash
-   npm run dev
-   ```
+# 2. Install root dependencies (includes devDependencies needed for build)
+npm install
 
-## Using [`.env.example`](.env.example)
+# 3. Install frontend dependencies
+cd src/web/react-app && npm install && cd ../..
 
-The root [`.env.example`](.env.example) file contains safe placeholder values. Main variable groups:
+# 4. Create your .env from the example
+cp .env.example .env
 
-- **Server:** `PORT`, `HOST`
-- **Database:** `DB_PATH`
-- **LLM providers:** `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `NVIDIA_API_KEY`, `GITHUB_TOKEN`
-- **Local model access:** `OLLAMA_BASE_URL`
-- **Security:** `ALLOW_SHELL_EXECUTION`, `FS_ROOT_DIR`, `DASHBOARD_PASSWORD`, `SENSITIVE_PATHS`
-- **Embeddings:** `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`
-- **Application behavior:** `SYSTEM_PROMPT`, `AUTONOMOUS_STEP_LIMIT`, `MEMORY_DECAY_THRESHOLD`, `SEMANTIC_SEARCH_THRESHOLD`, `LOG_LEVEL`
+# 5. Edit .env — at minimum, set an LLM API key
+nano .env
 
-> **Note:** Never commit real API keys, tokens, or passwords to a public repository.
+# 6a. Development (hot-reload backend + frontend):
+npm run dev
+
+# 6b. OR — Production build + run:
+npm run build
+npm start
+```
+
+Development mode starts both the backend (port 3001) and the frontend dev server (port 5173) concurrently. The frontend proxies `/api` and `/ws` requests to the backend automatically.
+
+Production mode serves the pre-built frontend from `dist/web/public` on port 3001.
+
+## Environment Variables
+
+Create your `.env` file by copying `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
+### Required for functionality
+
+At least **one** LLM API key must be set. The `DEFAULT_LLM_PROVIDER` determines which one is used:
+
+| Variable | Description |
+|---|---|
+| `OPENAI_API_KEY` | OpenAI (default provider) |
+| `ANTHROPIC_API_KEY` | Anthropic (Claude) |
+| `GROQ_API_KEY` | Groq |
+| `MISTRAL_API_KEY` | Mistral |
+| `MINIMAX_API_KEY` | MiniMax |
+| `NVIDIA_API_KEY` | NVIDIA |
+| `GITHUB_TOKEN` | GitHub Models |
+| `OLLAMA_BASE_URL` | Local Ollama (default: `http://localhost:11434`) |
+
+### Common settings
+
+| Variable | Default | Description |
+|---|---|---|
+| `HOST` | `0.0.0.0` | Server bind address (`0.0.0.0` for all interfaces) |
+| `PORT` | `3001` | Server port |
+| `DB_PATH` | `./data/penceai.db` | SQLite database path |
+| `DEFAULT_LLM_PROVIDER` | `openai` | Active LLM provider |
+| `DEFAULT_LLM_MODEL` | `gpt-4o` | Default model name |
+| `EMBEDDING_PROVIDER` | `openai` | Embedding provider (`openai`, `minimax`, `voyage`, `none`) |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
+| `LOG_LEVEL` | `info` | Logging level (`debug`, `info`, `error`) |
+| `DASHBOARD_PASSWORD` | — | Password protect the web dashboard |
+
+> **Important:** Never commit real API keys or passwords to the repository.
+
+<details>
+<summary>Full variable list</summary>
+
+#### Server
+- `PORT` — Server port (default: 3001)
+- `HOST` — Bind address (default: 0.0.0.0)
+- `DB_PATH` — SQLite database file path (default: ./data/penceai.db)
+
+#### LLM Providers
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `MINIMAX_API_KEY`, `NVIDIA_API_KEY`, `GITHUB_TOKEN`
+- `DEFAULT_LLM_PROVIDER` — One of: `openai`, `anthropic`, `ollama`, `minimax`, `github`, `groq`, `mistral`, `nvidia`
+- `DEFAULT_LLM_MODEL` — Model name (default: `gpt-4o`)
+- `OLLAMA_BASE_URL` — Ollama server URL (default: `http://localhost:11434`)
+- `ENABLE_OLLAMA_TOOLS` — Enable Ollama tool calling (default: false)
+- `ENABLE_NVIDIA_TOOLS` — Enable NVIDIA tool calling (default: false)
+
+#### Embedding
+- `EMBEDDING_PROVIDER` — `openai`, `minimax`, `voyage`, `none` (default: `openai`)
+- `EMBEDDING_MODEL` — Embedding model (default: `text-embedding-3-small`)
+- `VOYAGE_API_KEY` — Voyage API key
+
+#### Messaging Channels
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`
+- `DISCORD_BOT_TOKEN`, `DISCORD_ALLOWED_USERS`
+- `WHATSAPP_ENABLED`
+
+#### Security
+- `ALLOW_SHELL_EXECUTION` — Enable shell command execution (default: false)
+- `FS_ROOT_DIR` — Root directory for file operations
+- `DASHBOARD_PASSWORD` — Password for web dashboard
+- `BRAVE_SEARCH_API_KEY` — Brave Search API key
+- `SENSITIVE_PATHS` — Comma-separated protected paths
+
+#### Application Behavior
+- `SYSTEM_PROMPT` — Custom system prompt override
+- `AUTONOMOUS_STEP_LIMIT` — Max autonomous reasoning steps (default: 5)
+- `MEMORY_DECAY_THRESHOLD` — Memory decay days (default: 30)
+- `SEMANTIC_SEARCH_THRESHOLD` — Similarity threshold (default: 0.7)
+- `LOG_LEVEL` — `debug`, `info`, `error` (default: `info`)
+- `DEFAULT_USER_NAME` — Default user display name
+
+#### MCP (Model Context Protocol)
+- `ENABLE_MCP` — Enable MCP (default: true)
+- `MCP_SERVERS` — JSON array of MCP server configs
+- `MCP_TIMEOUT` — Timeout in ms (default: 30000)
+- `MCP_MAX_CONCURRENT` — Max parallel MCP calls (default: 5)
+- `MCP_LOGGING` — Enable MCP logging (default: true)
+
+#### Hook Execution Engine
+- `ENABLE_HOOKS` — Enable hooks (default: true)
+- `HOOK_SECURITY_MONITOR` — Path traversal & secret detection (default: true)
+- `HOOK_OUTPUT_SANITIZER` — API key masking (default: true)
+- `HOOK_CONSOLE_LOG_DETECTOR` — `ask`, `approve`, `block` (default: ask)
+- `HOOK_OBSERVATION_CAPTURE` — Log tool calls (default: true)
+- `HOOK_DEV_SERVER_BLOCKER` — Block dev server commands (default: true)
+- `HOOK_CONTEXT_BUDGET_GUARD` — Compaction enforcement (default: true)
+- `HOOK_SESSION_SUMMARY` — Session end metrics (default: true)
+
+#### Agentic RAG
+- `AGENTIC_RAG_ENABLED` — Enable agentic RAG (default: true)
+- `AGENTIC_RAG_MAX_HOPS` — Multi-hop retrieval depth, 1-5 (default: 3)
+- `AGENTIC_RAG_DECISION_CONFIDENCE` — Minimum confidence (default: 0.5)
+- `AGENTIC_RAG_CRITIQUE_RELEVANCE_FLOOR` — (default: 0.5)
+- `AGENTIC_RAG_CRITIQUE_COMPLETENESS_FLOOR` — (default: 0.3)
+- `AGENTIC_RAG_VERIFICATION_SUPPORT_FLOOR` — (default: 0.6)
+- `AGENTIC_RAG_VERIFICATION_UTILITY_FLOOR` — 1-5 (default: 2)
+- `AGENTIC_RAG_MAX_REGENERATIONS` — 0-3 (default: 1)
+
+</details>
 
 ## Commands
 
-Primary commands from [`package.json`](package.json) for manual development:
-
-- **Development server:** `npm run dev`
-- **Backend only:** `npm run dev:backend-only`
-- **Production build:** `npm run build`
-- **Start after build:** `npm run start`
-- **CLI tools:** `npm run cli`
-- **Maintenance tasks:** `npm run maintenance`
-
-Docker lifecycle commands:
-- **Build / Run:** `docker compose up -d --build`
-- **Stop:** `docker compose down`
-- **View Logs:** `docker compose logs -f`
+| Command | Description |
+|---|---|
+| `npm run dev` | Development mode (backend + frontend with hot-reload) |
+| `npm run dev:backend-only` | Backend only with hot-reload |
+| `npm run build` | Production build (TypeScript + Vite) |
+| `npm start` | Start production server (requires `npm run build` first) |
+| `npm run cli` | Interactive CLI |
+| `npm run maintenance` | Maintenance CLI |
 
 ## Architecture Summary
 

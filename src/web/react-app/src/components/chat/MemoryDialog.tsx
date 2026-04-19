@@ -126,7 +126,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
             <div className="flex items-center gap-3 text-[1.7rem] font-semibold tracking-[-0.03em] text-foreground sm:text-[1.9rem]">
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-purple-500/20 text-purple-400">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-foreground">
                 <BrainCircuit className="h-5 w-5" />
               </span>
               Bellek Merkezi

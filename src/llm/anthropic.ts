@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { LLMProvider, type ChatOptions, TOOL_CALL_CLEAR_SIGNAL } from './provider.js';
 import type { LLMMessage, LLMResponse, ToolCall } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
+import { extractThinkingFromTags } from '../utils/thinkTags.js';
 
 export class AnthropicProvider extends LLMProvider {
     readonly name = 'anthropic';
@@ -82,21 +83,36 @@ export class AnthropicProvider extends LLMProvider {
             input_schema: t.parameters as Anthropic.Tool['input_schema'],
         }));
 
-        const response = await this.client.messages.create({
+        const isThinkingEnabled = !!options?.thinking;
+
+        const baseParams: Record<string, unknown> = {
             model,
             max_tokens: options?.maxTokens || 4096,
             system: options?.systemPrompt,
             messages: anthropicMessages,
             tools: tools && tools.length > 0 ? tools : undefined,
-            temperature: options?.temperature ?? 0.7,
-        });
+        };
+
+        if (isThinkingEnabled) {
+            baseParams.thinking = { type: 'enabled', budget_tokens: options?.maxTokens ? Math.min(options.maxTokens, 10000) : 10000 };
+        } else {
+            baseParams.temperature = options?.temperature ?? 0.7;
+        }
+
+        const response = await this.client.messages.create(baseParams as unknown as Anthropic.MessageCreateParams) as Anthropic.Message;
 
         // Yanıtı çözümle
         let content = '';
+        let thinkingContent: string | undefined;
         const toolCalls: ToolCall[] = [];
 
         for (const block of response.content) {
-            if (block.type === 'text') {
+            if (block.type === 'thinking') {
+                const blockText = (block as { thinking: string }).thinking || '';
+                if (blockText) {
+                    thinkingContent = thinkingContent ? thinkingContent + '\n\n' + blockText : blockText;
+                }
+            } else if (block.type === 'text') {
                 content += block.text;
             } else if (block.type === 'tool_use') {
                 toolCalls.push({
@@ -107,6 +123,14 @@ export class AnthropicProvider extends LLMProvider {
             }
         }
 
+        if (!thinkingContent && isThinkingEnabled) {
+            const extracted = extractThinkingFromTags(content);
+            if (extracted.thinking) {
+                thinkingContent = extracted.thinking;
+                content = extracted.cleanContent;
+            }
+        }
+
         let finishReason: LLMResponse['finishReason'] = 'stop';
         if (response.stop_reason === 'tool_use') finishReason = 'tool_calls';
         else if (response.stop_reason === 'max_tokens') finishReason = 'length';
@@ -114,6 +138,7 @@ export class AnthropicProvider extends LLMProvider {
         return {
             content,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+            thinkingContent,
             finishReason,
             usage: {
                 promptTokens: response.usage.input_tokens,
@@ -154,17 +179,27 @@ export class AnthropicProvider extends LLMProvider {
         }
         const tools: Anthropic.Tool[] | undefined = options?.tools?.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters as Anthropic.Tool['input_schema'] }));
 
-        const stream = this.client.messages.stream({
+        const isThinkingEnabled = !!options?.thinking;
+
+        const streamParams: Record<string, unknown> = {
             model, max_tokens: options?.maxTokens || 4096,
             system: options?.systemPrompt,
             messages: anthropicMessages,
             tools: tools?.length ? tools : undefined,
-            temperature: options?.temperature ?? 0.7,
-        });
+        };
+
+        if (isThinkingEnabled) {
+            streamParams.thinking = { type: 'enabled', budget_tokens: options?.maxTokens ? Math.min(options.maxTokens, 10000) : 10000 };
+        } else {
+            streamParams.temperature = options?.temperature ?? 0.7;
+        }
+
+        const stream = this.client.messages.stream(streamParams as unknown as Anthropic.MessageCreateParams);
 
         let content = '';
+        let thinkingContent = '';
         let hasToolCalls = false;
-        let tokensEmitted = false; // Token gönderilip gönderilmediğini takip et
+        let tokensEmitted = false;
         const toolCalls: ToolCall[] = [];
         let currentToolUse: { id: string; name: string; inputStr: string } | null = null;
 
@@ -172,14 +207,15 @@ export class AnthropicProvider extends LLMProvider {
             if (event.type === 'content_block_start') {
                 if (event.content_block.type === 'tool_use') {
                     if (!hasToolCalls && tokensEmitted) {
-                        // İlk tool call tespit edildi — önceden stream edilmiş metni temizle
                         onToken(TOOL_CALL_CLEAR_SIGNAL);
                     }
                     hasToolCalls = true;
                     currentToolUse = { id: event.content_block.id, name: event.content_block.name, inputStr: '' };
                 }
             } else if (event.type === 'content_block_delta') {
-                if (event.delta.type === 'text_delta') {
+                if (event.delta.type === 'thinking_delta') {
+                    thinkingContent += (event.delta as { thinking: string }).thinking;
+                } else if (event.delta.type === 'text_delta') {
                     content += event.delta.text;
                     if (!hasToolCalls) {
                         onToken(event.delta.text);
@@ -194,7 +230,15 @@ export class AnthropicProvider extends LLMProvider {
             }
         }
 
-        return { content, toolCalls: toolCalls.length ? toolCalls : undefined, finishReason: toolCalls.length ? 'tool_calls' : 'stop' };
+        if (!thinkingContent && isThinkingEnabled) {
+            const extracted = extractThinkingFromTags(content);
+            if (extracted.thinking) {
+                thinkingContent = extracted.thinking;
+                content = extracted.cleanContent;
+            }
+        }
+
+        return { content, thinkingContent: thinkingContent || undefined, toolCalls: toolCalls.length ? toolCalls : undefined, finishReason: toolCalls.length ? 'tool_calls' : 'stop' };
     }
 
     async healthCheck(): Promise<boolean> {

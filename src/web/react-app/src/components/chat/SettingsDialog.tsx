@@ -202,7 +202,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
             <div className="flex items-center gap-3 text-[1.7rem] font-semibold tracking-[-0.03em] text-foreground sm:text-[1.9rem]">
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-purple-500/20 text-purple-400">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-foreground">
                 <Settings2 className="h-5 w-5" />
               </span>
               Ayarlar
@@ -267,7 +267,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
         <div className="max-w-3xl text-sm leading-6 text-surface-strong">
           {statusText || 'Kaydettiğiniz değişiklikler anında uygulanır. LLM provider/model değişiklikleri yeniden başlatma gerektirir.'}
         </div>
-        <Button onClick={handleSave} disabled={settingsLoading || providersLoading || pathsLoading || updateSettings.isPending} className="min-w-[190px] rounded-full px-5 bg-purple-600 text-white hover:bg-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.4)] transition-all duration-300 border-0">
+        <Button onClick={handleSave} disabled={settingsLoading || providersLoading || pathsLoading || updateSettings.isPending} className="min-w-[190px] px-5">
         <Save className="h-4 w-4" />
         Kaydet ve Uygula
         </Button>
@@ -282,7 +282,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="glass-panel flex max-h-[calc(100dvh-1.5rem)] w-[min(96vw,84rem)] max-w-[95vw] md:max-w-2xl flex-col overflow-hidden p-0 text-foreground">
+        <DialogContent className="glass-panel flex max-h-[calc(100dvh-1.5rem)] w-[min(96vw,120rem)] max-w-[95vw] md:max-w-4xl flex-col overflow-hidden p-0 text-foreground">
           <VisuallyHidden.Root>
             <DialogTitle>Ayarlar</DialogTitle>
             <DialogDescription>Model seçimi, servis anahtarları ve çalışma davranışlarını düzenleyin.</DialogDescription>

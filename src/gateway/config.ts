@@ -15,7 +15,7 @@ const validEmbeddingProviders = ['minimax', 'openai', 'voyage', 'none'] as const
 
 const ConfigSchema = z.object({
   port: z.coerce.number().default(3001),
-  host: z.string().default('localhost'),
+  host: z.string().default('0.0.0.0'),
   dbPath: z.string().optional(),
   projectRoot: z.string().optional(),
   defaultUserName: z.string().default('Kullanıcı'),

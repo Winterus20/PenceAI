@@ -19,3 +19,7 @@ export {
 // Logger and async context
 export { logger, asyncLocalStorage, runWithTraceId, flush } from './logger.js';
 export type { TraceContext } from './logger.js';
+
+// Think tags utility
+export { extractThinkingFromTags } from './thinkTags.js';
+export type { ExtractResult } from './thinkTags.js';

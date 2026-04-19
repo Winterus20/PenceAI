@@ -2,6 +2,7 @@ import { LLMProvider, type ChatOptions, TOOL_CALL_CLEAR_SIGNAL } from './provide
 import type { LLMMessage, LLMResponse, ToolCall } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
 import { logger } from '../utils/logger.js';
+import { extractThinkingFromTags } from '../utils/thinkTags.js';
 import { randomUUID } from 'crypto';
 
 interface OllamaMessage {
@@ -123,9 +124,21 @@ export class OllamaProvider extends LLMProvider {
             arguments: tc.function.arguments,
         }));
 
+        let content = data.message.content || '';
+        let thinkingContent: string | undefined;
+
+        if (options?.thinking) {
+            const extracted = extractThinkingFromTags(content);
+            if (extracted.thinking) {
+                thinkingContent = extracted.thinking;
+                content = extracted.cleanContent;
+            }
+        }
+
         return {
-            content: data.message.content || '',
+            content,
             toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
+            thinkingContent,
             finishReason: toolCalls && toolCalls.length > 0 ? 'tool_calls' : 'stop',
             usage: {
                 promptTokens: data.prompt_eval_count || 0,
@@ -205,7 +218,16 @@ export class OllamaProvider extends LLMProvider {
             }
         }
 
-        return { content, toolCalls: toolCallsCollected.length ? toolCallsCollected : undefined, finishReason: toolCallsCollected.length ? 'tool_calls' : 'stop' };
+        let thinkingContent: string | undefined;
+        if (options?.thinking) {
+            const extracted = extractThinkingFromTags(content);
+            if (extracted.thinking) {
+                thinkingContent = extracted.thinking;
+                content = extracted.cleanContent;
+            }
+        }
+
+        return { content, thinkingContent, toolCalls: toolCallsCollected.length ? toolCallsCollected : undefined, finishReason: toolCallsCollected.length ? 'tool_calls' : 'stop' };
     }
 
     async healthCheck(): Promise<boolean> {
