@@ -7,8 +7,12 @@ RED='\033[31m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
-# Global error trap
+# Global error trap: show error + pause, then exit
 trap 'err "Beklenmeyen hata! Satir: $LINENO"; echo ""; echo -e "${YELLOW}Pencere kapanmasin diye bekleniyor...${RESET}"; read -rp "Cikmak icin Enter'\''a basin" _; exit 1' ERR
+
+# Exit trap: always pause before closing (unless ERR trap already paused)
+_EXIT_PAUSED=false
+trap 'if [ "$_EXIT_PAUSED" = false ]; then echo -e "${YELLOW}Pencere kapanmasin diye bekleniyor...${RESET}"; read -rp "Cikmak icin Enter'\''a basin" _; fi' EXIT
 
 step()  { echo -e "${CYAN}  ->${RESET} $1"; }
 ok()    { echo -e "${GREEN}  OK${RESET} $1"; }
@@ -20,6 +24,7 @@ stop_with_pause() {
     echo ""
     echo -e "${YELLOW}Pencere kapanmasin diye bekleniyor...${RESET}"
     read -rp "Cikmak icin Enter'a basin" _
+    _EXIT_PAUSED=true
     exit 1
 }
 
@@ -502,5 +507,3 @@ echo -e "    ${CYAN}\$EDITOR .env${RESET}"
 echo ""
 echo "========================================"
 echo ""
-echo -e "${YELLOW}Pencere kapanmasin diye bekleniyor...${RESET}"
-read -rp "Cikmak icin Enter'a basin" _
