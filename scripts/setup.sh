@@ -13,6 +13,14 @@ ok()    { echo -e "${GREEN}  OK${RESET} $1"; }
 warn()  { echo -e "${YELLOW}  !!${RESET} $1"; }
 err()   { echo -e "${RED}  XX${RESET} $1"; }
 
+stop_with_pause() {
+    err "$1"
+    echo ""
+    echo -e "${YELLOW}Pencere kapanmasin diye bekleniyor...${RESET}"
+    read -rp "Cikmak icin Enter'a basin" _
+    exit 1
+}
+
 set_env_value() {
     local file="$1"
     local key="$2"
@@ -37,7 +45,7 @@ echo -e "${BOLD}    PenceAI Kurulum Sihirbazi${RESET}"
 echo -e "${BOLD}========================================${RESET}"
 echo ""
 
-# ── Node.js ──────────────────────────────────────────────────────
+# -- Node.js -----------------------------------------------------------
 echo -e "${BOLD}[1/6] Node.js kontrol ediliyor...${RESET}"
 
 if ! command -v node &>/dev/null; then
@@ -48,45 +56,45 @@ if ! command -v node &>/dev/null; then
     echo ""
     echo "  nvm kullaniyorsaniz:"
     echo "  nvm install 22 && nvm use 22"
-    exit 1
+    stop_with_pause "Kurulum durduruldu."
 fi
 
 NODE_VERSION=$(node -v | sed 's/^v//')
 NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
 
 if [ "$NODE_MAJOR" -lt 22 ]; then
-    err "Node.js $NODE_VERSION bulundu — 22.0.0 veya uzeri gerekiyor."
+    err "Node.js $NODE_VERSION bulundu - 22.0.0 veya uzeri gerekiyor."
     echo ""
     echo "  Guncellemek icin:"
     echo -e "  ${CYAN}https://nodejs.org/${RESET}"
-    exit 1
+    stop_with_pause "Kurulum durduruldu."
 fi
 
 ok "Node.js v${NODE_VERSION} bulundu"
 
-# ── npm ───────────────────────────────────────────────────────────
+# -- npm ---------------------------------------------------------------
 echo ""
-echo -e "${BOLD}[2/6] Bağımlılıklar kuruluyor...${RESET}"
+echo -e "${BOLD}[2/6] Bagimliliklar kuruluyor...${RESET}"
 
 cd "$PROJECT_ROOT"
 
-step "Root bağımlılıkları kuruluyor (bu birkac dakika surebilir)..."
+step "Root bagimliliklari kuruluyor (bu birkac dakika surebilir)..."
 if ! npm install 2>&1 | tail -5; then
-    err "npm install basarisiz oldu. Yukaridaki hatalari kontrol edin."
-    exit 1
+    err "npm install basarisiz oldu."
+    stop_with_pause "Kurulum durduruldu."
 fi
-ok "Root bağımlılıkları"
+ok "Root bagimliliklari"
 
-step "Frontend bağımlılıkları kuruluyor..."
+step "Frontend bagimliliklari kuruluyor..."
 cd "$PROJECT_ROOT/src/web/react-app"
 if ! npm install 2>&1 | tail -5; then
     err "Frontend npm install basarisiz oldu."
-    exit 1
+    stop_with_pause "Kurulum durduruldu."
 fi
 cd "$PROJECT_ROOT"
-ok "Frontend bağımlılıkları"
+ok "Frontend bagimliliklari"
 
-# ── .env ──────────────────────────────────────────────────────────
+# -- .env --------------------------------------------------------------
 echo ""
 echo -e "${BOLD}[3/6] .env dosyasi yapilandiriliyor...${RESET}"
 
@@ -100,7 +108,7 @@ else
     warn ".env dosyasi zaten mevcut, mevcut dosya korunuyor"
 fi
 
-# ── API Key ──────────────────────────────────────────────────────
+# -- API Key -----------------------------------------------------------
 echo ""
 echo -e "${BOLD}[4/6] LLM API anahtari yapilandiriliyor${RESET}"
 echo ""
@@ -163,7 +171,7 @@ else
     fi
 fi
 
-# ── Build ─────────────────────────────────────────────────────────
+# -- Build -------------------------------------------------------------
 echo ""
 echo -e "${BOLD}[5/6] Proje derleniyor...${RESET}"
 
@@ -173,11 +181,11 @@ if ! npm run build; then
     echo ""
     echo "  Gelistirme modunda baslatmayi deneyebilirsiniz:"
     echo -e "  ${CYAN}npm run dev${RESET}"
-    exit 1
+    stop_with_pause "Kurulum durduruldu."
 fi
 ok "Build tamamlandi"
 
-# ── Summary ───────────────────────────────────────────────────────
+# -- Summary -----------------------------------------------------------
 echo ""
 echo -e "${BOLD}[6/6] Kurulum tamamlandi!${RESET}"
 echo ""

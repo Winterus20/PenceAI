@@ -13,6 +13,14 @@ function Write-Ok($msg)   { Write-Host "${Green}  OK${Reset} $msg" }
 function Write-Warn($msg) { Write-Host "${Yellow}  !!${Reset} $msg" }
 function Write-Err($msg)  { Write-Host "${Red}  XX${Reset} $msg" }
 
+function Stop-WithPause($msg) {
+    Write-Err $msg
+    Write-Host ""
+    Write-Host "${Yellow}Pencere kapanmasin diye bekleniyor...${Reset}"
+    Read-Host "Cikmak icin Enter'a basin"
+    exit 1
+}
+
 function Test-Command($cmd) {
     try { Get-Command $cmd -ErrorAction Stop | Out-Null; return $true }
     catch { return $false }
@@ -62,7 +70,7 @@ if (-not (Test-Command "node")) {
     Write-Host ""
     Write-Host "  nvm kullaniyorsaniz:"
     Write-Host "  nvm install 22 && nvm use 22"
-    exit 1
+    Stop-WithPause "Kurulum durduruldu."
 }
 
 $nodeVersion = (node -v) -replace '^v', ''
@@ -73,7 +81,7 @@ if ($nodeMajor -lt 22) {
     Write-Host ""
     Write-Host "  Guncellemek icin:"
     Write-Host "  ${Cyan}https://nodejs.org/${Reset}"
-    exit 1
+    Stop-WithPause "Kurulum durduruldu."
 }
 
 Write-Ok "Node.js v$nodeVersion bulundu"
@@ -96,13 +104,13 @@ try {
         Write-Err "npm install basarisiz oldu. Son 20 satir:"
         Get-Content $npmRootLog | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
         Remove-Item $npmRootLog -Force -ErrorAction SilentlyContinue
-        exit 1
+        Stop-WithPause "Kurulum durduruldu."
     }
 } catch {
     Write-Err "npm install basarisiz oldu. Son 20 satir:"
     Get-Content $npmRootLog | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
     Remove-Item $npmRootLog -Force -ErrorAction SilentlyContinue
-    exit 1
+    Stop-WithPause "Kurulum durduruldu."
 }
 Remove-Item $npmRootLog -Force -ErrorAction SilentlyContinue
 Write-Ok "Root bagimliliklari"
@@ -121,14 +129,14 @@ try {
         Get-Content $npmFrontLog | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
         Remove-Item $npmFrontLog -Force -ErrorAction SilentlyContinue
         Pop-Location
-        exit 1
+        Stop-WithPause "Kurulum durduruldu."
     }
 } catch {
     Write-Err "Frontend npm install basarisiz oldu. Son 20 satir:"
     Get-Content $npmFrontLog | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
     Remove-Item $npmFrontLog -Force -ErrorAction SilentlyContinue
     Pop-Location
-    exit 1
+    Stop-WithPause "Kurulum durduruldu."
 }
 Remove-Item $npmFrontLog -Force -ErrorAction SilentlyContinue
 Pop-Location
@@ -232,13 +240,13 @@ try {
         Write-Host ""
         Write-Host "  Gelistirme modunda baslatmayi deneyebilirsiniz:"
         Write-Host "  ${Cyan}npm run dev${Reset}"
-        exit 1
+        Stop-WithPause "Kurulum durduruldu."
     }
 } catch {
     Write-Err "Build basarisiz oldu. Son 20 satir:"
     Get-Content $buildLog | Select-Object -Last 20 | ForEach-Object { Write-Host "  $_" }
     Remove-Item $buildLog -Force -ErrorAction SilentlyContinue
-    exit 1
+    Stop-WithPause "Kurulum durduruldu."
 }
 Remove-Item $buildLog -Force -ErrorAction SilentlyContinue
 Write-Ok "Build tamamlandi"
