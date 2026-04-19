@@ -102,9 +102,11 @@ if ! test_port_available "$CONFIG_PORT"; then
     read -rp "Bu sureci kapatip devam etmek istiyor musunuz? (e/H) " confirm
     if [ "$confirm" = "e" ] || [ "$confirm" = "E" ]; then
         if command -v lsof &>/dev/null; then
-            lsof -i ":${CONFIG_PORT}" -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+            lsof -i ":${CONFIG_PORT}" -t 2>/dev/null | while read -r pid; do
+                kill -9 "$pid" 2>/dev/null || warn "PID $pid kapatilamadi (Yetkisiz erisim). Lutfen manuel kapatin."
+            done
         elif command -v fuser &>/dev/null; then
-            fuser -k "${CONFIG_PORT}/tcp" 2>/dev/null || true
+            fuser -k "${CONFIG_PORT}/tcp" 2>/dev/null || warn "Port $CONFIG_PORT kapatilamadi. Lutfen manuel kapatin."
         fi
         sleep 2
         if ! test_port_available "$CONFIG_PORT"; then

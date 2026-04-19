@@ -98,7 +98,11 @@ if (-not (Test-PortAvailable -Port $configPort)) {
         if ($connections) {
             $pids = $connections | Select-Object -ExpandProperty OwningProcess -Unique
             foreach ($pid in $pids) {
-                Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+                try {
+                    Stop-Process -Id $pid -Force -ErrorAction Stop
+                } catch {
+                    Write-Warn "PID $pid kapatilamadi (Yetkisiz erisim). Lutfen manuel kapatin."
+                }
             }
             Start-Sleep -Seconds 2
         }

@@ -130,6 +130,13 @@ Write-Host "========================================" -ForegroundColor White
 Write-Host "    PenceAI Kurulum Sihirbazi" -ForegroundColor White
 Write-Host "========================================" -ForegroundColor White
 Write-Host ""
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Warn "Script Yonetici (Administrator) olarak calistirilmiyor."
+    Write-Host "  Sistem paketleri kurulurken veya port islemlerinde yetki hatalari olusabilir." -ForegroundColor DarkGray
+    Write-Host "  Hata alirsaniz PowerShell'i 'Yonetici Olarak Calistir' secenegiyle acip tekrar deneyin." -ForegroundColor DarkGray
+    Write-Host ""
+}
 
 # -- Disk space --------------------------------------------------------
 Write-Host "[0/9] Disk alani kontrol ediliyor..." -ForegroundColor White
@@ -195,7 +202,7 @@ if ($missingSys.Count -gt 0) {
         foreach ($pkg in $toInstall) {
             Write-Step "winget install $pkg ..."
             try {
-                winget install $pkg --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+                winget install $pkg --accept-source-agreements --accept-package-agreements 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
                 if ($LASTEXITCODE -ne 0) { $failed += $pkg }
             } catch { $failed += $pkg }
         }
@@ -210,7 +217,7 @@ if ($missingSys.Count -gt 0) {
     if (-not $installed -and (Test-Command "choco")) {
         Write-Step "choco ile yukleniyor..."
         try {
-            choco install $toInstall -y 2>&1 | Out-Null
+            choco install $toInstall -y 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
             if ($LASTEXITCODE -eq 0) {
                 $installed = $true
                 Write-Ok "Sistem paketleri choco ile yuklendi"
@@ -292,7 +299,7 @@ if ($needsInstall -or $needsUpgrade) {
         Write-Step "winget ile yukleniyor..."
         $wingetLog = [System.IO.Path]::GetTempFileName()
         try {
-            winget install OpenJS.NodeJS.LTS --version 22 --accept-source-agreements --accept-package-agreements 2>&1 | Tee-Object -FilePath $wingetLog | Out-Null
+            winget install OpenJS.NodeJS.LTS --version 22 --accept-source-agreements --accept-package-agreements 2>&1 | Tee-Object -FilePath $wingetLog | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
             if ($LASTEXITCODE -eq 0) {
                 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
                 if (Test-Command "node") {
@@ -311,8 +318,8 @@ if ($needsInstall -or $needsUpgrade) {
             Write-Step "nvm-windows ile yukleniyor..."
             $env:Path = "$nvmHome;$env:Path"
             try {
-                nvm install 22 2>&1 | Out-Null
-                nvm use 22 2>&1 | Out-Null
+                nvm install 22 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+                nvm use 22 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
                 if (Test-Command "node") {
                     $installed = $true
                     Write-Ok "nvm-windows ile Node.js 22 yuklendi"
@@ -614,7 +621,11 @@ if (-not (Test-PortAvailable -Port $configPort)) {
     if ($confirm -eq "e" -or $confirm -eq "E") {
         $pids = Get-NetTCPConnection -LocalPort $configPort -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique
         foreach ($pid in $pids) {
-            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+            try {
+                Stop-Process -Id $pid -Force -ErrorAction Stop
+            } catch {
+                Write-Warn "PID $pid kapatilamadi (Yetkisiz erisim). Lutfen manuel kapatin."
+            }
         }
         Start-Sleep -Seconds 2
         if (Test-PortAvailable -Port $configPort) {

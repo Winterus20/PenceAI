@@ -30,6 +30,12 @@ stop_with_pause() {
     exit 1
 }
 
+stream_output() {
+    while IFS= read -r line || [ -n "$line" ]; do
+        echo -e "${DARKGRAY}    $line${RESET}"
+    done
+}
+
 set_env_value() {
     local file="$1"
     local key="$2"
@@ -113,6 +119,11 @@ echo -e "${BOLD}========================================${RESET}"
 echo -e "${BOLD}    PenceAI Kurulum Sihirbazi${RESET}"
 echo -e "${BOLD}========================================${RESET}"
 echo ""
+if [ "$EUID" -ne 0 ]; then
+    warn "Script root (sudo) yetkisiyle calistirilmiyor."
+    echo -e "${DARKGRAY}  Paket kurulumlarinda parolaniz sorulabilir veya yetki hatalari olusabilir.${RESET}"
+    echo ""
+fi
 
 # -- Disk space --------------------------------------------------------
 echo -e "${BOLD}[0/9] Disk alani kontrol ediliyor...${RESET}"
@@ -159,7 +170,7 @@ if [ ${#MISSING_SYS[@]} -gt 0 ]; then
 
         if [ -n "$PKGS" ]; then
             step "sudo apt-get install -y$PKGS"
-            if sudo apt-get install -y $PKGS 2>&1 | tail -5; then
+            if sudo apt-get install -y $PKGS 2>&1 | stream_output; then
                 ok "Sistem paketleri yuklendi"
             else
                 err "apt ile paket kurulumu basarisiz. sudo ile calisiyor musunuz?"
@@ -177,7 +188,7 @@ if [ ${#MISSING_SYS[@]} -gt 0 ]; then
 
         if [ -n "$PKGS" ]; then
             step "sudo dnf install -y$PKGS"
-            if sudo dnf install -y $PKGS 2>&1 | tail -5; then
+            if sudo dnf install -y $PKGS 2>&1 | stream_output; then
                 ok "Sistem paketleri yuklendi"
             else
                 err "dnf ile paket kurulumu basarisiz. sudo ile calisiyor musunuz?"
@@ -195,7 +206,7 @@ if [ ${#MISSING_SYS[@]} -gt 0 ]; then
 
         if [ -n "$PKGS" ]; then
             step "sudo yum install -y$PKGS"
-            if sudo yum install -y $PKGS 2>&1 | tail -5; then
+            if sudo yum install -y $PKGS 2>&1 | stream_output; then
                 ok "Sistem paketleri yuklendi"
             else
                 err "yum ile paket kurulumu basarisiz. sudo ile calisiyor musunuz?"
@@ -212,7 +223,7 @@ if [ ${#MISSING_SYS[@]} -gt 0 ]; then
 
         if [ -n "$PKGS" ]; then
             step "brew install$PKGS"
-            if brew install $PKGS 2>&1 | tail -5; then
+            if brew install $PKGS 2>&1 | stream_output; then
                 ok "Sistem paketleri yuklendi"
             else
                 err "Homebrew ile paket kurulumu basarisiz."
@@ -307,7 +318,7 @@ if [ "$NEEDS_INSTALL" = true ] || [ "$NEEDS_UPGRADE" = true ]; then
     if [ "$INSTALLED" = false ] && command -v apt-get &>/dev/null; then
         step "apt uzerinden yukleniyor (NodeSource)..."
         if curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh 2>/dev/null; then
-            if bash /tmp/nodesource_setup.sh 2>&1 | tail -3 && sudo apt-get install -y nodejs 2>&1 | tail -3; then
+            if bash /tmp/nodesource_setup.sh 2>&1 | stream_output && sudo apt-get install -y nodejs 2>&1 | stream_output; then
                 INSTALLED=true
                 ok "apt ile Node.js 22 yuklendi"
             fi
@@ -318,7 +329,7 @@ if [ "$NEEDS_INSTALL" = true ] || [ "$NEEDS_UPGRADE" = true ]; then
     # Try Homebrew (macOS / Linux)
     if [ "$INSTALLED" = false ] && command -v brew &>/dev/null; then
         step "Homebrew ile yukleniyor..."
-        if brew install node@22 2>&1 | tail -3; then
+        if brew install node@22 2>&1 | stream_output; then
             INSTALLED=true
             ok "Homebrew ile Node.js 22 yuklendi"
         fi
@@ -328,7 +339,7 @@ if [ "$NEEDS_INSTALL" = true ] || [ "$NEEDS_UPGRADE" = true ]; then
     if [ "$INSTALLED" = false ] && command -v dnf &>/dev/null; then
         step "dnf uzerinden yukleniyor..."
         if curl -fsSL https://rpm.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh 2>/dev/null; then
-            if bash /tmp/nodesource_setup.sh 2>&1 | tail -3 && sudo dnf install -y nodejs 2>&1 | tail -3; then
+            if bash /tmp/nodesource_setup.sh 2>&1 | stream_output && sudo dnf install -y nodejs 2>&1 | stream_output; then
                 INSTALLED=true
                 ok "dnf ile Node.js 22 yuklendi"
             fi
@@ -340,7 +351,7 @@ if [ "$NEEDS_INSTALL" = true ] || [ "$NEEDS_UPGRADE" = true ]; then
     if [ "$INSTALLED" = false ] && command -v yum &>/dev/null; then
         step "yum uzerinden yukleniyor..."
         if curl -fsSL https://rpm.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh 2>/dev/null; then
-            if bash /tmp/nodesource_setup.sh 2>&1 | tail -3 && sudo yum install -y nodejs 2>&1 | tail -3; then
+            if bash /tmp/nodesource_setup.sh 2>&1 | stream_output && sudo yum install -y nodejs 2>&1 | stream_output; then
                 INSTALLED=true
                 ok "yum ile Node.js 22 yuklendi"
             fi
@@ -553,9 +564,11 @@ if ! test_port_available "$CONFIG_PORT"; then
     read -rp "Bu sureci kapatip devam etmek istiyor musunuz? (e/H) " confirm_port
     if [ "$confirm_port" = "e" ] || [ "$confirm_port" = "E" ]; then
         if command -v lsof &>/dev/null; then
-            lsof -i ":${CONFIG_PORT}" -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+            lsof -i ":${CONFIG_PORT}" -t 2>/dev/null | while read -r pid; do
+                kill -9 "$pid" 2>/dev/null || warn "PID $pid kapatilamadi (Yetkisiz erisim). Lutfen manuel kapatin."
+            done
         elif command -v fuser &>/dev/null; then
-            fuser -k "${CONFIG_PORT}/tcp" 2>/dev/null || true
+            fuser -k "${CONFIG_PORT}/tcp" 2>/dev/null || warn "Port $CONFIG_PORT kapatilamadi. Lutfen manuel kapatin."
         fi
         sleep 2
         if ! test_port_available "$CONFIG_PORT"; then
