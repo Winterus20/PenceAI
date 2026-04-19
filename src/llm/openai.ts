@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { LLMProvider, type ChatOptions } from './provider.js';
-import type { LLMMessage, LLMResponse, ToolCall, LLMToolDefinition } from '../router/types.js';
+import type { LLMMessage, LLMResponse, ToolCall, LLMToolDefinition, ImageBlock } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
 import { extractThinkingFromTags } from '../utils/thinkTags.js';
 
@@ -8,6 +8,7 @@ interface NormalizedMessage {
     role: 'user' | 'assistant';
     content: string;
     toolCalls?: ToolCall[];
+    imageBlocks?: ImageBlock[];
 }
 
 /**
@@ -28,11 +29,13 @@ function normalizeOpenAIMessages(
         let currentRole: string | null = null;
         let currentContent = '';
         let currentToolCalls: ToolCall[] | undefined;
+        let currentImageBlocks: ImageBlock[] | undefined;
 
         for (const msg of messages) {
             let roleToUse = msg.role;
             let contentToAdd = msg.content || '';
             let toolCallsToAdd: ToolCall[] | undefined;
+            let imageBlocksToAdd: ImageBlock[] | undefined;
 
             if (msg.role === 'tool' && msg.toolResults) {
                 roleToUse = 'user';
@@ -42,23 +45,29 @@ function normalizeOpenAIMessages(
                     contentToAdd = `[Araç Kullanıldı: ${msg.toolCalls.map(tc => tc.name).join(', ')}]`;
                 }
                 toolCallsToAdd = msg.toolCalls;
+            } else if (msg.role === 'user' && msg.imageBlocks && msg.imageBlocks.length > 0) {
+                imageBlocksToAdd = msg.imageBlocks;
             }
 
-            if (!contentToAdd.trim() && msg.role !== 'assistant') continue;
+            if (!contentToAdd.trim() && msg.role !== 'assistant' && !imageBlocksToAdd) continue;
 
             if (roleToUse === currentRole && roleToUse !== 'system') {
                 currentContent += '\n\n' + contentToAdd;
+                if (imageBlocksToAdd) {
+                    currentImageBlocks = [...(currentImageBlocks ?? []), ...imageBlocksToAdd];
+                }
             } else {
                 if (currentRole && currentRole !== 'system') {
-                    normalized.push({ role: currentRole as 'user' | 'assistant', content: currentContent, toolCalls: currentToolCalls });
+                    normalized.push({ role: currentRole as 'user' | 'assistant', content: currentContent, toolCalls: currentToolCalls, imageBlocks: currentImageBlocks });
                 }
                 currentRole = roleToUse;
                 currentContent = contentToAdd;
                 currentToolCalls = toolCallsToAdd;
+                currentImageBlocks = imageBlocksToAdd;
             }
         }
         if (currentRole && currentRole !== 'system') {
-            normalized.push({ role: currentRole as 'user' | 'assistant', content: currentContent, toolCalls: currentToolCalls });
+            normalized.push({ role: currentRole as 'user' | 'assistant', content: currentContent, toolCalls: currentToolCalls, imageBlocks: currentImageBlocks });
         }
 
         // Ilk mesaj assistant ise user'a cevir
@@ -86,17 +95,38 @@ function normalizeOpenAIMessages(
             }
         }
 
-        const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = normalized.map(msg => ({
-            role: msg.role,
-            content: msg.content,
-            ...(msg.role === 'assistant' && msg.toolCalls ? {
-                tool_calls: msg.toolCalls.map(tc => ({
-                    id: tc.id,
-                    type: 'function' as const,
-                    function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
-                })),
-            } : {}),
-        }));
+        const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = normalized.map(msg => {
+            if (msg.role === 'user' && msg.imageBlocks && msg.imageBlocks.length > 0) {
+                const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [
+                    ...msg.imageBlocks.map(img => ({
+                        type: 'image_url' as const,
+                        image_url: { url: `data:${img.mimeType};base64,${img.data}` },
+                    })),
+                    ...(msg.content ? [{ type: 'text' as const, text: msg.content }] : []),
+                ];
+                const userMsg: OpenAI.Chat.ChatCompletionUserMessageParam = { role: 'user', content: contentParts };
+                return userMsg;
+            }
+
+            if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+                const assistantMsg: OpenAI.Chat.ChatCompletionAssistantMessageParam = {
+                    role: 'assistant',
+                    content: msg.content || null,
+                    tool_calls: msg.toolCalls.map(tc => ({
+                        id: tc.id,
+                        type: 'function' as const,
+                        function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+                    })),
+                };
+                return assistantMsg;
+            }
+
+            const textMsg: OpenAI.Chat.ChatCompletionUserMessageParam | OpenAI.Chat.ChatCompletionAssistantMessageParam = {
+                role: msg.role,
+                content: msg.content,
+            };
+            return textMsg;
+        });
 
         return { messages: openaiMessages, effectiveTools: undefined };
     }

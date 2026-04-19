@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { getConfig } from '../gateway/config.js';
 import { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/logger.js';
+import { SmartSearchEngine } from './search/index.js';
 
 const execAsync = promisify(exec);
 
@@ -595,77 +596,40 @@ export function createBuiltinTools(
         });
     }
 
-    // --- Web Arama (Brave Search) ---
-    if (config.braveSearchApiKey) {
-      tools.push({
+    // --- Web Arama (Smart Search: Brave + DuckDuckGo + Wikipedia + HN + Reddit) ---
+    tools.push({
         name: 'webSearch',
         async execute(args) {
-          // Zod runtime validation
-          const validation = validateArgs(WebSearchArgsSchema, args);
-          if (!validation.success) return validation.error;
-          
-          const { query, freshness } = validation.data;
-          const count = validation.data.count ?? 5;
-          const safeCount = Math.min(count, 10);
-  
-          try {
-            const params = new URLSearchParams({
-              q: query,
-              count: String(safeCount),
-              search_lang: 'tr',
-            });
-            if (freshness) params.set('freshness', freshness);
+            const validation = validateArgs(WebSearchArgsSchema, args);
+            if (!validation.success) return validation.error;
 
-                    const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
-                        headers: {
-                            'Accept': 'application/json',
-                            'Accept-Encoding': 'gzip',
-                            'X-Subscription-Token': config.braveSearchApiKey!,
-                        },
-                    });
+            const { query, freshness } = validation.data;
+            const count = validation.data.count ?? 5;
 
-                    if (!response.ok) {
-                        return `Hata: Brave Search API ${response.status} — ${response.statusText}`;
-                    }
+            try {
+                const searchEngine = new SmartSearchEngine({
+                    braveApiKey: config.braveSearchApiKey,
+                });
 
-                    // Brave Search API response Zod schema
-                    const BraveSearchResult = z.object({
-                        web: z.object({
-                            results: z.array(z.object({
-                                title: z.string(),
-                                url: z.string(),
-                                description: z.string().optional(),
-                                age: z.string().optional(),
-                            })).optional(),
-                        }).optional(),
-                    });
+                const result = await searchEngine.search(query, {
+                    count: Math.min(count, 10),
+                    freshness: freshness as 'pd' | 'pw' | 'pm' | 'py' | undefined,
+                });
 
-                    const raw = await response.json();
-                    const data = BraveSearchResult.safeParse(raw);
-                    if (!data.success) {
-                        return 'Hata: Brave Search API yanıtı parse edilemedi';
-                    }
-
-                    const results = data.data?.web?.results;
-
-                    if (!results || results.length === 0) {
-                        return `"${query}" için sonuç bulunamadı.`;
-                    }
-
-                    const formatted = results.map((r, i: number) => {
-                        let entry = `${i + 1}. **${r.title}**\n   ${r.url}`;
-                        if (r.description) entry += `\n   ${r.description}`;
-                        if (r.age) entry += ` (${r.age})`;
-                        return entry;
-                    }).join('\n\n');
-
-                    return `🔍 "${query}" için ${results.length} sonuç:\n\n${formatted}`;
-                } catch (err: unknown) {
-                    return `Hata: Web araması yapılamadı — ${err instanceof Error ? err.message : String(err)}`;
+                if (result.results.length === 0) {
+                    return `"${query}" için sonuç bulunamadı.`;
                 }
-            },
-        });
-    }
+
+                const sourceInfo = result.sources.length > 0
+                    ? ` [Kaynaklar: ${result.sources.join(', ')}${result.intent !== 'general' ? ` | Niyet: ${result.intent}` : ''}]`
+                    : '';
+
+                return `🔍 "${query}" için ${result.results.length} sonuç${sourceInfo}:\n\n${result.formatted}`;
+            } catch (err: unknown) {
+                return `Hata: Web araması yapılamadı — ${err instanceof Error ? err.message : String(err)}`;
+            }
+        },
+    });
 
     return tools;
 }

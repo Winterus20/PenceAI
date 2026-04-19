@@ -380,42 +380,40 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         });
     }
 
-    // Web arama (Brave Search) etkinse ekle
-    if (config.braveSearchApiKey) {
-        tools.push({
-            name: 'webSearch',
-            description: 'Web\'de arama yapar ve sonuçları döndürür.',
-            llmDescription: 'Web\'de ara',
-            parameters: {
-                type: 'object',
-                properties: {
-                    query: {
-                        type: 'string',
-                        description: 'Arama sorgusu (doğal dilde veya anahtar kelimelerle)',
-                    },
-                    count: {
-                        type: 'integer',
-                        description: 'Döndürülecek sonuç sayısı (varsayılan: 5, maksimum: 10)',
-                    },
-                    freshness: {
-                        type: 'string',
-                        description: 'Zaman filtresi: pd (son 24 saat), pw (son 1 hafta), pm (son 1 ay), py (son 1 yıl)',
-                        enum: ['pd', 'pw', 'pm', 'py'],
-                    },
+    // Web arama (Smart Search — Brave + DuckDuckGo + Wikipedia + HN + Reddit)
+    tools.push({
+        name: 'webSearch',
+        description: 'Web\'de arama yapar ve sonuçları döndürür. Birden fazla kaynak (Brave, DuckDuckGo, Wikipedia, Hacker News, Reddit) kullanır.',
+        llmDescription: 'Web\'de ara (çoklu kaynak)',
+        parameters: {
+            type: 'object',
+            properties: {
+                query: {
+                    type: 'string',
+                    description: 'Arama sorgusu (doğal dilde veya anahtar kelimelerle)',
                 },
-                required: ['query'],
-            },
-            llmParameters: {
-                type: 'object',
-                properties: {
-                    query: { type: 'string' },
-                    count: { type: 'integer' },
-                    freshness: { type: 'string', enum: ['pd', 'pw', 'pm', 'py'] },
+                count: {
+                    type: 'integer',
+                    description: 'Döndürülecek sonuç sayısı (varsayılan: 5, maksimum: 10)',
                 },
-                required: ['query'],
+                freshness: {
+                    type: 'string',
+                    description: 'Zaman filtresi: pd (son 24 saat), pw (son 1 hafta), pm (son 1 ay), py (son 1 yıl)',
+                    enum: ['pd', 'pw', 'pm', 'py'],
+                },
             },
-        });
-    }
+            required: ['query'],
+        },
+        llmParameters: {
+            type: 'object',
+            properties: {
+                query: { type: 'string' },
+                count: { type: 'integer' },
+                freshness: { type: 'string', enum: ['pd', 'pw', 'pm', 'py'] },
+            },
+            required: ['query'],
+        },
+    });
 
     return tools;
 }
