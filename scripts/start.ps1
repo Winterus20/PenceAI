@@ -141,7 +141,7 @@ $proc.OutputDataReceived.Add_DataReceived({
     if ($e.Data) { 
         Write-Host $e.Data 
         # Otomatik tarayıcı açma mantığı (sadece bir kere çalışır)
-        if (-not $script:browserOpened -and $e.Data -match "Server running at") {
+        if (-not $script:browserOpened -and ($e.Data -match "PenceAI..al..yor" -or $e.Data -match "Dashboard: http")) {
             $script:browserOpened = $true
             $url = "http://localhost:$configPort"
             Write-Host "Tarayici aciliyor: $url" -ForegroundColor Cyan

@@ -350,10 +350,11 @@ async function main() {
     autonomousWorker.start();
 
     server.listen(config.port, config.host, () => {
+        const displayHost = config.host === '0.0.0.0' ? 'localhost' : config.host;
         logger.info(`\n[Gateway] 🚀 PençeAI çalışıyor!`);
-        logger.info(`[Gateway] 🌐 Dashboard: http://${config.host}:${config.port}`);
-        logger.info(`[Gateway] 📡 WebSocket: ws://${config.host}:${config.port}/ws`);
-        logger.info(`[Gateway] 💡 API: http://${config.host}:${config.port}/api/health\n`);
+        logger.info(`[Gateway] 🌐 Dashboard: http://${displayHost}:${config.port}`);
+        logger.info(`[Gateway] 📡 WebSocket: ws://${displayHost}:${config.port}/ws`);
+        logger.info(`[Gateway] 💡 API: http://${displayHost}:${config.port}/api/health\n`);
     });
 
     server.on('error', (err: NodeJS.ErrnoException) => {
