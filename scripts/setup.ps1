@@ -100,6 +100,9 @@ if (-not (Test-Command "node")) {
     if ($nodeMajor -lt 22) {
         Write-Err "Node.js $nodeVersion bulundu - 22.0.0 veya uzeri gerekiyor."
         $needsUpgrade = $true
+    } elseif ($nodeMajor -gt 22) {
+        Write-Warn "Node.js $nodeVersion bulundu - Node.js 22 LTS onerilir (daha yeni surumlerde native moduller derleme gerektirir)"
+        $needsUpgrade = $true
     } else {
         Write-Ok "Node.js v$nodeVersion bulundu"
     }
@@ -175,6 +178,68 @@ if ($needsInstall -or $needsUpgrade) {
         Stop-WithPause "Kurulum durduruldu."
     }
     Write-Ok "Node.js v$nodeVersion hazir"
+}
+
+# -- Build tools for native modules ------------------------------------
+$nodeVersion = (node -v) -replace '^v', ''
+$nodeMajor = [int]($nodeVersion.Split('.')[0])
+
+if ($nodeMajor -gt 22) {
+    Write-Host ""
+    Write-Host "[1.5/8] Native modul derleme araclari kontrol ediliyor..." -ForegroundColor White
+    Write-Warn "Node.js $nodeVersion icin prebuilt binary bulunamadi, derleme gerekli"
+
+    $needBuildTools = $false
+
+    # Check Python
+    $pythonFound = $false
+    foreach ($py in @("python", "python3", "py")) {
+        if (Test-Command $py) {
+            $pythonFound = $true
+            break
+        }
+    }
+    if (-not $pythonFound) {
+        Write-Err "Python bulunamadi (node-gyp icin gerekli)"
+        $needBuildTools = $true
+    }
+
+    # Check VS Build Tools
+    $vsFound = $false
+    $vsPaths = @(
+        "${env:ProgramFiles (x86)}\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC",
+        "${env:ProgramFiles (x86)}\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\VC\Tools\MSVC"
+    )
+    foreach ($p in $vsPaths) {
+        if (Test-Path $p) { $vsFound = $true; break }
+    }
+    if (-not $vsFound) {
+        Write-Err "Visual Studio Build Tools bulunamadi"
+        $needBuildTools = $true
+    }
+
+    if ($needBuildTools) {
+        Write-Host ""
+        Write-Step "Eksik derleme araclari yukleniyor..."
+        Write-Host ""
+        Write-Host "  1) Python 3:"
+        Write-Host "     winget install Python.Python.3.12" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  2) Visual Studio Build Tools:"
+        Write-Host "     winget install Microsoft.VisualStudio.2022.BuildTools --override `"--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended`"" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  veya hepsini birlikte:"
+        Write-Host "     npm install --global windows-build-tools" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  Alternatif: Node.js 22 LTS kullan (prebuilt binary var, derleme gerekmez):"
+        Write-Host "     nvm install 22 && nvm use 22" -ForegroundColor Cyan
+        Write-Host ""
+        Stop-WithPause "Derleme araclari kuruldugunda tekrar deneyin."
+    } else {
+        Write-Ok "Derleme araclari mevcut"
+    }
 }
 
 # -- npm ---------------------------------------------------------------
