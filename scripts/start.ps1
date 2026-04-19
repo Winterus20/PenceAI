@@ -135,9 +135,19 @@ $psi.RedirectStandardError = $true
 $proc = [System.Diagnostics.Process]::new()
 $proc.StartInfo = $psi
 
+$browserOpened = $false
 $proc.OutputDataReceived.Add_DataReceived({
     param($sender, $e)
-    if ($e.Data) { Write-Host $e.Data }
+    if ($e.Data) { 
+        Write-Host $e.Data 
+        # Otomatik tarayıcı açma mantığı (sadece bir kere çalışır)
+        if (-not $script:browserOpened -and $e.Data -match "Server running at") {
+            $script:browserOpened = $true
+            $url = "http://localhost:$configPort"
+            Write-Host "Tarayici aciliyor: $url" -ForegroundColor Cyan
+            Start-Process $url -ErrorAction SilentlyContinue
+        }
+    }
 }) | Out-Null
 
 $proc.ErrorDataReceived.Add_DataReceived({

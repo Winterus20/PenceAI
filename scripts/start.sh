@@ -136,5 +136,22 @@ cleanup() {
 }
 trap 'EXIT_CODE=$?; cleanup' EXIT
 
+open_browser() {
+    local url="http://localhost:$CONFIG_PORT"
+    # Wait a moment for server to actually bind
+    sleep 2
+    echo -e "${CYAN}Tarayici aciliyor: $url${RESET}"
+    if command -v xdg-open &> /dev/null; then
+        xdg-open "$url" &> /dev/null
+    elif command -v open &> /dev/null; then
+        open "$url" &> /dev/null
+    elif command -v start &> /dev/null; then
+        start "$url" &> /dev/null
+    fi
+}
+
+# Run browser opener in background
+open_browser &
+
 node dist/gateway/index.js
 EXIT_CODE=$?
