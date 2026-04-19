@@ -15,6 +15,14 @@ export interface MetricsSession {
   contextHistoryTokens: number;
   sessionTotalToolTime: number;
   sessionToolCallCount: number;
+  compaction: {
+    wasCompacted: boolean;
+    originalTokens: number;
+    compactedTokens: number;
+    durationMs: number;
+    messagesCompacted: number;
+    summaryLength: number;
+  } | null;
 }
 
 export class MetricsTracker {
@@ -41,6 +49,7 @@ export class MetricsTracker {
       contextHistoryTokens: 0,
       sessionTotalToolTime: 0,
       sessionToolCallCount: 0,
+      compaction: null,
     };
   }
 
@@ -73,6 +82,19 @@ export class MetricsTracker {
     return this.session.sessionToolCallCount;
   }
 
+  recordCompaction(data: {
+    originalTokens: number;
+    compactedTokens: number;
+    durationMs: number;
+    messagesCompacted: number;
+    summaryLength: number;
+  }): void {
+    this.session.compaction = {
+      wasCompacted: true,
+      ...data,
+    };
+  }
+
   buildMetricsEvent(conversationId: string): AgentEvent {
     const s = this.session;
     const metricsMessageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -102,6 +124,13 @@ export class MetricsTracker {
           userMessageTokens: s.contextUserMsgTokens,
           systemPromptTokens: s.contextSystemPromptTokens,
         },
+        compaction: s.compaction ? {
+          wasCompacted: s.compaction.wasCompacted,
+          originalTokens: s.compaction.originalTokens,
+          compactedTokens: s.compaction.compactedTokens,
+          durationMs: s.compaction.durationMs,
+          messagesCompacted: s.compaction.messagesCompacted,
+        } : undefined,
       },
     };
   }
@@ -113,7 +142,10 @@ export class MetricsTracker {
       .map(([k, v]) => `${k}=${v}ms`);
     const agenticSuffix = agenticParts.length > 0 ? ` | Agentic: ${agenticParts.join(', ')}` : '';
     const toolSuffix = s.sessionTotalToolTime > 0 ? ` | Tools: ${s.sessionTotalToolTime}ms (${s.sessionToolCallCount} çağrı)` : '';
-    return `[Agent] ⏱️ PERFORMANCE BREAKDOWN — Toplam: ${Date.now() - s.startTimeMs}ms | Retrieval: ${s.perfTimings.retrieval ?? 0}ms | GraphRAG: ${s.perfTimings.graphRAG ?? 0}ms | LLM: ${Object.entries(s.perfTimings).filter(([k]) => k.startsWith('llm_call_')).map(([k, v]) => `${k}=${v}ms`).join(', ') || 'none'}${agenticSuffix}${toolSuffix}`;
+    const compactSuffix = s.compaction?.wasCompacted
+      ? ` | Compaction: ${s.compaction.originalTokens}→${s.compaction.compactedTokens} tokens (${s.compaction.messagesCompacted} msgs, ${s.compaction.durationMs}ms)`
+      : '';
+    return `[Agent] ⏱️ PERFORMANCE BREAKDOWN — Toplam: ${Date.now() - s.startTimeMs}ms | Retrieval: ${s.perfTimings.retrieval ?? 0}ms | GraphRAG: ${s.perfTimings.graphRAG ?? 0}ms | LLM: ${Object.entries(s.perfTimings).filter(([k]) => k.startsWith('llm_call_')).map(([k, v]) => `${k}=${v}ms`).join(', ') || 'none'}${agenticSuffix}${toolSuffix}${compactSuffix}`;
   }
 
   buildCostLog(): string | null {

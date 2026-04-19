@@ -68,6 +68,15 @@ export class ContextPreparer {
         return Math.ceil(text.length / 4);
     }
 
+    convertHistoryToLLMMessages(history: ConversationMessage[]): LLMMessage[] {
+        return history.map(h => ({
+            role: h.role,
+            content: h.content,
+            toolCalls: h.toolCalls,
+            toolResults: h.toolResults,
+        }));
+    }
+
     prepare(params: {
         senderName: string;
         userMessage: string;
@@ -188,5 +197,11 @@ export class ContextPreparer {
                 pastHistoryTokens,
             },
         };
+    }
+
+    getTotalContextTokens(prepared: PreparedContext): number {
+        return prepared.contextTokenInfo.systemPromptTokens
+            + prepared.contextTokenInfo.userMsgTokens
+            + prepared.contextTokenInfo.pastHistoryTokens;
     }
 }

@@ -20,11 +20,12 @@ import { MetricsTracker } from './metricsTracker.js';
 import { ContextPreparer } from './contextPreparer.js';
 import { MemoryExtractor } from './memoryExtractor.js';
 import { ReActLoop } from './reactLoop.js';
+import { CompactEngine } from './compactEngine.js';
 
 const MAX_TOOL_ITERATIONS_DEFAULT = 5;
 
 export interface AgentEvent {
-    type: 'thinking' | 'tool_start' | 'tool_end' | 'iteration' | 'token' | 'clear_stream' | 'replace_stream' | 'metrics';
+    type: 'thinking' | 'tool_start' | 'tool_end' | 'iteration' | 'token' | 'clear_stream' | 'replace_stream' | 'metrics' | 'compaction';
     data: Record<string, unknown>;
 }
 
@@ -48,6 +49,7 @@ export class AgentRuntime {
     private contextPreparer: ContextPreparer;
 
     private memoryExtractor: MemoryExtractor;
+    private compactEngine: CompactEngine;
 
     // Agentic RAG — Response Verification
     private responseVerifier?: ResponseVerifier;
@@ -63,6 +65,7 @@ constructor(llm: LLMProvider, memory: MemoryManager) {
         this.memory = memory;
         this.contextPreparer = new ContextPreparer(this.memory);
         this.memoryExtractor = new MemoryExtractor(this.llm, this.memory);
+        this.compactEngine = new CompactEngine(this.llm);
         this.maxToolIterations = getConfig().autonomousStepLimit || MAX_TOOL_ITERATIONS_DEFAULT;
         logger.info(`[Agent] Max tool iterations set to ${this.maxToolIterations}`);
 
@@ -260,24 +263,46 @@ constructor(llm: LLMProvider, memory: MemoryManager) {
             });
         }
 
-        // --- Sliding Window Context Budaması (Atomik Çift-Korumalı) ---
-        // assistant(toolCalls) + tool(toolResults) çiftleri bölünemez birim olarak ele alınır.
-        // Böylece MiniMax/OpenAI'da "tool result not found" veya "does not follow" hataları önlenir.
-        const MAX_HISTORY_TOKENS = 128000;
-        const prunedHistory = pruneConversationHistory(
+        // --- Context Compaction (Akıllı Sıkıştırma) ---
+        // Token bütçesi aşıldığında eski mesajları LLM ile özetle, bilgileri koru
+        const compactResult = await this.compactEngine.compactIfNeeded(
+            this.contextPreparer.convertHistoryToLLMMessages(history),
             history,
-            this.estimateMessageTokens.bind(this),
-            MAX_HISTORY_TOKENS,
+            conversationId,
+            0, // sessionToolCallCount will be tracked in ReAct loop
         );
-        history = prunedHistory.history;
-        if (prunedHistory.prunedChunkCount > 0) {
-            logger.info(`[Agent] ✂️ Context sınırına ulaşıldı (${MAX_HISTORY_TOKENS} token). ${prunedHistory.prunedChunkCount} eski chunk budandı.`);
-        }
-        if (prunedHistory.repairedAssistantCount > 0) {
-            logger.info(`[Agent] ⚠️ ${prunedHistory.repairedAssistantCount} eşsiz assistant(toolCalls) mesajı düzeltildi.`);
-        }
-        if (prunedHistory.skippedToolCount > 0) {
-            logger.info(`[Agent] ⚠️ ${prunedHistory.skippedToolCount} eşsiz tool result mesajı atlandı.`);
+
+        // Fallback: eğer compact başarısız olursa veya yeterli değilse, sliding window kullan
+        let finalHistory = history;
+        if (compactResult.wasCompacted) {
+            // Compacted mesajları ConversationMessage'a geri çeviremeyiz,
+            // bu yüzden llmMessages'ı doğrudan contextPreparer'dan alacağız
+            this.metricsTracker.recordCompaction({
+                originalTokens: compactResult.originalTokens,
+                compactedTokens: compactResult.compactedTokens,
+                durationMs: compactResult.durationMs,
+                messagesCompacted: compactResult.messagesCompacted,
+                summaryLength: compactResult.summaryLength,
+            });
+            logger.info(`[Agent] 🗜️ Context compacted: ${compactResult.originalTokens} → ${compactResult.compactedTokens} tokens (${compactResult.messagesCompacted} mesaj özetlendi, ${compactResult.durationMs}ms)`);
+        } else {
+            // Compaction gerekmedi veya devre dışı — sliding window fallback
+            const MAX_HISTORY_TOKENS = 128000;
+            const prunedHistory = pruneConversationHistory(
+finalHistory,
+                this.estimateMessageTokens.bind(this),
+                MAX_HISTORY_TOKENS,
+            );
+            finalHistory = prunedHistory.history;
+            if (prunedHistory.prunedChunkCount > 0) {
+                logger.info(`[Agent] ✂️ Context sınırına ulaşıldı (${MAX_HISTORY_TOKENS} token). ${prunedHistory.prunedChunkCount} eski chunk budandı.`);
+            }
+            if (prunedHistory.repairedAssistantCount > 0) {
+                logger.info(`[Agent] ⚠️ ${prunedHistory.repairedAssistantCount} eşsiz assistant(toolCalls) mesajı düzeltildi.`);
+            }
+            if (prunedHistory.skippedToolCount > 0) {
+                logger.info(`[Agent] ⚠️ ${prunedHistory.skippedToolCount} eşsiz tool result mesajı atlandı.`);
+            }
         }
 
         // Kullanıcı belleklerini akıllı şekilde al — hibrit arama (FTS + Semantik)
@@ -318,7 +343,7 @@ const graphRAGResult = await this.graphRAGManager.retrieve(
             ? this.graphRAGManager.formatCommunitySummaries(graphRAGResult.graphRAGResult.communitySummaries)
             : null;
 
-        const prepared = this.contextPreparer.prepare({
+        let prepared = this.contextPreparer.prepare({
             senderName: message.senderName,
             userMessage: message.content,
             relevantMemories: finalRelevantMemories,
@@ -328,7 +353,7 @@ const graphRAGResult = await this.graphRAGManager.retrieve(
             followUpCandidates,
             conversationSummaries,
             recentMessages,
-            history,
+history: finalHistory,
             graphRAGCommunitySummaries: graphRAGResult.graphRAGResult?.communitySummaries ?? [],
             shouldAddCommunitySummaries,
             communitySummariesFormatted,
@@ -341,6 +366,16 @@ const graphRAGResult = await this.graphRAGManager.retrieve(
             },
             getBase64,
         });
+
+        // Compact sonrası llmMessages'ı güncelle
+        if (compactResult.wasCompacted) {
+            const systemMsg = prepared.llmMessages.find(m => m.role === 'system');
+            prepared = { ...prepared, llmMessages: compactResult.messages };
+            // Compact boundary zaten system mesajı içeriyor, orijinal system prompt'u ekle (ilk sıraya)
+            if (systemMsg) {
+                prepared.llmMessages.unshift(systemMsg);
+            }
+        }
 
         const { finalSystemPrompt, llmMessages, contextTokenInfo } = prepared;
         const { systemPromptTokens, userMsgTokens, pastHistoryTokens } = contextTokenInfo;
@@ -363,6 +398,8 @@ const graphRAGResult = await this.graphRAGManager.retrieve(
             thinking: options?.thinking,
             isFirstMessage: history.filter(h => h.role === 'user').length <= 1,
             contextTokenInfo: { systemPromptTokens, userMsgTokens, pastHistoryTokens },
+            compactEngine: this.compactEngine,
+            compactThreshold: getConfig().compactTokenThreshold,
         });
 
         let response = loopResult.uiContent;

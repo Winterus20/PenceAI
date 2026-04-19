@@ -7,7 +7,7 @@ export interface HistoryPruneResult {
     skippedToolCount: number;
 }
 
-interface HistoryChunk {
+export interface HistoryChunk {
     messages: ConversationMessage[];
     tokens: number;
 }

@@ -8,6 +8,8 @@ import { extractFallbackToolCalls } from './fallbackParser.js';
 import { getConfig } from '../gateway/config.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/index.js';
+import { CompactEngine } from './compactEngine.js';
+import { getHookRegistry } from './mcp/hooks.js';
 
 export interface ReActLoopInput {
     llm: LLMProvider;
@@ -27,6 +29,8 @@ export interface ReActLoopInput {
         userMsgTokens: number;
         pastHistoryTokens: number;
     };
+    compactEngine: CompactEngine;
+    compactThreshold: number;
 }
 
 export interface ReActLoopResult {
@@ -51,6 +55,8 @@ export class ReActLoop {
             thinking,
             isFirstMessage,
             contextTokenInfo,
+            compactEngine,
+            compactThreshold,
         } = input;
 
         let uiContent = '';
@@ -222,6 +228,70 @@ export class ReActLoop {
                     timestamp: new Date(),
                     toolResults,
                 });
+
+                // Context Compaction — tool call'lar token bütçesini aşıyorsa sıkıştır
+                if (compactEngine && compactThreshold > 0) {
+                    const currentTokens = llmMessages.reduce((sum, msg) => {
+                        let t = 0;
+                        if (msg.content) t += msg.content.length;
+                        if (msg.toolCalls) for (const tc of msg.toolCalls) { t += tc.name.length + JSON.stringify(tc.arguments).length; }
+                        if (msg.toolResults) for (const tr of msg.toolResults) { t += tr.name.length + String(tr.result || '').length; }
+                        return sum + t + 4;
+                    }, 0);
+                    const approxTokens = Math.ceil(currentTokens / 4);
+
+                    if (approxTokens > compactThreshold) {
+                        const config = getConfig();
+                        if (config.enableHooks) {
+                            const hookRegistry = getHookRegistry();
+                            await hookRegistry.executePhase('PreCompact', {
+                                toolName: '*',
+                                args: { currentTokens: approxTokens, threshold: compactThreshold },
+                                sessionId: conversationId,
+                                callCount: toolManager.sessionToolCallCount,
+                                totalTokens: approxTokens,
+                                tokenThreshold: compactThreshold,
+                                compactReason: 'react_loop_budget_exceeded',
+                            });
+                        }
+
+                        const compactResult = await compactEngine.compactIfNeeded(
+                            llmMessages,
+                            [],
+                            conversationId,
+                            toolManager.sessionToolCallCount,
+                        );
+
+                        if (compactResult.wasCompacted) {
+                            llmMessages.length = 0;
+                            llmMessages.push(...compactResult.messages);
+                            metricsTracker.recordCompaction({
+                                originalTokens: compactResult.originalTokens,
+                                compactedTokens: compactResult.compactedTokens,
+                                durationMs: compactResult.durationMs,
+                                messagesCompacted: compactResult.messagesCompacted,
+                                summaryLength: compactResult.summaryLength,
+                            });
+                            logger.info(`[ReActLoop] 🗜️ In-loop context compacted: ${compactResult.originalTokens} → ${compactResult.compactedTokens} tokens`);
+
+                            if (config.enableHooks) {
+                                const hookRegistry = getHookRegistry();
+                                hookRegistry.executePhase('PostCompact', {
+                                    toolName: '*',
+                                    args: { originalTokens: compactResult.originalTokens, compactedTokens: compactResult.compactedTokens },
+                                    sessionId: conversationId,
+                                    callCount: toolManager.sessionToolCallCount,
+                                    totalTokens: compactResult.compactedTokens,
+                                    tokenThreshold: compactThreshold,
+                                }).catch(err => logger.debug({ err }, '[ReActLoop] PostCompact hook error (non-blocking)'));
+                            }
+
+                            if (onEvent) {
+                                onEvent({ type: 'compaction', data: { originalTokens: compactResult.originalTokens, compactedTokens: compactResult.compactedTokens } });
+                            }
+                        }
+                    }
+                }
 
                 continue; // LLM'e tekrar dön
             }

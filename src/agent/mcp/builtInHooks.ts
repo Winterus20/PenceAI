@@ -174,8 +174,8 @@ function registerDevServerBlocker(registry: HookRegistry): void {
   });
 }
 
-const CONTEXT_BUDGET_SOFT_LIMIT = 40;
-const CONTEXT_BUDGET_HARD_LIMIT = 60;
+const CONTEXT_CALL_SOFT_LIMIT = 40;
+const CONTEXT_CALL_HARD_LIMIT = 60;
 
 function registerContextBudgetGuard(registry: HookRegistry): void {
   registry.register({
@@ -184,24 +184,55 @@ function registerContextBudgetGuard(registry: HookRegistry): void {
     matcher: '*',
     priority: 0,
     handler: async (ctx: HookContext): Promise<HookResult> => {
-      if (ctx.callCount >= CONTEXT_BUDGET_HARD_LIMIT) {
+      const totalTokens = ctx.totalTokens;
+      const tokenThreshold = ctx.tokenThreshold;
+
+      // Token-based budget check (primary)
+      if (totalTokens !== undefined && tokenThreshold !== undefined && tokenThreshold > 0) {
+        const ratio = totalTokens / tokenThreshold;
+        if (ratio >= 1.0) {
+          logger.warn({
+            totalTokens,
+            threshold: tokenThreshold,
+            ratio: ratio.toFixed(2),
+          }, '[Hook:BudgetGuard] Hard context budget limit reached — compaction required');
+          return {
+            decision: 'block',
+            reason: `Context budget hard limit reached (${totalTokens} tokens >= ${tokenThreshold} threshold). Compaction is required.`,
+          };
+        }
+        if (ratio >= 0.8) {
+          logger.info({
+            totalTokens,
+            threshold: tokenThreshold,
+            ratio: ratio.toFixed(2),
+          }, '[Hook:BudgetGuard] Soft context budget limit reached — compaction recommended');
+          return {
+            decision: 'ask',
+            reason: `Approaching context budget limit (${totalTokens}/${tokenThreshold} tokens, ${(ratio * 100).toFixed(0)}%). Consider compacting context.`,
+          };
+        }
+      }
+
+      // Fallback: call count based check
+      if (ctx.callCount >= CONTEXT_CALL_HARD_LIMIT) {
         logger.warn({
           callCount: ctx.callCount,
-          limit: CONTEXT_BUDGET_HARD_LIMIT,
-        }, '[Hook:BudgetGuard] Hard context budget limit reached — compaction required');
+          limit: CONTEXT_CALL_HARD_LIMIT,
+        }, '[Hook:BudgetGuard] Hard context budget limit reached (call count) — compaction required');
         return {
           decision: 'block',
-          reason: `Context budget hard limit reached (${ctx.callCount} calls >= ${CONTEXT_BUDGET_HARD_LIMIT}). Compaction is required before proceeding.`,
+          reason: `Context budget hard limit reached (${ctx.callCount} calls >= ${CONTEXT_CALL_HARD_LIMIT}). Compaction is required before proceeding.`,
         };
       }
-      if (ctx.callCount >= CONTEXT_BUDGET_SOFT_LIMIT) {
+      if (ctx.callCount >= CONTEXT_CALL_SOFT_LIMIT) {
         logger.info({
           callCount: ctx.callCount,
-          limit: CONTEXT_BUDGET_SOFT_LIMIT,
-        }, '[Hook:BudgetGuard] Soft context budget limit reached — compaction recommended');
+          limit: CONTEXT_CALL_SOFT_LIMIT,
+        }, '[Hook:BudgetGuard] Soft context budget limit reached (call count) — compaction recommended');
         return {
           decision: 'ask',
-          reason: `Approaching context budget limit (${ctx.callCount}/${CONTEXT_BUDGET_HARD_LIMIT} calls). Consider compacting context.`,
+          reason: `Approaching context budget limit (${ctx.callCount}/${CONTEXT_CALL_HARD_LIMIT} calls). Consider compacting context.`,
         };
       }
       return { decision: 'approve' };

@@ -94,6 +94,13 @@ const ConfigSchema = z.object({
   hookContextBudgetGuard: z.coerce.boolean().default(true),
   hookSessionSummary: z.coerce.boolean().default(true),
 
+  // Context Compaction
+  compactEnabled: z.coerce.boolean().default(true),
+  compactTokenThreshold: z.coerce.number().min(10000).max(200000).catch(100000).default(100000),
+  compactPreserveRecentMessages: z.coerce.number().min(2).max(50).catch(10).default(10),
+  compactPreserveFileAttachments: z.coerce.boolean().default(true),
+  compactMaxFileAttachmentBytes: z.coerce.number().min(1024).max(102400).catch(51200).default(51200),
+
   // Agentic RAG
   agenticRAGEnabled: z.coerce.boolean().default(true),
   agenticRAGMaxHops: z.coerce.number().min(1).max(5).default(3),
@@ -159,6 +166,13 @@ export function loadConfig(): AppConfig {
         hookDevServerBlocker: process.env.HOOK_DEV_SERVER_BLOCKER,
         hookContextBudgetGuard: process.env.HOOK_CONTEXT_BUDGET_GUARD,
         hookSessionSummary: process.env.HOOK_SESSION_SUMMARY,
+
+        // Context Compaction
+        compactEnabled: process.env.COMPACT_ENABLED,
+        compactTokenThreshold: process.env.COMPACT_TOKEN_THRESHOLD,
+        compactPreserveRecentMessages: process.env.COMPACT_PRESERVE_RECENT_MESSAGES,
+        compactPreserveFileAttachments: process.env.COMPACT_PRESERVE_FILE_ATTACHMENTS,
+        compactMaxFileAttachmentBytes: process.env.COMPACT_MAX_FILE_ATTACHMENT_BYTES,
 
         // Agentic RAG
         agenticRAGEnabled: process.env.AGENTIC_RAG_ENABLED,

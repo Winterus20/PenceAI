@@ -33,6 +33,8 @@ export interface HookContext {
   result?: unknown;
   error?: string;
   compactReason?: string;
+  totalTokens?: number;
+  tokenThreshold?: number;
 }
 
 export interface HookResult {
