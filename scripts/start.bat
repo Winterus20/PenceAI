@@ -2,4 +2,3 @@
 setlocal
 cd /d "%~dp0"
 powershell.exe -ExecutionPolicy Bypass -NoProfile -File "start.ps1"
-pause

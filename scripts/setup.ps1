@@ -63,6 +63,65 @@ function Check-DiskSpace {
     return $true
 }
 
+function Test-PortAvailable {
+    param([int]$Port)
+    try {
+        $tcpListener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
+        $tcpListener.Start()
+        $tcpListener.Stop()
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Invoke-NpmStream {
+    param(
+        [string]$WorkingDir,
+        [string]$LogPath
+    )
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "cmd.exe"
+    $psi.Arguments = "/c npm install"
+    $psi.WorkingDirectory = $WorkingDir
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $proc = [System.Diagnostics.Process]::new()
+    $proc.StartInfo = $psi
+
+    $stdoutLines = [System.Collections.ArrayList]::new()
+    $stderrLines = [System.Collections.ArrayList]::new()
+
+    $proc.OutputDataReceived.Add_DataReceived({
+        param($sender, $e)
+        if ($e.Data) {
+            $stdoutLines.Add($e.Data) | Out-Null
+            Write-Host "    $($e.Data)"
+        }
+    }) | Out-Null
+
+    $proc.ErrorDataReceived.Add_DataReceived({
+        param($sender, $e)
+        if ($e.Data) {
+            $stderrLines.Add($e.Data) | Out-Null
+            Write-Host "    $($e.Data)" -ForegroundColor DarkGray
+        }
+    }) | Out-Null
+
+    $proc.Start() | Out-Null
+    $proc.BeginOutputReadLine()
+    $proc.BeginErrorReadLine()
+    $proc.WaitForExit()
+
+    $allLines = $stdoutLines + $stderrLines
+    $allLines | Out-File -FilePath $LogPath -Encoding UTF8
+
+    return $proc.ExitCode
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..")
 
@@ -73,7 +132,7 @@ Write-Host "========================================" -ForegroundColor White
 Write-Host ""
 
 # -- Disk space --------------------------------------------------------
-Write-Host "[0/8] Disk alani kontrol ediliyor..." -ForegroundColor White
+Write-Host "[0/9] Disk alani kontrol ediliyor..." -ForegroundColor White
 if (-not (Check-DiskSpace -RequiredMB 2000)) {
     Write-Warn "Yetersiz disk alani. En az 2GB bos alan onerilir."
     Write-Host ""
@@ -84,9 +143,107 @@ if (-not (Check-DiskSpace -RequiredMB 2000)) {
 }
 Write-Ok "Disk alani yeterli"
 
+# -- System dependencies -----------------------------------------------
+Write-Host ""
+Write-Host "[1/9] Sistem bagimliliklari kontrol ediliyor..." -ForegroundColor White
+
+$missingSys = @()
+$sysChecks = @(
+    @{ Cmd = "gcc";     Name = "gcc (C derleyici)" },
+    @{ Cmd = "g++";     Name = "g++ (C++ derleyici)" },
+    @{ Cmd = "make";    Name = "make (build araci)" },
+    @{ Cmd = "python3"; Name = "python3" },
+    @{ Cmd = "git";     Name = "git" },
+    @{ Cmd = "curl";    Name = "curl" }
+)
+
+foreach ($check in $sysChecks) {
+    if (-not (Test-Command $check.Cmd)) {
+        $missingSys += $check.Name
+    }
+}
+
+if ($missingSys.Count -gt 0) {
+    Write-Host ""
+    Write-Warn "Asagidaki sistem paketleri eksik:"
+    foreach ($dep in $missingSys) {
+        Write-Host "    - $dep"
+    }
+    Write-Host ""
+    Write-Step "Eksik paketler yukleniyor..."
+
+    $pkgMap = @{
+        "gcc"             = "gcc"
+        "g++"             = "g++"
+        "make"            = "make"
+        "python3"         = "python3"
+        "git"             = "git"
+        "curl"            = "curl"
+    }
+
+    $toInstall = @()
+    foreach ($dep in $missingSys) {
+        $pkgName = $pkgMap[$dep]
+        if ($pkgName) { $toInstall += $pkgName }
+    }
+
+    $installed = $false
+
+    if (Test-Command "winget") {
+        Write-Step "winget ile yukleniyor..."
+        $failed = @()
+        foreach ($pkg in $toInstall) {
+            Write-Step "winget install $pkg ..."
+            try {
+                winget install $pkg --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { $failed += $pkg }
+            } catch { $failed += $pkg }
+        }
+        if ($failed.Count -eq 0) {
+            $installed = $true
+            Write-Ok "Sistem paketleri winget ile yuklendi"
+        } else {
+            Write-Warn "Bazi paketler yuklenemedi: $($failed -join ', ')"
+        }
+    }
+
+    if (-not $installed -and (Test-Command "choco")) {
+        Write-Step "choco ile yukleniyor..."
+        try {
+            choco install $toInstall -y 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                $installed = $true
+                Write-Ok "Sistem paketleri choco ile yuklendi"
+            }
+        } catch {}
+    }
+
+    if (-not $installed) {
+        Write-Host ""
+        Write-Err "Otomatik paket kurulumu yapilamadi!"
+        Write-Host "  Asagidaki paketleri manuel olarak kurun:"
+        foreach ($dep in $missingSys) {
+            Write-Host "    - $dep"
+        }
+        Write-Host ""
+        Write-Host "  winget ile:" -ForegroundColor Cyan
+        Write-Host "    winget install Git Git.Git Python.Python.3.12" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  veya choco ile:" -ForegroundColor Cyan
+        Write-Host "    choco install git python make curl gcc" -ForegroundColor Cyan
+        Write-Host ""
+        $confirm = Read-Host "Devam etmek istiyor musunuz? (e/H)"
+        if ($confirm -ne "e" -and $confirm -ne "E") {
+            Stop-WithPause "Kurulum durduruldu."
+        }
+    }
+} else {
+    Write-Ok "Tum sistem bagimliliklari mevcut"
+}
+
 # -- Node.js -----------------------------------------------------------
 Write-Host ""
-Write-Host "[1/8] Node.js kontrol ediliyor..." -ForegroundColor White
+Write-Host "[2/9] Node.js kontrol ediliyor..." -ForegroundColor White
 
 $needsInstall = $false
 $needsUpgrade = $false
@@ -186,8 +343,8 @@ $nodeMajor = [int]($nodeVersion.Split('.')[0])
 
 if ($nodeMajor -gt 22) {
     Write-Host ""
-    Write-Host "[1.5/8] Native modul derleme araclari kontrol ediliyor..." -ForegroundColor White
-    Write-Warn "Node.js $nodeVersion icin prebuilt binary bulunamadi, derleme gerekli"
+    Write-Host "[2.5/9] Native modul derleme araclari kontrol ediliyor..." -ForegroundColor White
+    Write-Warn "Node.js $nodeMajor icin prebuilt binary bulunamadi, derleme gerekli"
 
     $needBuildTools = $false
 
@@ -204,13 +361,14 @@ if ($nodeMajor -gt 22) {
         $needBuildTools = $true
     }
 
-    # Check VS Build Tools
+    # Check VS Build Tools (corrected paths)
     $vsFound = $false
     $vsPaths = @(
-        "${env:ProgramFiles (x86)}\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC",
-        "${env:ProgramFiles (x86)}\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC",
         "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC",
-        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\VC\Tools\MSVC"
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\VC\Tools\MSVC",
+        "${env:ProgramFiles (x86)}\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC",
+        "${env:ProgramFiles (x86)}\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC"
     )
     foreach ($p in $vsPaths) {
         if (Test-Path $p) { $vsFound = $true; break }
@@ -244,49 +402,39 @@ if ($nodeMajor -gt 22) {
 
 # -- npm ---------------------------------------------------------------
 Write-Host ""
-Write-Host "[2/8] Bagimliliklar kuruluyor..." -ForegroundColor White
+Write-Host "[3/9] Bagimliliklar kuruluyor..." -ForegroundColor White
 
 Set-Location $ProjectRoot
 
 Write-Step "Root bagimliliklari kuruluyor (bu birkac dakika surebilir)..."
 $npmRootLog = Join-Path $env:TEMP "penceai_npm_root.log"
-$npmOutput = cmd /c "npm install 2>&1"
-$npmRootExit = $LASTEXITCODE
-$npmOutput | Out-File -FilePath $npmRootLog -Encoding UTF8
-if ($npmRootExit -ne 0) {
-    Write-Err "npm install basarisiz oldu (cikis kodu: $npmRootExit)"
-    Write-Host ""
-    if (Test-Path $npmRootLog) {
-        Get-Content $npmRootLog -Encoding UTF8 | ForEach-Object { Write-Host "  $_" }
+try {
+    $npmRootExit = Invoke-NpmStream -WorkingDir $ProjectRoot -LogPath $npmRootLog
+    if ($npmRootExit -ne 0) {
+        Write-Err "npm install basarisiz oldu (cikis kodu: $npmRootExit)"
+        Stop-WithPause "Kurulum durduruldu."
     }
+} finally {
     Remove-Item $npmRootLog -Force -ErrorAction SilentlyContinue
-    Stop-WithPause "Kurulum durduruldu."
 }
-Remove-Item $npmRootLog -Force -ErrorAction SilentlyContinue
 Write-Ok "Root bagimliliklari"
 
 Write-Step "Frontend bagimliliklari kuruluyor..."
 $npmFrontLog = Join-Path $env:TEMP "penceai_npm_front.log"
-Push-Location "src\web\react-app"
-$npmOutput = cmd /c "npm install 2>&1"
-$npmFrontExit = $LASTEXITCODE
-$npmOutput | Out-File -FilePath $npmFrontLog -Encoding UTF8
-Pop-Location
-if ($npmFrontExit -ne 0) {
-    Write-Err "Frontend npm install basarisiz oldu (cikis kodu: $npmFrontExit)"
-    Write-Host ""
-    if (Test-Path $npmFrontLog) {
-        Get-Content $npmFrontLog -Encoding UTF8 | ForEach-Object { Write-Host "  $_" }
+try {
+    $npmFrontExit = Invoke-NpmStream -WorkingDir (Join-Path $ProjectRoot "src\web\react-app") -LogPath $npmFrontLog
+    if ($npmFrontExit -ne 0) {
+        Write-Err "Frontend npm install basarisiz oldu (cikis kodu: $npmFrontExit)"
+        Stop-WithPause "Kurulum durduruldu."
     }
+} finally {
     Remove-Item $npmFrontLog -Force -ErrorAction SilentlyContinue
-    Stop-WithPause "Kurulum durduruldu."
 }
-Remove-Item $npmFrontLog -Force -ErrorAction SilentlyContinue
 Write-Ok "Frontend bagimliliklari"
 
 # -- .env --------------------------------------------------------------
 Write-Host ""
-Write-Host "[3/8] .env dosyasi yapilandiriliyor..." -ForegroundColor White
+Write-Host "[4/9] .env dosyasi yapilandiriliyor..." -ForegroundColor White
 
 $envFile = Join-Path $ProjectRoot ".env"
 $envExample = Join-Path $ProjectRoot ".env.example"
@@ -305,7 +453,7 @@ if (-not (Test-Path $envFile)) {
 
 # -- API Key -----------------------------------------------------------
 Write-Host ""
-Write-Host "[4/8] LLM API anahtari yapilandiriliyor" -ForegroundColor White
+Write-Host "[5/9] LLM API anahtari yapilandiriliyor" -ForegroundColor White
 Write-Host ""
 
 $providers = @(
@@ -369,31 +517,56 @@ if ($selected.Default -eq "ollama") {
 
 # -- Build -------------------------------------------------------------
 Write-Host ""
-Write-Host "[5/8] Proje derleniyor..." -ForegroundColor White
+Write-Host "[6/9] Proje derleniyor..." -ForegroundColor White
 
 Write-Step "TypeScript + Frontend build (bu birkac dakika surebilir)..."
 $buildLog = Join-Path $env:TEMP "penceai_build.log"
-$buildOutput = cmd /c "npm run build 2>&1"
-$buildExit = $LASTEXITCODE
-$buildOutput | Out-File -FilePath $buildLog -Encoding UTF8
-if ($buildExit -ne 0) {
-    Write-Err "Build basarisiz oldu (cikis kodu: $buildExit)"
-    Write-Host ""
-    if (Test-Path $buildLog) {
-        Get-Content $buildLog -Encoding UTF8 | ForEach-Object { Write-Host "  $_" }
+try {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "cmd.exe"
+    $psi.Arguments = "/c npm run build"
+    $psi.WorkingDirectory = $ProjectRoot
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $proc = [System.Diagnostics.Process]::new()
+    $proc.StartInfo = $psi
+
+    $proc.OutputDataReceived.Add_DataReceived({
+        param($sender, $e)
+        if ($e.Data) { Write-Host "    $($e.Data)" }
+    }) | Out-Null
+
+    $proc.ErrorDataReceived.Add_DataReceived({
+        param($sender, $e)
+        if ($e.Data) { Write-Host "    $($e.Data)" -ForegroundColor DarkGray }
+    }) | Out-Null
+
+    $proc.Start() | Out-Null
+    $proc.BeginOutputReadLine()
+    $proc.BeginErrorReadLine()
+    $proc.WaitForExit()
+
+    $buildOutput = $proc.StandardOutput.ReadToEnd() + $proc.StandardError.ReadToEnd()
+    $buildOutput | Out-File -FilePath $buildLog -Encoding UTF8
+
+    if ($proc.ExitCode -ne 0) {
+        Write-Err "Build basarisiz oldu (cikis kodu: $($proc.ExitCode))"
+        Write-Host ""
+        Write-Host "  Gelistirme modunda baslatmayi deneyebilirsiniz:"
+        Write-Host "  npm run dev" -ForegroundColor Cyan
+        Stop-WithPause "Kurulum durduruldu."
     }
-    Write-Host ""
-    Write-Host "  Gelistirme modunda baslatmayi deneyebilirsiniz:"
-    Write-Host "  npm run dev" -ForegroundColor Cyan
+} finally {
     Remove-Item $buildLog -Force -ErrorAction SilentlyContinue
-    Stop-WithPause "Kurulum durduruldu."
 }
-Remove-Item $buildLog -Force -ErrorAction SilentlyContinue
 Write-Ok "Build tamamlandi"
 
 # -- Database directory ------------------------------------------------
 Write-Host ""
-Write-Host "[6/8] Veritabani dizini hazirlaniyor..." -ForegroundColor White
+Write-Host "[7/9] Veritabani dizini hazirlaniyor..." -ForegroundColor White
 
 $dbDir = Join-Path $ProjectRoot "data"
 if (-not (Test-Path $dbDir)) {
@@ -403,9 +576,49 @@ if (-not (Test-Path $dbDir)) {
     Write-Ok "data\ dizini zaten mevcut"
 }
 
+# -- Port check --------------------------------------------------------
+Write-Host ""
+Write-Host "[8/9] Port kontrolu yapiliyor..." -ForegroundColor White
+
+$configPort = 3001
+$envPortLine = Select-String -Path $envFile -Pattern "^PORT=" -ErrorAction SilentlyContinue
+if ($envPortLine) {
+    $configPort = [int]($envPortLine.Line -replace '^PORT=', '')
+}
+
+if (-not (Test-PortAvailable -Port $configPort)) {
+    Write-Warn "Port $configPort zaten kullaniliyor!"
+    Write-Host ""
+    $procInfo = Get-NetTCPConnection -LocalPort $configPort -ErrorAction SilentlyContinue | ForEach-Object {
+        $proc = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+        if ($proc) { "$($proc.ProcessName) (PID: $($proc.Id))" }
+    }
+    if ($procInfo) {
+        Write-Host "  Kullanilan surec: $($procInfo -join ', ')" -ForegroundColor Yellow
+    }
+    Write-Host ""
+    $confirm = Read-Host "Bu sureci kapatip devam etmek istiyor musunuz? (e/H)"
+    if ($confirm -eq "e" -or $confirm -eq "E") {
+        $pids = Get-NetTCPConnection -LocalPort $configPort -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique
+        foreach ($pid in $pids) {
+            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Seconds 2
+        if (Test-PortAvailable -Port $configPort) {
+            Write-Ok "Port $configPort serbest birakildi"
+        } else {
+            Stop-WithPause "Port $configPort hala kullaniliyor. Manuel olarak kapatip tekrar deneyin."
+        }
+    } else {
+        Stop-WithPause "Port $configPort kullaniliyor. Baska bir port ayarlayin veya mevcut sureci kapatip tekrar deneyin."
+    }
+} else {
+    Write-Ok "Port $configPort musait"
+}
+
 # -- Summary -----------------------------------------------------------
 Write-Host ""
-Write-Host "[7/8] Kurulum tamamlandi!" -ForegroundColor White
+Write-Host "[9/9] Kurulum tamamlandi!" -ForegroundColor White
 Write-Host ""
 Write-Host "========================================"
 Write-Host ""
@@ -416,7 +629,7 @@ Write-Host "    npm start" -ForegroundColor Cyan -NoNewline; Write-Host "       
 Write-Host "    npm run dev" -ForegroundColor Cyan -NoNewline; Write-Host "             (Gelistirme modu, hot-reload)"
 Write-Host "    scripts\start.bat" -ForegroundColor Cyan -NoNewline; Write-Host "       (Alternatif baslatma)"
 Write-Host ""
-Write-Host "  Dashboard: http://localhost:3001" -ForegroundColor Cyan
+Write-Host "  Dashboard: http://localhost:$configPort" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Yapilandirmayi degistirmek icin:"
 Write-Host "    notepad .env" -ForegroundColor Cyan

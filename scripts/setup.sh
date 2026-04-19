@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 CYAN='\033[36m'
 GREEN='\033[32m'
 YELLOW='\033[33m'
 RED='\033[31m'
 BOLD='\033[1m'
+GRAY='\033[90m'
 RESET='\033[0m'
 
 # Global error trap: show error + pause, then exit
@@ -72,6 +74,37 @@ check_disk_space() {
     return 0
 }
 
+test_port_available() {
+    local port="$1"
+    if command -v ss &>/dev/null; then
+        if ss -tlnp 2>/dev/null | grep -q ":${port} "; then
+            return 1
+        fi
+    elif command -v lsof &>/dev/null; then
+        if lsof -i ":${port}" &>/dev/null; then
+            return 1
+        fi
+    elif command -v nc &>/dev/null; then
+        if nc -z localhost "$port" 2>/dev/null; then
+            return 1
+        fi
+    fi
+    return 0
+}
+
+get_process_on_port() {
+    local port="$1"
+    if command -v lsof &>/dev/null; then
+        lsof -i ":${port}" -t 2>/dev/null | while read -r pid; do
+            ps -p "$pid" -o comm= 2>/dev/null | while read -r name; do
+                echo "$name (PID: $pid)"
+            done
+        done | tr '\n' ', ' | sed 's/,$//'
+    elif command -v fuser &>/dev/null; then
+        fuser "${port}/tcp" 2>/dev/null
+    fi
+}
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -82,7 +115,7 @@ echo -e "${BOLD}========================================${RESET}"
 echo ""
 
 # -- Disk space --------------------------------------------------------
-echo -e "${BOLD}[0/8] Disk alani kontrol ediliyor...${RESET}"
+echo -e "${BOLD}[0/9] Disk alani kontrol ediliyor...${RESET}"
 if ! check_disk_space 2000 "$PROJECT_ROOT"; then
     warn "Yetersiz disk alani. En az 2GB bos alan onerilir."
     echo ""
@@ -95,7 +128,7 @@ ok "Disk alani yeterli"
 
 # -- System dependencies -----------------------------------------------
 echo ""
-echo -e "${BOLD}[1/7] Sistem bagimliliklari kontrol ediliyor...${RESET}"
+echo -e "${BOLD}[1/9] Sistem bagimliliklari kontrol ediliyor...${RESET}"
 
 MISSING_SYS=()
 
@@ -203,7 +236,7 @@ fi
 
 # -- Node.js -----------------------------------------------------------
 echo ""
-echo -e "${BOLD}[2/8] Node.js kontrol ediliyor...${RESET}"
+echo -e "${BOLD}[2/9] Node.js kontrol ediliyor...${RESET}"
 
 NEEDS_INSTALL=false
 NEEDS_UPGRADE=false
@@ -332,15 +365,13 @@ fi
 
 # -- npm ---------------------------------------------------------------
 echo ""
-echo -e "${BOLD}[3/8] Bagimliliklar kuruluyor...${RESET}"
+echo -e "${BOLD}[3/9] Bagimliliklar kuruluyor...${RESET}"
 
 cd "$PROJECT_ROOT"
 
 step "Root bagimliliklari kuruluyor (bu birkac dakika surebilir)..."
-set +e
 npm install 2>&1 | tee /tmp/penceai_npm_root.log
 NPM_EXIT=${PIPESTATUS[0]:-$?}
-set -u
 if [ "$NPM_EXIT" -ne 0 ]; then
     err "npm install basarisiz oldu (cikis kodu: $NPM_EXIT)"
     echo ""
@@ -354,10 +385,8 @@ ok "Root bagimliliklari"
 
 step "Frontend bagimliliklari kuruluyor..."
 cd "$PROJECT_ROOT/src/web/react-app"
-set +e
 npm install 2>&1 | tee /tmp/penceai_npm_front.log
 NPM_EXIT=${PIPESTATUS[0]:-$?}
-set -u
 if [ "$NPM_EXIT" -ne 0 ]; then
     err "Frontend npm install basarisiz oldu (cikis kodu: $NPM_EXIT)"
     echo ""
@@ -372,7 +401,7 @@ ok "Frontend bagimliliklari"
 
 # -- .env --------------------------------------------------------------
 echo ""
-echo -e "${BOLD}[4/8] .env dosyasi yapilandiriliyor...${RESET}"
+echo -e "${BOLD}[4/9] .env dosyasi yapilandiriliyor...${RESET}"
 
 ENV_FILE="$PROJECT_ROOT/.env"
 ENV_EXAMPLE="$PROJECT_ROOT/.env.example"
@@ -391,7 +420,7 @@ fi
 
 # -- API Key -----------------------------------------------------------
 echo ""
-echo -e "${BOLD}[5/8] LLM API anahtari yapilandiriliyor${RESET}"
+echo -e "${BOLD}[5/9] LLM API anahtari yapilandiriliyor${RESET}"
 echo ""
 
 PROVIDERS=(
@@ -454,13 +483,11 @@ fi
 
 # -- Build -------------------------------------------------------------
 echo ""
-echo -e "${BOLD}[6/8] Proje derleniyor...${RESET}"
+echo -e "${BOLD}[6/9] Proje derleniyor...${RESET}"
 
 step "TypeScript + Frontend build (bu birkac dakika surebilir)..."
-set +e
 npm run build 2>&1 | tee /tmp/penceai_build.log
 BUILD_EXIT=${PIPESTATUS[0]:-$?}
-set -u
 if [ "$BUILD_EXIT" -ne 0 ]; then
     err "Build basarisiz oldu (cikis kodu: $BUILD_EXIT)"
     echo ""
@@ -477,7 +504,7 @@ ok "Build tamamlandi"
 
 # -- Database directory ------------------------------------------------
 echo ""
-echo -e "${BOLD}[7/8] Veritabani dizini hazirlaniyor...${RESET}"
+echo -e "${BOLD}[7/9] Veritabani dizini hazirlaniyor...${RESET}"
 
 DB_DIR="$PROJECT_ROOT/data"
 if [ ! -d "$DB_DIR" ]; then
@@ -487,9 +514,46 @@ else
     ok "data/ dizini zaten mevcut"
 fi
 
+# -- Port check --------------------------------------------------------
+echo ""
+echo -e "${BOLD}[8/9] Port kontrolu yapiliyor...${RESET}"
+
+CONFIG_PORT=3001
+env_port_line=$(grep -E "^PORT=" "$ENV_FILE" 2>/dev/null || true)
+if [ -n "$env_port_line" ]; then
+    CONFIG_PORT="${env_port_line#PORT=}"
+fi
+
+if ! test_port_available "$CONFIG_PORT"; then
+    proc_info=$(get_process_on_port "$CONFIG_PORT")
+    if [ -n "$proc_info" ]; then
+        warn "Port $CONFIG_PORT zaten kullaniliyor: $proc_info"
+    else
+        warn "Port $CONFIG_PORT zaten kullaniliyor"
+    fi
+    echo ""
+    read -rp "Bu sureci kapatip devam etmek istiyor musunuz? (e/H) " confirm_port
+    if [ "$confirm_port" = "e" ] || [ "$confirm_port" = "E" ]; then
+        if command -v lsof &>/dev/null; then
+            lsof -i ":${CONFIG_PORT}" -t 2>/dev/null | xargs kill -9 2>/dev/null || true
+        elif command -v fuser &>/dev/null; then
+            fuser -k "${CONFIG_PORT}/tcp" 2>/dev/null || true
+        fi
+        sleep 2
+        if ! test_port_available "$CONFIG_PORT"; then
+            stop_with_pause "Port $CONFIG_PORT hala kullaniliyor. Manuel olarak kapatip tekrar deneyin."
+        fi
+        ok "Port $CONFIG_PORT serbest birakildi"
+    else
+        stop_with_pause "Port $CONFIG_PORT kullaniliyor. Baska bir port ayarlayin veya mevcut sureci kapatip tekrar deneyin."
+    fi
+else
+    ok "Port $CONFIG_PORT musait"
+fi
+
 # -- Summary -----------------------------------------------------------
 echo ""
-echo -e "${BOLD}[8/8] Kurulum tamamlandi!${RESET}"
+echo -e "${BOLD}[9/9] Kurulum tamamlandi!${RESET}"
 echo ""
 echo "========================================"
 echo ""
@@ -500,7 +564,7 @@ echo -e "    ${CYAN}npm start${RESET}              (Production modu)"
 echo -e "    ${CYAN}npm run dev${RESET}             (Gelistirme modu, hot-reload)"
 echo -e "    ${CYAN}./scripts/start.sh${RESET}       (Alternatif baslatma)"
 echo ""
-echo -e "  Dashboard: ${CYAN}http://localhost:3001${RESET}"
+echo -e "  Dashboard: ${CYAN}http://localhost:${CONFIG_PORT}${RESET}"
 echo ""
 echo "  Yapilandirmayi degistirmek icin:"
 echo -e "    ${CYAN}\$EDITOR .env${RESET}"
