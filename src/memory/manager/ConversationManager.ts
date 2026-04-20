@@ -19,6 +19,8 @@ import {
   type ConversationRow,
   type MessageRow,
   type RecentConversationRow,
+  type ConversationBranchInfo,
+  type ForkConversationResponse,
 } from '../types.js';
 import { buildConversationTranscript } from '../contextUtils.js';
 import type {
@@ -200,9 +202,12 @@ export class ConversationManager {
       SELECT
         c.id, c.title, c.channel_type, c.channel_id, c.user_id, c.user_name,
         c.created_at, c.updated_at, c.message_count, c.is_summarized,
-        (SELECT content FROM messages WHERE conversation_id = c.id AND role = 'user' ORDER BY id ASC LIMIT 1) as first_message
+        c.parent_conversation_id, c.branch_point_message_id, c.display_order,
+        (SELECT content FROM messages WHERE conversation_id = c.id AND role = 'user' ORDER BY id ASC LIMIT 1) as first_message,
+        CASE WHEN c.parent_conversation_id IS NOT NULL THEN 1 ELSE 0 END as is_branch,
+        CASE WHEN EXISTS (SELECT 1 FROM conversations WHERE parent_conversation_id = c.id) THEN 1 ELSE 0 END as has_children
       FROM conversations c
-      ORDER BY c.updated_at DESC
+      ORDER BY COALESCE(c.display_order, printf('%04d', c.rowid)) ASC
       LIMIT ?
     `).all(limit) as RecentConversationRow[];
   }
@@ -273,7 +278,28 @@ export class ConversationManager {
    * Konuşmayı siler.
    * @returns silme başarılıysa true, konuşma bulunamadıysa false
    */
-  deleteConversation(conversationId: string): boolean {
+  deleteConversation(conversationId: string, deleteBranches: boolean = false): boolean {
+    if (deleteBranches) {
+      const children = this.db.prepare(
+        `SELECT id FROM conversations WHERE parent_conversation_id = ?`
+      ).all(conversationId) as Array<{ id: string }>;
+      for (const child of children) {
+        this.deleteConversation(child.id, true);
+      }
+    } else {
+      const children = this.db.prepare(
+        `SELECT id, rowid FROM conversations WHERE parent_conversation_id = ?`
+      ).all(conversationId) as Array<{ id: string; rowid: number }>;
+      if (children.length > 0) {
+        const orphanStmt = this.db.prepare(
+          `UPDATE conversations SET parent_conversation_id = NULL, display_order = printf('%04d', rowid) WHERE id = ?`
+        );
+        for (const child of children) {
+          orphanStmt.run(child.id);
+        }
+        logger.info(`[Memory] ${children.length} dal yetim bırakıldı (bağımsız conversation oldu)`);
+      }
+    }
     // Önce silinecek mesajların ID'lerini al → message_embeddings temizliği için
     const msgIds = this.db.prepare(
       `SELECT id FROM messages WHERE conversation_id = ?`
@@ -343,5 +369,124 @@ export class ConversationManager {
     }
 
     return { deletedCount, results };
+  }
+
+  forkConversation(conversationId: string, forkFromMessageId: number): ForkConversationResponse {
+    const conv = this.db.prepare(`SELECT * FROM conversations WHERE id = ?`).get(conversationId) as ConversationRow | undefined;
+    if (!conv) {
+      throw new Error(`Conversation not found: ${conversationId}`);
+    }
+
+    const messages = this.db.prepare(`
+      SELECT * FROM messages WHERE conversation_id = ? AND id <= ? ORDER BY id ASC
+    `).all(conversationId, forkFromMessageId) as MessageRow[];
+
+    if (messages.length === 0 || !messages.some(m => m.id === forkFromMessageId)) {
+      throw new Error(`Message not found: ${forkFromMessageId}`);
+    }
+
+    const newId = uuidv4();
+
+    const doFork = this.db.transaction(() => {
+      const parentOrder = conv.display_order || this.db.prepare(
+        `SELECT printf('%04d', rowid) as display_order FROM conversations WHERE id = ?`
+      ).get(conversationId) as { display_order: string };
+
+      const lastChild = this.db.prepare(`
+        SELECT display_order FROM conversations
+        WHERE parent_conversation_id = ?
+        ORDER BY display_order DESC
+        LIMIT 1
+      `).get(conversationId) as { display_order: string } | undefined;
+
+      let childNum: number;
+      if (lastChild) {
+        const segments = lastChild.display_order.split('.');
+        const lastSegment = parseInt(segments[segments.length - 1], 10);
+        childNum = lastSegment + 1;
+      } else {
+        childNum = 1;
+      }
+      const childSegment = String(childNum).padStart(4, '0');
+      const newDisplayOrder = (typeof parentOrder === 'string' ? parentOrder : parentOrder.display_order) + '.' + childSegment;
+
+      this.db.prepare(`
+        INSERT INTO conversations (id, channel_type, channel_id, user_id, user_name, title, parent_conversation_id, branch_point_message_id, display_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(newId, conv.channel_type, conv.channel_id, conv.user_id, conv.user_name,
+             '', conversationId, forkFromMessageId, newDisplayOrder);
+
+      const insertedIds: number[] = [];
+      for (const msg of messages) {
+        const result = this.db.prepare(`
+          INSERT INTO messages (conversation_id, role, content, tool_calls, tool_results, attachments)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(newId, msg.role, msg.content, msg.tool_calls, msg.tool_results, msg.attachments);
+        insertedIds.push(Number(result.lastInsertRowid));
+      }
+
+      try {
+        const insertEmb = this.db.prepare(
+          `INSERT INTO message_embeddings (rowid, embedding) VALUES (CAST(? AS INTEGER), ?)`
+        );
+        for (let i = 0; i < messages.length; i++) {
+          const originalId = BigInt(messages[i].id);
+          const row = this.db.prepare(
+            `SELECT embedding FROM message_embeddings WHERE rowid = CAST(? AS INTEGER)`
+          ).get(originalId) as { embedding: Buffer } | undefined;
+          if (row) {
+            insertEmb.run(BigInt(insertedIds[i]), row.embedding);
+          }
+        }
+      } catch (err) {
+        logger.warn({ err }, '[Memory] Embedding kopyalama başarısız, devam ediliyor');
+      }
+
+      return insertedIds;
+    });
+
+    const insertedIds = doFork();
+
+    const copiedMessages = messages.map((row, i) => ({
+      role: row.role as ConversationMessage['role'],
+      content: row.content,
+      timestamp: new Date(row.created_at.endsWith('Z') ? row.created_at : row.created_at.replace(' ', 'T') + 'Z'),
+      toolCalls: row.tool_calls ? JSON.parse(row.tool_calls) : undefined,
+      toolResults: row.tool_results ? JSON.parse(row.tool_results) : undefined,
+      attachments: row.attachments ? JSON.parse(row.attachments) : undefined,
+      id: insertedIds[i],
+    }));
+
+    return { conversationId: newId, messages: copiedMessages };
+  }
+
+  getChildBranches(conversationId: string): ConversationBranchInfo[] {
+    return this.db.prepare(`
+      SELECT c.id, c.title, c.branch_point_message_id, c.display_order, c.message_count, c.updated_at
+      FROM conversations c
+      WHERE c.parent_conversation_id = ?
+      ORDER BY c.display_order ASC, c.created_at ASC
+    `).all(conversationId) as ConversationBranchInfo[];
+  }
+
+  getConversationBranchInfo(conversationId: string): { hasChildren: boolean; isBranch: boolean; parentConversationId: string | null; branchPointMessageId: number | null } {
+    const conv = this.db.prepare(
+      `SELECT parent_conversation_id, branch_point_message_id FROM conversations WHERE id = ?`
+    ).get(conversationId) as { parent_conversation_id: string | null; branch_point_message_id: number | null } | undefined;
+
+    if (!conv) {
+      throw new Error(`Conversation not found: ${conversationId}`);
+    }
+
+    const children = this.db.prepare(
+      `SELECT id FROM conversations WHERE parent_conversation_id = ? LIMIT 1`
+    ).get(conversationId);
+
+    return {
+      hasChildren: !!children,
+      isBranch: conv.parent_conversation_id !== null,
+      parentConversationId: conv.parent_conversation_id,
+      branchPointMessageId: conv.branch_point_message_id,
+    };
   }
 }

@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { Virtuoso } from 'react-virtuoso';
-import { Sparkles, Globe, Code, MessageCircle, BrainCircuit } from 'lucide-react';
-import type { Message, MessageMetrics } from '@/store/agentStore';
+import { BrainCircuit, Sparkles, Globe, Code, MessageCircle } from 'lucide-react';
+import type { Message, MessageMetrics, ConversationBranchInfo } from '@/store/agentStore';
 import { Button } from '@/components/ui/button';
 import { MessageBubble } from './MessageBubble';
 
@@ -18,6 +18,9 @@ interface MessageStreamProps {
   onSendFeedback?: (messageId: string, type: 'positive' | 'negative') => void;
   feedbacks?: Record<string, { type: 'positive' | 'negative' }>;
   messageMetrics?: Record<string, MessageMetrics | null>;
+  onFork?: (messageId: string, dbMessageId?: number) => void;
+  messageBranches?: Map<number, ConversationBranchInfo[]>;
+  onLoadBranch?: (conversationId: string) => void;
 }
 
 const quickActions = [
@@ -40,6 +43,9 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
   onSendFeedback,
   feedbacks,
   messageMetrics,
+  onFork,
+  messageBranches,
+  onLoadBranch,
 }) => {
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const virtuosoRef = useRef<HTMLDivElement>(null);
@@ -87,6 +93,9 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
         feedbacks={feedbacks}
         conversationId={msg.role === 'assistant' ? (activeConversationId ?? undefined) : undefined}
         metrics={metricsForMsg}
+        onFork={onFork}
+        branchesForMessage={msg.dbId ? (messageBranches?.get(msg.dbId) ?? []) : []}
+        onLoadBranch={onLoadBranch}
       />
     );
   };

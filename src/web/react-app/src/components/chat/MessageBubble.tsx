@@ -2,8 +2,9 @@ import React, { useMemo, useState, lazy, Suspense } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, SquarePen, BrainCircuit, Paperclip, ChevronDown, Sparkles } from 'lucide-react';
+import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, SquarePen, BrainCircuit, Paperclip, ChevronDown, Sparkles, GitBranch } from 'lucide-react';
 import type { AttachmentItem, Message, MessageMetrics } from '@/store/agentStore';
+import type { ConversationBranchInfo } from '@/store/types';
 import { cn } from '@/lib/utils';
 import { stripThinkTags, formatTime, stripOuterBackticks } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -102,6 +103,42 @@ const InlineMetaBlock: React.FC<{
   );
 };
 
+const BranchDropdown: React.FC<{
+  branches: ConversationBranchInfo[];
+  onLoadBranch: (conversationId: string) => void;
+}> = ({ branches, onLoadBranch }) => {
+  const [open, setOpen] = useState(false);
+
+  if (branches.length === 0) return null;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[11px] text-purple-400/70 hover:text-purple-300 transition-colors px-1.5 py-0.5 rounded-md hover:bg-purple-500/10"
+      >
+        <GitBranch size={10} />
+        {branches.length} dal
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 mb-1 bg-card border border-border/60 rounded-lg shadow-lg py-1 min-w-[180px] z-50">
+          {branches.map((branch) => (
+            <button
+              key={branch.id}
+              type="button"
+              onClick={() => { onLoadBranch(branch.id); setOpen(false); }}
+              className="w-full text-left px-3 py-1.5 text-sm text-foreground/80 hover:bg-white/5 truncate"
+            >
+              {branch.title || 'Başlıksız Dal'}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ─── Main Component ─── */
 
 export interface MessageBubbleProps {
@@ -119,6 +156,9 @@ export interface MessageBubbleProps {
   conversationId?: string;
   metrics?: MessageMetrics;
   memorySaved?: boolean;
+  onFork?: (messageId: string, dbMessageId?: number) => void;
+  branchesForMessage?: ConversationBranchInfo[];
+  onLoadBranch?: (conversationId: string) => void;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
@@ -136,6 +176,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
   conversationId,
   metrics,
   memorySaved,
+  onFork,
+  branchesForMessage,
+  onLoadBranch,
 }) => {
   const isUser = msg.role === 'user';
   const isSystem = msg.role === 'system';
@@ -266,6 +309,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
           <div className="text-[11px] font-medium text-muted-foreground/50 mx-1">
             {formatTime(msg.timestamp)}
           </div>
+          {branchesForMessage && branchesForMessage.length > 0 && onLoadBranch && (
+            <BranchDropdown branches={branchesForMessage} onLoadBranch={onLoadBranch} />
+          )}
 
           {!isSystem && (
             <div className={cn(
@@ -333,6 +379,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
                   >
                     <RefreshCw size={12} aria-hidden="true" />
                   </Button>
+                  {onFork && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 rounded-none hover:bg-transparent text-foreground/30 hover:text-foreground transition-colors"
+                      onClick={() => onFork(msg.id, msg.dbId)}
+                      aria-label="Bu mesajdan dallandır"
+                      title="Dallandır"
+                    >
+                      <GitBranch size={12} aria-hidden="true" />
+                    </Button>
+                  )}
                   {metrics && (
                     <MetricsPanel
                       metrics={metrics}

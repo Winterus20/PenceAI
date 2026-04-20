@@ -30,3 +30,23 @@ export function useConversationQuery(conversationId: string | null) {
     refetchOnWindowFocus: false,
   });
 }
+
+export function useBranchesQuery(conversationId: string | null) {
+  return useQuery({
+    queryKey: [CONVERSATIONS_QUERY_KEY, conversationId, 'branches'],
+    queryFn: () => conversationService.getBranches(conversationId!),
+    enabled: !!conversationId,
+    staleTime: 1000 * 60 * 2,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useBranchInfoQuery(conversationId: string | null) {
+  return useQuery({
+    queryKey: [CONVERSATIONS_QUERY_KEY, conversationId, 'branch-info'],
+    queryFn: () => conversationService.getBranchInfo(conversationId!),
+    enabled: !!conversationId,
+    staleTime: 1000 * 60 * 2,
+    refetchOnWindowFocus: false,
+  });
+}

@@ -33,6 +33,7 @@ export interface Message {
   thinking?: string[];
   pending?: boolean;
   sources?: MemorySource[];
+  dbId?: number;
 }
 
 export interface ConversationItem {
@@ -42,6 +43,27 @@ export interface ConversationItem {
   created_at?: string;
   updated_at?: string;
   message_count?: number;
+  parent_conversation_id?: string | null;
+  branch_point_message_id?: number | null;
+  display_order?: string | null;
+  has_children?: number;
+  is_branch?: number;
+}
+
+export interface ConversationBranchInfo {
+  id: string;
+  title: string;
+  branch_point_message_id: number | null;
+  display_order: string | null;
+  message_count: number;
+  updated_at: string;
+}
+
+export interface BranchInfoResponse {
+  hasChildren: boolean;
+  isBranch: boolean;
+  parentConversationId: string | null;
+  branchPointMessageId: number | null;
 }
 
 export interface StatsState {
@@ -176,6 +198,9 @@ export interface ChatSlice {
   clearEditingMessage: () => void;
   updateMessageContent: (messageId: string, content: string) => void;
   removeMessagesAfter: (messageId: string) => void;
+  activeBranchInfo: BranchInfoResponse | null;
+  setActiveBranchInfo: (info: BranchInfoResponse | null) => void;
+  addBranchConversation: (parentId: string, childConversation: ConversationItem) => void;
 }
 
 export interface UISlice {

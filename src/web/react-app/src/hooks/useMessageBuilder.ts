@@ -56,6 +56,7 @@ export function useMessageBuilder() {
           content: (msg.content as string) || '',
           timestamp: normalizeTimestamp(msg.timestamp as string),
           attachments,
+          dbId: msg.id as number | undefined,
         });
         return;
       }
@@ -88,6 +89,7 @@ export function useMessageBuilder() {
           timestamp: normalizeTimestamp(msg.timestamp as string),
           toolCalls: pendingTools.length > 0 ? pendingTools : undefined,
           thinking: pendingThinkingEntries.length > 0 ? pendingThinkingEntries : undefined,
+          dbId: msg.id as number | undefined,
         });
         pendingTools = [];
         pendingThinkingEntries = [];

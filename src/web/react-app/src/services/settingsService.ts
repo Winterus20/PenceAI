@@ -42,6 +42,6 @@ export const settingsService = {
   update: (data: Partial<AppConfig>) => api.post<Partial<AppConfig>, UpdateSettingsResponse>('/settings', data),
   getSensitivePaths: () => api.get<string[]>('/settings/sensitive-paths'),
   addSensitivePath: (path: string) => api.post<{ path: string }, string[]>('/settings/sensitive-paths', { path }),
-  removeSensitivePath: (path: string) => api.delete<string[]>('/settings/sensitive-paths', { body: JSON.stringify({ path }) }),
+  removeSensitivePath: (path: string) => api.delete<{ path: string }, string[]>('/settings/sensitive-paths', { path }),
   getLLMProviders: () => api.get<LLMProvider[]>('/llm/providers'),
 };

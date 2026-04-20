@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand';
-import type { AgentState, ChatSlice } from '../types';
+import type { AgentState, BranchInfoResponse, ChatSlice } from '../types';
 
 export const createChatSlice: StateCreator<
   AgentState,
@@ -20,6 +20,7 @@ export const createChatSlice: StateCreator<
   selectedConversationIds: [],
   bulkDeleteConfirm: null,
   editingMessage: { messageId: null, content: '' },
+  activeBranchInfo: null as BranchInfoResponse | null,
 
   setConnected: (status) => set({ isConnected: status }),
   setReceiving: (status) => set({ isReceiving: status }),
@@ -120,5 +121,18 @@ export const createChatSlice: StateCreator<
     return {
       messages: state.messages.slice(0, messageIndex + 1),
     };
+  }),
+
+  setActiveBranchInfo: (info) => set({ activeBranchInfo: info }),
+
+  addBranchConversation: (parentId, childConversation) => set((state) => {
+    const parentIdx = state.conversations.findIndex(c => c.id === parentId);
+    const newConversations = [...state.conversations];
+    if (parentIdx !== -1) {
+      newConversations.splice(parentIdx + 1, 0, childConversation);
+    } else {
+      newConversations.push(childConversation);
+    }
+    return { conversations: newConversations };
   }),
 });

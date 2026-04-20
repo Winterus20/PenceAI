@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { MessageStream } from './MessageStream';
-import type { Message, FeedbackState, MessageMetrics } from '../../store/agentStore';
+import type { Message, FeedbackState, MessageMetrics, ConversationBranchInfo } from '../../store/agentStore';
 
 export interface MessagePanelProps {
   messages: Message[];
@@ -14,6 +14,9 @@ export interface MessagePanelProps {
   onEditMessage: (messageId: string, content: string) => void;
   onSendFeedback: (messageId: string, type: 'positive' | 'negative') => void;
   messageMetrics: Record<string, MessageMetrics | null>;
+  onFork?: (messageId: string, dbMessageId?: number) => void;
+  messageBranches?: Map<number, ConversationBranchInfo[]>;
+  onLoadBranch?: (conversationId: string) => void;
 }
 
 export const MessagePanel: React.FC<MessagePanelProps> = ({
@@ -28,6 +31,9 @@ export const MessagePanel: React.FC<MessagePanelProps> = ({
   onEditMessage,
   onSendFeedback,
   messageMetrics,
+  onFork,
+  messageBranches,
+  onLoadBranch,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -51,6 +57,9 @@ export const MessagePanel: React.FC<MessagePanelProps> = ({
         onSendFeedback={(messageId, type) => onSendFeedback(messageId, type)}
         feedbacks={feedbacks}
         messageMetrics={messageMetrics}
+        onFork={onFork}
+        messageBranches={messageBranches}
+        onLoadBranch={onLoadBranch}
       />
     </div>
   );

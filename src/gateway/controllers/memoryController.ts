@@ -28,6 +28,48 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       res.json(messages);
   });
 
+  expressRouter.post('/conversations/:id/fork', (req, res) => {
+    const { id } = req.params;
+    const { forkFromMessageId } = req.body;
+
+    if (!forkFromMessageId || typeof forkFromMessageId !== 'number') {
+      return res.status(400).json({ error: 'forkFromMessageId is required and must be a number' });
+    }
+
+    try {
+      const result = memory.forkConversation(id, forkFromMessageId);
+      return res.json(result);
+    } catch (err: any) {
+      if (err.message?.includes('not found')) {
+        return res.status(404).json({ error: err.message });
+      }
+      logger.error({ err }, '[API] Fork conversation failed');
+      return res.status(500).json({ error: 'Fork failed' });
+    }
+  });
+
+  expressRouter.get('/conversations/:id/branches', (req, res) => {
+    const { id } = req.params;
+    try {
+      const branches = memory.getChildBranches(id);
+      return res.json(branches);
+    } catch (err: any) {
+      logger.error({ err }, '[API] Get branches failed');
+      return res.status(500).json({ error: 'Failed to get branches' });
+    }
+  });
+
+  expressRouter.get('/conversations/:id/branch-info', (req, res) => {
+    const { id } = req.params;
+    try {
+      const info = memory.getConversationBranchInfo(id);
+      return res.json(info);
+    } catch (err: any) {
+      logger.error({ err }, '[API] Get branch info failed');
+      return res.status(500).json({ error: 'Failed to get branch info' });
+    }
+  });
+
   expressRouter.patch('/conversations/:id', (req, res) => {
     const { id } = req.params;
     const { title } = req.body;
@@ -49,15 +91,29 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
   });
 
   expressRouter.delete('/conversations/:id', (req, res) => {
+    const { id } = req.params;
+    const { deleteBranches } = req.body;
+
     try {
-      const deleted = memory.deleteConversation(req.params.id);
+      const branchInfo = memory.getConversationBranchInfo(id);
+      if (branchInfo.hasChildren && !deleteBranches) {
+        const branches = memory.getChildBranches(id);
+        return res.status(409).json({
+          error: 'Conversation has child branches',
+          hasChildren: true,
+          branches,
+        });
+      }
+
+      const deleted = memory.deleteConversation(id, deleteBranches === true);
       if (!deleted) {
         return res.status(404).json({ error: 'Konuşma bulunamadı' });
       }
       broadcastStats();
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      logger.error({ err }, '[API] Delete conversation failed');
+      res.status(500).json({ error: 'Delete failed' });
     }
   });
 

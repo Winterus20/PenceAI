@@ -2,6 +2,8 @@
  * Memory modülü — Ortak tip tanımları ve yardımcı fonksiyonlar.
  */
 
+import type { ConversationMessage } from '../router/types.js';
+
 // ========== Veritabanı Satır Tipleri ==========
 
 export interface ConversationRow {
@@ -15,6 +17,9 @@ export interface ConversationRow {
     is_summarized: number;
     is_title_custom: number;
     message_count: number;
+    parent_conversation_id: string | null;
+    branch_point_message_id: number | null;
+    display_order: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -172,6 +177,22 @@ export interface MessageSearchRow extends MessageRow {
 export interface RecentConversationRow extends ConversationRow {
     message_count: number;
     first_message: string | null;
+    has_children: number;
+    is_branch: number;
+}
+
+export interface ConversationBranchInfo {
+    id: string;
+    title: string;
+    branch_point_message_id: number | null;
+    display_order: string | null;
+    message_count: number;
+    updated_at: string;
+}
+
+export interface ForkConversationResponse {
+    conversationId: string;
+    messages: ConversationMessage[];
 }
 
 // ========== Memory Graph Interfaces ==========

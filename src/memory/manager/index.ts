@@ -35,6 +35,8 @@ import {
   type ConversationRow,
   type FeedbackRow,
   type FeedbackInput,
+  type ConversationBranchInfo,
+  type ForkConversationResponse,
   DEFAULT_USER_NAME,
 } from '../types.js';
 
@@ -265,8 +267,20 @@ export class MemoryManager {
     return this.conversationManager.getConversationTranscriptBundle(conversationId, limit);
   }
 
-  deleteConversation(conversationId: string): boolean {
-    return this.conversationManager.deleteConversation(conversationId);
+  deleteConversation(conversationId: string, deleteBranches?: boolean): boolean {
+    return this.conversationManager.deleteConversation(conversationId, deleteBranches);
+  }
+
+  forkConversation(conversationId: string, forkFromMessageId: number): ForkConversationResponse {
+    return this.conversationManager.forkConversation(conversationId, forkFromMessageId);
+  }
+
+  getChildBranches(conversationId: string): ConversationBranchInfo[] {
+    return this.conversationManager.getChildBranches(conversationId);
+  }
+
+  getConversationBranchInfo(conversationId: string): { hasChildren: boolean; isBranch: boolean; parentConversationId: string | null; branchPointMessageId: number | null } {
+    return this.conversationManager.getConversationBranchInfo(conversationId);
   }
 
   deleteConversations(conversationIds: string[]): { deletedCount: number, results: { id: string, deleted: boolean }[] } {

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Plus, Pin, PinOff, Trash2, PanelLeftClose, MoreVertical, Pencil } from 'lucide-react';
+import { Search, Plus, Pin, PinOff, Trash2, PanelLeftClose, MoreVertical, Pencil, GitBranch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -15,6 +15,7 @@ export type SortOrder = 'newest' | 'oldest' | 'messages';
 
 export interface GroupedConversations {
   pinned: ConversationItem[];
+  pinnedBranches: ConversationItem[];
   groups: {
     today: ConversationItem[];
     yesterday: ConversationItem[];
@@ -81,8 +82,15 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
         return new Date(normalizeTimestamp(b.updated_at || b.created_at)).getTime() - new Date(normalizeTimestamp(a.updated_at || a.created_at)).getTime();
       });
 
-    const pinned = filtered.filter((conversation) => pinnedConversations.includes(conversation.id));
-    const others = filtered.filter((conversation) => !pinnedConversations.includes(conversation.id));
+    const pinned = filtered.filter(
+      (conversation) => pinnedConversations.includes(conversation.id) && !conversation.is_branch
+    );
+    const pinnedBranches = filtered.filter(
+      (conversation) => pinnedConversations.includes(conversation.id) && conversation.is_branch === 1
+    );
+    const others = filtered.filter(
+      (conversation) => !pinnedConversations.includes(conversation.id) && !conversation.is_branch
+    );
 
     const groups: Record<string, typeof others> = { today: [], yesterday: [], thisWeek: [], older: [] };
     const now = new Date();
@@ -100,7 +108,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
       else groups.older.push(conversation);
     });
 
-    return { pinned, groups };
+    return { pinned, pinnedBranches, groups };
   }, [conversations, pinnedConversations, searchQuery, sortOrder]);
 
   const handleLoadConversation = (id: string) => {
@@ -127,81 +135,92 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
     setEditTitle('');
   };
 
-  const renderConversationItem = (conversation: ConversationItem, isPinned: boolean) => {
+  const renderConversationItem = (conversation: ConversationItem, isPinned: boolean, depth: number = 0) => {
     const isEditing = editingId === conversation.id;
+    const isBranch = depth > 0;
+    const childBranches = isBranch ? [] : conversations.filter(
+      c => c.parent_conversation_id === conversation.id
+    );
 
     return (
-      <div
-        key={conversation.id}
-        className={`group w-full rounded-lg transition-colors ${activeConversationId === conversation.id ? 'bg-white/10' : 'hover:bg-white/5'}`}
-      >
-        <div className="flex items-center justify-between gap-2 p-2 px-3">
-          {isEditing ? (
-            <div className="flex-1 flex gap-1">
-              <input
-                type="text"
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSaveRename(conversation.id);
-                  if (e.key === 'Escape') { setEditingId(null); setEditTitle(''); }
-                }}
-                onBlur={() => handleSaveRename(conversation.id)}
-                autoFocus
-                className="flex-1 h-7 px-2 text-sm bg-white/10 border border-white/20 rounded text-foreground focus:outline-none focus:ring-1 focus:ring-white/30"
-              />
-            </div>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => handleLoadConversation(conversation.id)}
-                className="min-w-0 flex-1 text-left flex flex-col gap-0.5"
-              >
-                <div className="truncate text-[14px] font-normal text-foreground/90">{conversation.title || conversation.user_name || 'Sohbet'}</div>
-                <div className="text-[11px] text-muted-foreground/50">{formatRelativeTime(conversation.updated_at || conversation.created_at)}</div>
-              </button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/10"
-                  >
-                    <MoreVertical className="h-3.5 w-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-[160px]">
-                  <DropdownMenuItem onClick={() => handleStartRename(conversation)}>
-                    <Pencil className="mr-2 h-4 w-4" />
-                    Yeniden Adlandır
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => onTogglePinned(conversation.id)}>
-                    {isPinned ? (
-                      <>
-                        <PinOff className="mr-2 h-4 w-4" />
-                        Sabitlemeyi Kaldır
-                      </>
-                    ) : (
-                      <>
-                        <Pin className="mr-2 h-4 w-4" />
-                        Sabitle
-                      </>
-                    )}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="text-destructive focus:text-destructive"
-                    onClick={() => onDeleteConversation(conversation.id)}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Sil
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </>
-          )}
+      <React.Fragment key={conversation.id}>
+        <div
+          className={`group w-full rounded-lg transition-colors ${activeConversationId === conversation.id ? 'bg-white/10' : 'hover:bg-white/5'} ${isBranch ? 'pl-4 border-l border-border/20 ml-3' : ''}`}
+        >
+          <div className="flex items-center justify-between gap-2 p-2 px-3">
+            {isEditing ? (
+              <div className="flex-1 flex gap-1">
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveRename(conversation.id);
+                    if (e.key === 'Escape') { setEditingId(null); setEditTitle(''); }
+                  }}
+                  onBlur={() => handleSaveRename(conversation.id)}
+                  autoFocus
+                  className="flex-1 h-7 px-2 text-sm bg-white/10 border border-white/20 rounded text-foreground focus:outline-none focus:ring-1 focus:ring-white/30"
+                />
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleLoadConversation(conversation.id)}
+                  className="min-w-0 flex-1 text-left flex flex-col gap-0.5"
+                >
+                  <div className="truncate text-[14px] font-normal text-foreground/90 flex items-center gap-1.5">
+                    {isBranch && <GitBranch size={11} className="text-purple-400/60 flex-shrink-0" />}
+                    {conversation.title || conversation.user_name || 'Sohbet'}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground/50">
+                    {formatRelativeTime(conversation.updated_at || conversation.created_at)}
+                  </div>
+                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/10"
+                    >
+                      <MoreVertical className="h-3.5 w-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-[160px]">
+                    <DropdownMenuItem onClick={() => handleStartRename(conversation)}>
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Yeniden Adlandır
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onTogglePinned(conversation.id)}>
+                      {isPinned ? (
+                        <>
+                          <PinOff className="mr-2 h-4 w-4" />
+                          Sabitlemeyi Kaldır
+                        </>
+                      ) : (
+                        <>
+                          <Pin className="mr-2 h-4 w-4" />
+                          Sabitle
+                        </>
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={() => onDeleteConversation(conversation.id)}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Sil
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+        {childBranches.map(branch => renderConversationItem(branch, false, depth + 1))}
+      </React.Fragment>
     );
   };
 
@@ -244,11 +263,14 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
 
       {/* Sohbet Listesi */}
       <div className="flex-1 overflow-y-auto subtle-scrollbar px-3 pb-4">
-        {groupedConversations.pinned.length ? (
+        {groupedConversations.pinned.length || groupedConversations.pinnedBranches.length ? (
           <div className="mb-6">
             <div className="mb-1 px-2 text-xs font-semibold text-muted-foreground">Sabitlenmiş</div>
             <div className="space-y-[2px]">
               {groupedConversations.pinned.map((conversation) => renderConversationItem(conversation, true))}
+              {groupedConversations.pinnedBranches
+                .filter(b => !groupedConversations.pinned.some(p => p.id === b.parent_conversation_id))
+                .map(branch => renderConversationItem(branch, true, 1))}
             </div>
           </div>
         ) : null}

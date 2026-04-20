@@ -11,7 +11,8 @@ export type {
   AttachmentItem, ToolCallItem, Message, ConversationItem, StatsState,
   ConfirmRequest, ActiveView, Theme, Channel, BulkDeleteConfirmState,
   EditingMessageState, LightboxState, FeedbackState, ToastState, AgentState,
-  MessageMetrics, CanvasArtifact, MemorySource
+  MessageMetrics, CanvasArtifact, MemorySource,
+  ConversationBranchInfo, BranchInfoResponse
 } from './types';
 
 export const useAgentStore = create<AgentState>()(

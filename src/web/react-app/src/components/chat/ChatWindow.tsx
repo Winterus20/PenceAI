@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
-import { BrainCircuit, Wrench, Menu, X, PanelLeftOpen, Command } from 'lucide-react';
+import { BrainCircuit, Wrench, Menu, X, PanelLeftOpen, Command, ArrowLeft } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { useAgentStore } from '../../store/agentStore';
 import { useAgentSocket } from '../../hooks/useAgentSocket';
 import { useConversations } from '../../hooks/useConversations';
+import { useBranchInfoQuery } from '@/hooks/queries/useConversations';
 import { useMessageBuilder } from '../../hooks/useMessageBuilder';
+import type { ConversationBranchInfo } from '@/store/types';
 import { useFileUpload } from '../../hooks/useFileUpload';
 import { useConversationFilters } from '../../hooks/useConversationFilters';
 import { Toast } from '@/components/ui/Toast';
@@ -21,6 +23,51 @@ const MemoryDialog = lazy(() => import('./MemoryDialog').then(m => ({ default: m
 const ConfirmDialog = lazy(() => import('./ConfirmDialog').then(m => ({ default: m.ConfirmDialog })));
 const OnboardingDialog = lazy(() => import('./OnboardingDialog').then(m => ({ default: m.OnboardingDialog })));
 const CommandPalette = lazy(() => import('./CommandPalette').then(m => ({ default: m.CommandPalette })));
+
+const BranchDeleteDialog: React.FC<{
+  open: boolean;
+  branches: ConversationBranchInfo[];
+  onConfirm: (deleteBranches: boolean) => void;
+  onCancel: () => void;
+}> = ({ open, branches, onConfirm, onCancel }) => {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-card border border-border/60 rounded-xl p-6 max-w-md w-full shadow-2xl">
+        <h3 className="text-lg font-semibold text-foreground mb-2">
+          Bu konuşmanın {branches.length} alt dalı var
+        </h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Silme işlemini nasıl yapmak istersiniz?
+        </p>
+        <div className="space-y-2 mb-4">
+          <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-white/5 cursor-pointer border border-border/30">
+            <input type="radio" name="deleteOption" value="all" defaultChecked className="mt-1" />
+            <div>
+              <div className="text-sm font-medium text-foreground">Dallarla birlikte sil</div>
+              <div className="text-xs text-muted-foreground">Ana konuşma ve tüm alt dallar silinecek</div>
+            </div>
+          </label>
+          <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-white/5 cursor-pointer border border-border/30">
+            <input type="radio" name="deleteOption" value="onlyMain" className="mt-1" />
+            <div>
+              <div className="text-sm font-medium text-foreground">Sadece ana konuşmayı sil</div>
+              <div className="text-xs text-muted-foreground">Dallar bağımsız konuşma olarak kalır</div>
+            </div>
+          </label>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onCancel}>İptal</Button>
+          <Button variant="destructive" size="sm" onClick={() => {
+            const selected = document.querySelector<HTMLInputElement>('input[name="deleteOption"]:checked');
+            onConfirm(selected?.value === 'all');
+          }}>Sil</Button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export const ChatWindow = () => {
   // Agent Store
@@ -69,11 +116,14 @@ export const ChatWindow = () => {
     loadConversations,
     loadConversation: loadConversationFromHook,
     deleteConversation,
+    confirmDeleteWithBranches,
     togglePinned,
     handleNewChat: handleNewChatFromHook,
   } = useConversations();
 
   const { buildRenderableMessages } = useMessageBuilder();
+
+  const { forkConversation } = useConversations();
 
   const {
     pendingAttachments,
@@ -92,6 +142,8 @@ export const ChatWindow = () => {
     sortOrder,
   } = useConversationFilters();
 
+  const { data: branchInfo } = useBranchInfoQuery(activeConversationId);
+
   // UI State
   const [input, setInput] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -101,6 +153,11 @@ export const ChatWindow = () => {
   const [showTools, setShowTools] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [deleteBranchDialog, setDeleteBranchDialog] = useState<{
+    isOpen: boolean;
+    conversationId: string;
+    branches: ConversationBranchInfo[];
+  } | null>(null);
 
   // Global keyboard shortcut: Cmd+K / Ctrl+K for command palette
   useEffect(() => {
@@ -252,6 +309,47 @@ export const ChatWindow = () => {
     setEditingMessage({ messageId, content });
   };
 
+  const handleDeleteConversation = useCallback(async (conversationId: string) => {
+    if (!window.confirm('Bu sohbet silinsin mi?')) return;
+
+    const result = await deleteConversation(conversationId);
+    if (result && typeof result === 'object' && result.hasChildren) {
+      setDeleteBranchDialog({
+        isOpen: true,
+        conversationId: result.conversationId,
+        branches: result.branches,
+      });
+    }
+  }, [deleteConversation]);
+
+  const handleForkMessage = useCallback(async (_messageId: string, dbMessageId?: number) => {
+    if (!activeConversationId || !dbMessageId) return;
+    const result = await forkConversation(activeConversationId, dbMessageId);
+    if (result) {
+      const rawMessages = await loadConversationFromHook(result.conversationId);
+      setMessages(buildRenderableMessages(rawMessages));
+    }
+  }, [activeConversationId, forkConversation, loadConversationFromHook, buildRenderableMessages, setMessages]);
+
+  const handleLoadBranch = useCallback(async (conversationId: string) => {
+    const rawMessages = await loadConversationFromHook(conversationId);
+    setMessages(buildRenderableMessages(rawMessages));
+  }, [loadConversationFromHook, buildRenderableMessages, setMessages]);
+
+  const messageBranches = React.useMemo(() => {
+    const branchMap = new Map<number, ConversationBranchInfo[]>();
+    if (!activeConversationId) return branchMap;
+    const branches = conversations.filter(c => c.parent_conversation_id === activeConversationId);
+    for (const branch of branches) {
+      if (branch.branch_point_message_id) {
+        const existing = branchMap.get(branch.branch_point_message_id) || [];
+        existing.push(branch as ConversationBranchInfo);
+        branchMap.set(branch.branch_point_message_id, existing);
+      }
+    }
+    return branchMap;
+  }, [conversations, activeConversationId]);
+
   return (
     <div className="flex h-screen w-full bg-background text-foreground overflow-hidden selection:bg-primary/20">
       <Suspense fallback={null}><SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} /></Suspense>
@@ -297,7 +395,7 @@ export const ChatWindow = () => {
                 onNewChat={handleNewChat}
                 onLoadConversation={loadConversation}
                 onTogglePinned={togglePinned}
-                onDeleteConversation={deleteConversation}
+                onDeleteConversation={handleDeleteConversation}
                 onRenameConversation={handleRenameConversation}
                 isConnected={isConnected}
                 onToggleSidebar={() => setShowConversations(false)}
@@ -339,7 +437,22 @@ export const ChatWindow = () => {
             >
               <Menu size={18} />
             </Button>
-            
+            {activeConversationId && branchInfo?.isBranch && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 text-muted-foreground hover:text-foreground hover:bg-white/10 rounded-lg"
+                onClick={async () => {
+                  if (branchInfo.parentConversationId) {
+                    await loadConversation(branchInfo.parentConversationId);
+                  }
+                }}
+                title="Üst dala dön"
+              >
+                <ArrowLeft size={14} />
+                <span className="text-xs">Üst Dal</span>
+              </Button>
+            )}
             <button className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-white/5 transition-colors text-lg font-semibold text-foreground/90">
               Pençe<span className="text-purple-400">AI</span>
               <span className="text-muted-foreground text-xs font-normal border border-white/10 rounded-full px-2 py-0.5 bg-white/5">v0.1</span>
@@ -382,6 +495,9 @@ export const ChatWindow = () => {
                 onEditMessage={handleEditMessage}
                 onSendFeedback={(messageId, type) => sendFeedback(messageId, activeConversationId || '', type)}
                 messageMetrics={messageMetrics}
+                onFork={handleForkMessage}
+                messageBranches={messageBranches}
+                onLoadBranch={handleLoadBranch}
               />
 
               <div
@@ -457,7 +573,7 @@ export const ChatWindow = () => {
               onNewChat={handleNewChat}
               onLoadConversation={loadConversation}
               onTogglePinned={togglePinned}
-              onDeleteConversation={deleteConversation}
+              onDeleteConversation={handleDeleteConversation}
               onRenameConversation={handleRenameConversation}
                 isConnected={isConnected}
                 isMobile={true}
@@ -473,6 +589,18 @@ export const ChatWindow = () => {
         type={toast.type}
         isVisible={toast.isVisible}
         onClose={hideToast}
+      />
+
+      <BranchDeleteDialog
+        open={!!deleteBranchDialog?.isOpen}
+        branches={deleteBranchDialog?.branches || []}
+        onConfirm={async (deleteBranches) => {
+          if (deleteBranchDialog?.conversationId) {
+            await confirmDeleteWithBranches(deleteBranchDialog.conversationId, deleteBranches);
+          }
+          setDeleteBranchDialog(null);
+        }}
+        onCancel={() => setDeleteBranchDialog(null)}
       />
     </div>
   );

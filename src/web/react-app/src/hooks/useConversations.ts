@@ -100,6 +100,30 @@ export function useConversations() {
         // React Query cache'ini invalid et
         queryClient.invalidateQueries({ queryKey: [CONVERSATIONS_QUERY_KEY] });
         return true;
+      } catch (error: any) {
+        if (error?.response?.status === 409) {
+          const branches = error?.response?.data?.branches || [];
+          return { hasChildren: true, branches, conversationId };
+        }
+        console.error('Konuşma silinemedi:', error);
+        hotToast.error('Konuşma silinirken bir hata oluştu');
+        return false;
+      }
+    },
+    [activeConversationId, removeConversation, clearMessages, setActiveConversationId, queryClient]
+  );
+
+  const confirmDeleteWithBranches = useCallback(
+    async (conversationId: string, deleteBranches: boolean) => {
+      try {
+        await conversationService.delete(conversationId, deleteBranches);
+        removeConversation(conversationId);
+        if (conversationId === activeConversationId) {
+          clearMessages();
+          setActiveConversationId(null);
+        }
+        queryClient.invalidateQueries({ queryKey: [CONVERSATIONS_QUERY_KEY] });
+        return true;
       } catch (error) {
         console.error('Konuşma silinemedi:', error);
         hotToast.error('Konuşma silinirken bir hata oluştu');
@@ -124,6 +148,22 @@ export function useConversations() {
     setActiveConversationId(null);
   }, [clearMessages, setActiveConversationId]);
 
+  const forkConversation = useCallback(
+    async (conversationId: string, forkFromMessageId: number) => {
+      try {
+        const result = await conversationService.fork(conversationId, forkFromMessageId);
+        setActiveConversationId(result.conversationId);
+        queryClient.invalidateQueries({ queryKey: [CONVERSATIONS_QUERY_KEY] });
+        return result;
+      } catch (error) {
+        console.error('Konuşma dallandırılamadı:', error);
+        hotToast.error('Konuşma dallandırılırken bir hata oluştu');
+        return null;
+      }
+    },
+    [setActiveConversationId, queryClient]
+  );
+
   return {
     // State
     conversations,
@@ -133,6 +173,8 @@ export function useConversations() {
     loadConversations,
     loadConversation,
     deleteConversation,
+    confirmDeleteWithBranches,
+    forkConversation,
     togglePinned,
     handleNewChat,
     setActiveConversationId,

@@ -37,7 +37,7 @@ export class PenceDatabase {
   private embeddingDimensions: number;
 
   /** En son migration versiyonu. Her yeni migration'da artırın. */
-  private static readonly LATEST_SCHEMA_VERSION = 17;
+  private static readonly LATEST_SCHEMA_VERSION = 18;
 
   constructor(dbPath: string, embeddingDimensions: number = 1536) {
     // data dizinini oluştur
@@ -76,6 +76,9 @@ export class PenceDatabase {
         title TEXT DEFAULT '',
         summary TEXT DEFAULT '',
         is_summarized INTEGER DEFAULT 0,
+        parent_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+        branch_point_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+        display_order TEXT DEFAULT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
@@ -900,6 +903,20 @@ export class PenceDatabase {
         logger.info('[Database] ✅ memory_claims tablosu oluşturuldu');
       } catch (err) {
         logger.error({ err: err }, '[Database] ❌ GraphRAG Claims migration failed:');
+      }
+    }
+
+    if (convTableInfo.length > 0 && !convTableInfo.some((col: any) => col.name === 'parent_conversation_id')) {
+      logger.info('[Database] 🚀 Migrating: Adding conversation branching columns');
+      try {
+        this.db.exec("ALTER TABLE conversations ADD COLUMN parent_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL");
+        this.db.exec("ALTER TABLE conversations ADD COLUMN branch_point_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL");
+        this.db.exec("ALTER TABLE conversations ADD COLUMN display_order TEXT DEFAULT NULL");
+        this.db.exec("UPDATE conversations SET display_order = printf('%04d', rowid) WHERE display_order IS NULL");
+        this.db.pragma('wal_checkpoint(TRUNCATE)');
+        logger.info('[Database] ✅ Conversation branching columns added');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (conversation branching):');
       }
     }
 

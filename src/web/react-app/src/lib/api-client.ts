@@ -107,6 +107,10 @@ export const api = {
       body: data ? JSON.stringify(data) : undefined,
     }),
 
-  delete: <T = any>(endpoint: string, options?: Omit<FetchOptions, 'method'>) =>
-    apiClient<T>(endpoint, { ...options, method: 'DELETE' }),
+  delete: <T = unknown, R = any>(endpoint: string, data?: T, options?: Omit<FetchOptions, 'method' | 'body'>) =>
+    apiClient<R>(endpoint, {
+      ...options,
+      method: 'DELETE',
+      body: data ? JSON.stringify(data) : undefined,
+    }),
 };

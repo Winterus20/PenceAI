@@ -14,6 +14,8 @@ import type {
   MemoryRow,
   MessageSearchRow,
   RecentConversationRow,
+  ConversationBranchInfo,
+  ForkConversationResponse,
   GraphAwareSearchResult,
   MemoryWriteMetadata,
 } from '../types.js';
@@ -117,6 +119,8 @@ export type {
   MemoryRow,
   MessageSearchRow,
   RecentConversationRow,
+  ConversationBranchInfo,
+  ForkConversationResponse,
   GraphAwareSearchResult,
   MemoryWriteMetadata,
 };

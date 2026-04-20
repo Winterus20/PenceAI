@@ -234,9 +234,7 @@ export function useSettingsForm(open: boolean): UseSettingsFormReturn {
   const handleRemoveSensitivePath = useCallback(async (pathToRemove: string) => {
     setPathLoading(true);
     try {
-      const paths = await api.delete<string[]>('/settings/sensitive-paths', {
-        body: JSON.stringify({ path: pathToRemove }),
-      });
+      const paths = await api.delete<{ path: string }, string[]>('/settings/sensitive-paths', { path: pathToRemove });
       setSensitivePaths(Array.isArray(paths) ? paths : []);
     } catch (error) {
       console.error('Hassas dizin kaldırılamadı:', error);

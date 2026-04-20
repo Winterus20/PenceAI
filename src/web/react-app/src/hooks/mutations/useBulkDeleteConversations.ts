@@ -11,7 +11,7 @@ export function useBulkDeleteConversations() {
 
   return useMutation({
     mutationFn: (ids: string[]) =>
-      api.delete('/conversations', { body: JSON.stringify({ ids }) }),
+      api.delete<{ ids: string[] }, unknown>('/conversations', { ids }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [CONVERSATIONS_QUERY_KEY] });
     },
