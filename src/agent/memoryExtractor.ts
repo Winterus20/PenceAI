@@ -24,10 +24,17 @@ export class MemoryExtractor {
     private memory: MemoryManager;
     private extractionCounter: number = 0;
     private pendingExtractionContext: ExtractionContext[] = [];
-    private graphQueue: Array<{ task: () => Promise<void>; retries: number; maxRetries: number }> = [];
+    private graphQueue: Array<{ task: () => Promise<void>; retries: number; maxRetries: number; description: string }> = [];
     private isGraphQueueRunning = false;
+    private deadLetterQueue: Array<{ description: string; error: string; failedAt: Date }> = [];
+    private consecutiveRichExtractions: number = 0;
 
-    static readonly EXTRACTION_INTERVAL = 3;
+    /** Dedup eşiği — MemoryStore'daki 0.80 eşiğiyle uyumlu */
+    static readonly DEDUP_SIMILARITY_THRESHOLD = 0.80;
+    /** Dinamik extraction interval aralığı */
+    static readonly MIN_EXTRACTION_INTERVAL = 2;
+    static readonly MAX_EXTRACTION_INTERVAL = 5;
+    static readonly DEFAULT_EXTRACTION_INTERVAL = 3;
     static readonly MAX_GRAPH_QUEUE_RETRIES = 3;
 
     constructor(llm: LLMProvider, memory: MemoryManager) {
@@ -47,14 +54,31 @@ export class MemoryExtractor {
         };
     }
 
+    /**
+     * Dinamik extraction interval hesaplar.
+     * Son extraction'da bellek çıkarıldıysa (verimli) interval'i düşür,
+     * çıkarılmadıysa (verimsiz) interval'i yükselt — gereksiz LLM çağrısı azaltır.
+     */
+    private getAdaptiveInterval(): number {
+        return Math.min(
+            MemoryExtractor.MAX_EXTRACTION_INTERVAL,
+            Math.max(
+                MemoryExtractor.MIN_EXTRACTION_INTERVAL,
+                MemoryExtractor.DEFAULT_EXTRACTION_INTERVAL - this.consecutiveRichExtractions
+            )
+        );
+    }
+
     pushExtractionContext(ctx: ExtractionContext): void {
         this.extractionCounter++;
+        const interval = this.getAdaptiveInterval();
         this.pendingExtractionContext.push(ctx);
-        logger.info(`[Agent] 🧪 Hafif tarama kuyruğu güncellendi (${this.extractionCounter}/${MemoryExtractor.EXTRACTION_INTERVAL})`);
+        logger.info(`[Agent] 🧪 Hafif tarama kuyruğu güncellendi (${this.extractionCounter}/${interval}, adaptif)`);
     }
 
     checkAndPrepareExtraction(): ExtractionCheckResult {
-        if (this.extractionCounter >= MemoryExtractor.EXTRACTION_INTERVAL) {
+        const interval = this.getAdaptiveInterval();
+        if (this.extractionCounter >= interval) {
             const batchedContext = this.pendingExtractionContext.splice(0);
             this.extractionCounter = 0;
 
@@ -63,7 +87,7 @@ export class MemoryExtractor {
             const combinedPrev = batchedContext.map(c => c.prevAssistant).filter(Boolean).join('\n');
             const contextUserName = batchedContext[0].userName || 'Kullanıcı';
 
-            logger.info(`[Agent] 🚀 Hafif tarama başlatıldı (${batchedContext.length} mesaj çifti birleştirildi)`);
+            logger.info(`[Agent] 🚀 Hafif tarama başlatıldı (${batchedContext.length} mesaj çifti birleştirildi, interval=${interval})`);
 
             return {
                 shouldExtract: true,
@@ -74,7 +98,7 @@ export class MemoryExtractor {
             };
         }
 
-        logger.info(`[Agent] ⏳ Hafif tarama ertelendi (${this.extractionCounter}/${MemoryExtractor.EXTRACTION_INTERVAL})`);
+        logger.info(`[Agent] ⏳ Hafif tarama ertelendi (${this.extractionCounter}/${interval})`);
         return { shouldExtract: false, combinedUser: '', combinedAssistant: '', combinedPrev: '', contextUserName: '' };
     }
 
@@ -121,11 +145,13 @@ export class MemoryExtractor {
                         } catch (err) {
                             logger.warn({ err }, `[Agent] Graph güncelleme hatası (hafif):`);
                         }
-                    });
+                    }, `graph_light_${memResult.id}`);
                 }
                 logger.info(`[Agent] 🧩 Hafif tarama: ${memories.length} bellek çıkarıldı`);
+                this.consecutiveRichExtractions = Math.min(3, this.consecutiveRichExtractions + 1);
             } else {
                 logger.info('[Agent] 🧩 Hafif tarama tamamlandı, yeni bellek çıkarılmadı');
+                this.consecutiveRichExtractions = Math.max(0, this.consecutiveRichExtractions - 1);
             }
         } catch (err) {
             logger.error({ err: err }, '[Agent] Hafif bellek çıkarımı başarısız:');
@@ -177,11 +203,13 @@ export class MemoryExtractor {
                         } catch (err) {
                             logger.warn({ err }, `[Agent] Graph güncelleme hatası (derin):`);
                         }
-                    });
+                    }, `graph_deep_${memResult.id}`);
                 }
                 logger.info(`[Agent] 🔍 Derin analiz: ${memories.length} bellek çıkarıldı (konuşma: ${conversationId.substring(0, 8)}...)`);
+                this.consecutiveRichExtractions = Math.min(3, this.consecutiveRichExtractions + 1);
             } else {
                 logger.info(`[Agent] 🔍 Derin analiz tamamlandı, yeni bellek çıkarılmadı (konuşma: ${conversationId.substring(0, 8)}...)`);
+                this.consecutiveRichExtractions = Math.max(0, this.consecutiveRichExtractions - 1);
             }
         } catch (err) {
             logger.error({ err: err }, '[Agent] Derin bellek çıkarımı başarısız:');
@@ -214,9 +242,12 @@ export class MemoryExtractor {
                         } catch (err) {
                             logger.warn({ err }, `[Agent] Raw text graph güncelleme hatası:`);
                         }
-                    });
+                    }, `graph_raw_${added.id}`);
                 }
                 logger.info(`[Agent] 🔍 Düz metin analizi: ${memories.length} bellek çıkarıldı.`);
+                this.consecutiveRichExtractions = Math.min(3, this.consecutiveRichExtractions + 1);
+            } else {
+                this.consecutiveRichExtractions = Math.max(0, this.consecutiveRichExtractions - 1);
             }
         } catch (err) {
             logger.error({ err: err }, '[Agent] Düz metinden bellek çıkarımı başarısız:');
@@ -266,31 +297,89 @@ export class MemoryExtractor {
     parseExtractionResponse(content: string): Array<{ content: string; category: string; importance: number }> {
         try {
             let jsonStr = content.trim();
+
+            // 1) Kod bloğu temizliği: ```json ... ``` veya ``` ... ```
+            jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/,'').trim();
+
+            // 2) JSON dizisi eşleştirme — en dıştaki [ ... ] yakala
             const jsonMatch = jsonStr.match(/\[[\s\S]*\]/);
             if (jsonMatch) {
                 jsonStr = jsonMatch[0];
             }
 
-            const parsed = JSON.parse(jsonStr);
-            if (!Array.isArray(parsed)) return [];
+            // 3) Trailing comma temizliği — JSON5 benzeri tolerans
+            jsonStr = jsonStr.replace(/,\s*([\]}])/g, '$1');
 
-            return parsed.filter((item: any) =>
-                item && typeof item.content === 'string' && item.content.length > 0
-            ).map((item: any) => ({
-                content: item.content,
-                category: ['preference', 'fact', 'habit', 'project', 'event', 'other'].includes(item.category) ? item.category : 'other',
-                importance: typeof item.importance === 'number' ? Math.min(10, Math.max(1, item.importance)) : 5,
-            }));
+            // 4) Tek tırnak → çift tırnak dönüşümü (bazı LLM'ler tek tırnak kullanıyor)
+            jsonStr = jsonStr.replace(/:\s*'([^']*?)'\s*([,}\]])/g, ': "$1"$2');
+
+            // 5) Escape düzeltme — geçersiz escape dizilerini düzelt
+            jsonStr = jsonStr.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+
+            try {
+                const parsed = JSON.parse(jsonStr);
+                if (!Array.isArray(parsed)) return [];
+
+                return this.validateExtractedMemories(parsed);
+            } catch {
+                // 6) Fallback: Satır satır JSON objesi çıkarma
+                return this.fallbackParseMemories(jsonStr);
+            }
         } catch {
             return [];
         }
+    }
+
+    /**
+     * Çıkarılan bellekleri doğrular ve normalleştirir.
+     */
+    private validateExtractedMemories(parsed: unknown[]): Array<{ content: string; category: string; importance: number }> {
+        if (!Array.isArray(parsed)) return [];
+
+        return parsed.filter((item: any) =>
+            item && typeof item.content === 'string' && item.content.length > 0
+        ).map((item: any) => ({
+            content: item.content,
+            category: ['preference', 'fact', 'habit', 'project', 'event', 'other'].includes(item.category) ? item.category : 'other',
+            importance: typeof item.importance === 'number' ? Math.min(10, Math.max(1, item.importance)) : 5,
+        }));
+    }
+
+    /**
+     * Fallback parser — JSON parse başarısız olduğunda satır bazlı çıkarma dener.
+     * Her { } bloğunu ayrı ayrı parse eder.
+     */
+    private fallbackParseMemories(jsonStr: string): Array<{ content: string; category: string; importance: number }> {
+        const results: Array<{ content: string; category: string; importance: number }> = [];
+        const objectRegex = /\{[^{}]*\}/g;
+
+        for (const match of jsonStr.matchAll(objectRegex)) {
+            try {
+                let objStr = match[0];
+                objStr = objStr.replace(/,\s*([\]}])/g, '$1');
+                objStr = objStr.replace(/:\s*'([^']*?)'\s*([,}\]])/g, ': "$1"$2');
+
+                const parsed = JSON.parse(objStr);
+                if (parsed && typeof parsed.content === 'string' && parsed.content.length > 0) {
+                    results.push({
+                        content: parsed.content,
+                        category: ['preference', 'fact', 'habit', 'project', 'event', 'other'].includes(parsed.category) ? parsed.category : 'other',
+                        importance: typeof parsed.importance === 'number' ? Math.min(10, Math.max(1, parsed.importance)) : 5,
+                    });
+                }
+            } catch {
+                // Bu objeyi atla, sonrakine devam et
+            }
+        }
+
+        return results;
     }
 
     private async getSimilarMemoriesForDedup(query: string, limit: number = 10): Promise<Array<{ id: number; content: string; similarity: number }>> {
         try {
             const similarMemories = await this.memory.semanticSearch(query, limit);
             return similarMemories
-                .filter(m => m.similarity > 0.6)
+                .filter(m => m.similarity >= MemoryExtractor.DEDUP_SIMILARITY_THRESHOLD)
                 .map(m => ({
                     id: m.id,
                     content: m.content,
@@ -407,12 +496,21 @@ export class MemoryExtractor {
                     logger.warn(`[Agent] Graph extraction task failed (attempt ${retries + 1}/${maxRetries + 1}), retrying in ${backoffMs}ms`);
 
                     setTimeout(() => {
-                        this.graphQueue.unshift({ task, retries: retries + 1, maxRetries });
+                        this.graphQueue.unshift({ task, retries: retries + 1, maxRetries, description: queueItem.description });
                         this._runGraphQueue().catch(() => {});
                     }, backoffMs);
                     break;
                 } else {
-                    logger.error({ err }, `[Agent] Background Graph extraction task failed after ${maxRetries + 1} attempts, giving up`);
+                    logger.error({ err }, `[Agent] Background Graph extraction task failed after ${maxRetries + 1} attempts, moving to dead-letter queue`);
+                    this.deadLetterQueue.push({
+                        description: queueItem.description,
+                        error: err instanceof Error ? err.message : String(err),
+                        failedAt: new Date(),
+                    });
+                    // DLQ'nun çok büyümesini önle — en fazla 50 kayıt tut
+                    if (this.deadLetterQueue.length > 50) {
+                        this.deadLetterQueue.shift();
+                    }
                 }
             }
         }
@@ -420,8 +518,31 @@ export class MemoryExtractor {
         this.isGraphQueueRunning = false;
     }
 
-    enqueueGraphTask(task: () => Promise<void>): void {
-        this.graphQueue.push({ task, retries: 0, maxRetries: MemoryExtractor.MAX_GRAPH_QUEUE_RETRIES });
+    enqueueGraphTask(task: () => Promise<void>, description: string = 'unnamed'): void {
+        this.graphQueue.push({ task, retries: 0, maxRetries: MemoryExtractor.MAX_GRAPH_QUEUE_RETRIES, description });
         this._runGraphQueue().catch(() => {});
+    }
+
+    /**
+     * Dead-letter queue'daki kayıtları döndürür.
+     * Kalıcı başarısız graph görevleri izleme ve manuel retry için kullanılabilir.
+     */
+    getDeadLetterQueue(): ReadonlyArray<{ description: string; error: string; failedAt: Date }> {
+        return this.deadLetterQueue;
+    }
+
+    /**
+     * Dead-letter queue'daki kayıtların sayısını döndürür.
+     */
+    getDeadLetterQueueSize(): number {
+        return this.deadLetterQueue.length;
+    }
+
+    /**
+     * Dead-letter queue'daki tüm kayıtları temizler.
+     */
+    clearDeadLetterQueue(): void {
+        this.deadLetterQueue.length = 0;
+        logger.info('[Agent] 🗑️ Dead-letter queue temizlendi');
     }
 }

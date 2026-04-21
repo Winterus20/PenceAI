@@ -6,6 +6,7 @@ import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import TurndownService from 'turndown';
 import { z } from 'zod';
+import { glob } from 'glob';
 import { getConfig } from '../gateway/config.js';
 import { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/logger.js';
@@ -115,6 +116,54 @@ const ExecuteShellArgsSchema = z.object({
     invalid_type_error: '"command" parametresi bir string olmalıdır',
   }).min(1, '"command" parametresi boş olamaz'),
   cwd: z.string().optional(),
+});
+
+/**
+ * Dosya düzenleme argümanları için Zod şeması
+ */
+const EditFileArgsSchema = z.object({
+  path: z.string({
+    required_error: '"path" parametresi zorunludur',
+    invalid_type_error: '"path" parametresi bir string olmalıdır',
+  }).min(1, '"path" parametresi boş olamaz'),
+  oldText: z.string({
+    required_error: '"oldText" parametresi zorunludur',
+    invalid_type_error: '"oldText" parametresi bir string olmalıdır',
+  }).min(1, '"oldText" parametresi boş olamaz'),
+  newText: z.string({
+    required_error: '"newText" parametresi zorunludur',
+    invalid_type_error: '"newText" parametresi bir string olmalıdır',
+  }),
+  replaceAll: z.boolean().optional().default(false),
+});
+
+/** Dosya arama için varsayılan maksimum sonuç sayısı */
+const DEFAULT_SEARCH_MAX_RESULTS = 50;
+
+/**
+ * Dosya arama argümanları için Zod şeması
+ */
+const SearchFilesArgsSchema = z.object({
+  pattern: z.string({
+    required_error: '"pattern" parametresi zorunludur',
+    invalid_type_error: '"pattern" parametresi bir string olmalıdır',
+  }).min(1, '"pattern" parametresi boş olamaz'),
+  directory: z.string().optional(),
+  maxResults: z.coerce.number().int().min(1).max(200).default(DEFAULT_SEARCH_MAX_RESULTS),
+});
+
+/**
+ * Dosya ekleme (append) argümanları için Zod şeması
+ */
+const AppendFileArgsSchema = z.object({
+  path: z.string({
+    required_error: '"path" parametresi zorunludur',
+    invalid_type_error: '"path" parametresi bir string olmalıdır',
+  }).min(1, '"path" parametresi boş olamaz'),
+  content: z.string({
+    required_error: '"content" parametresi zorunludur',
+    invalid_type_error: '"content" parametresi bir string olmalıdır',
+  }),
 });
 
 /**
@@ -312,6 +361,148 @@ export function createBuiltinTools(
         },
       },
   
+      // --- Dosya Düzenleme (Satır Bazlı Replace) ---
+      {
+        name: 'editFile',
+        async execute(args) {
+          const validation = validateArgs(EditFileArgsSchema, args);
+          if (!validation.success) return validation.error;
+
+          const { path: filePath, oldText, newText, replaceAll } = validation.data;
+          validatePath(filePath);
+
+          // Güvenlik: çok kısa oldText ile yanlışlıkla geniş kapsamlı değişiklik yapılmasını engelle
+          if (oldText.length < 3) {
+            return `⚠️ "oldText" çok kısa (${oldText.length} karakter). En az 3 karakter olmalı — aksi halde dosyada istenmeyen geniş kapsamlı değişiklikler oluşabilir. Daha spesifik bir metin parçası belirtin.`;
+          }
+
+          // replaceAll ile çok kısa metin kombinasyonu — ekstra uyarı
+          if (replaceAll && oldText.length < 10) {
+            return `⚠️ "replaceAll: true" ile ${oldText.length} karakterlik metin çok tehlikeli olabilir. Daha uzun ve spesifik bir metin parçası belirtin veya "replaceAll: false" kullanın.`;
+          }
+
+          // Hassas dizin onay kontrolü
+          const rejection = await requireConfirmation(
+            confirmCallback, 'editFile', filePath, 'write',
+            `"${filePath}" dosyasında düzenleme`, sensitivePaths,
+          );
+          if (rejection) return rejection;
+
+          try {
+            const content = await fs.readFile(filePath, 'utf-8');
+
+            if (!content.includes(oldText)) {
+              return `⚠️ Belirtilen metin dosyada bulunamadı: "${oldText.substring(0, 100)}${oldText.length > 100 ? '...' : ''}"`;
+            }
+
+            const occurrences = content.split(oldText).length - 1;
+            if (occurrences > 1 && !replaceAll) {
+              return `⚠️ Belirtilen metin dosyada ${occurrences} kez bulundu. Tümünü değiştirmek için "replaceAll: true" kullanın veya daha spesifik bir metin parçası belirtin.`;
+            }
+
+            const newContent = replaceAll
+              ? content.split(oldText).join(newText)
+              : content.replace(oldText, newText);
+
+            await fs.writeFile(filePath, newContent, 'utf-8');
+            return `✅ Dosya düzenlendi: ${filePath} (${replaceAll ? occurrences : 1} değişiklik)`;
+          } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            return `Hata: Dosya düzenlenemedi — ${error.message}`;
+          }
+        },
+      },
+
+      // --- Dosya Arama (Glob Pattern) ---
+      {
+        name: 'searchFiles',
+        async execute(args) {
+          const validation = validateArgs(SearchFilesArgsSchema, args);
+          if (!validation.success) return validation.error;
+
+          const { pattern, directory } = validation.data;
+          const maxResults = validation.data.maxResults ?? DEFAULT_SEARCH_MAX_RESULTS;
+          const searchDir = directory || process.cwd();
+
+          // Her durumda yol doğrulaması yap
+          try {
+            validatePath(searchDir);
+          } catch (e: unknown) {
+            const error = e instanceof Error ? e : new Error(String(e));
+            return `⛔ Erişim reddedildi: ${error.message}`;
+          }
+
+          try {
+            const allFiles = await glob(pattern, {
+              cwd: searchDir,
+              nodir: true,
+              absolute: true,
+              ignore: [
+                '**/node_modules/**',
+                '**/.git/**',
+                '**/dist/**',
+                '**/build/**',
+                '**/coverage/**',
+              ],
+            });
+
+            if (allFiles.length === 0) {
+              return `"${pattern}" kalıbına uygun dosya bulunamadı (${searchDir}).`;
+            }
+
+            // Sonuçları maxResults ile sınırla ve okunabilir formatta göster
+            const files = allFiles.slice(0, maxResults);
+            const relativeFiles = files.map(f => {
+              try {
+                return path.relative(searchDir, f) || f;
+              } catch {
+                return f;
+              }
+            });
+
+            const result = relativeFiles.map((f, i) => `${i + 1}. ${f}`).join('\n');
+
+            if (allFiles.length > maxResults) {
+              return `🔍 ${allFiles.length} dosya bulundu (ilk ${maxResults} gösteriliyor):\n${result}\n\n... [${allFiles.length - maxResults} dosya daha, "maxResults" değerini artırın]`;
+            }
+
+            return `🔍 ${files.length} dosya bulundu:\n${result}`;
+          } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            return `Hata: Dosya araması yapılamadı — ${error.message}`;
+          }
+        },
+      },
+
+      // --- Dosya Ekleme (Append) ---
+      {
+        name: 'appendFile',
+        async execute(args) {
+          const validation = validateArgs(AppendFileArgsSchema, args);
+          if (!validation.success) return validation.error;
+
+          const { path: filePath, content } = validation.data;
+          validatePath(filePath);
+
+          // Hassas dizin onay kontrolü
+          const rejection = await requireConfirmation(
+            confirmCallback, 'appendFile', filePath, 'write',
+            `"${filePath}" dosyasına ekleme`, sensitivePaths,
+          );
+          if (rejection) return rejection;
+
+          try {
+            // Dosya varsa sonuna ekle, yoksa oluştur
+            await fs.mkdir(path.dirname(filePath), { recursive: true });
+            await fs.appendFile(filePath, content, 'utf-8');
+            return `✅ Dosyaya eklendi: ${filePath}`;
+          } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            return `Hata: Dosyaya eklenemedi — ${error.message}`;
+          }
+        },
+      },
+
       // --- Bellek Arama (Graph-Aware: FTS + Semantik + Bağlamsal) ---
       {
         name: 'searchMemory',
@@ -572,9 +763,10 @@ export function createBuiltinTools(
                 }
 
                 try {
+                    const shellTimeout = config.shellTimeout;
                     const { stdout, stderr } = await execAsync(command, {
                         cwd: cwd || process.cwd(),
-                        timeout: 30000, // 30 saniye zaman aşımı
+                        timeout: shellTimeout,
                         maxBuffer: 1024 * 1024, // 1MB
                     });
 

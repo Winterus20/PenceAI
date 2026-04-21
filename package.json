@@ -53,6 +53,7 @@
     "discord.js": "^14.26.3",
     "dotenv": "^16.4.7",
     "express": "^4.21.0",
+    "glob": "^13.0.6",
     "gpt-tokenizer": "^3.4.0",
     "linkedom": "^0.18.12",
     "openai": "^4.77.0",

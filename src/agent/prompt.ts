@@ -50,7 +50,7 @@ Kullanıcının yazdığı dilde yanıtla — dili asla kendin değiştirme. Kar
 </davranis>
 
 <arac_kullanimi>
-- Kullanılabilir araçlar: \`readFile\`, \`writeFile\`, \`listDirectory\`, \`executeShell\`, \`searchMemory\`, \`deleteMemory\`, \`searchConversation\`, \`webSearch\` ve MCP araçları (\`mcp:server:tool\` formatında).
+- Kullanılabilir araçlar: \`readFile\`, \`writeFile\`, \`editFile\`, \`appendFile\`, \`searchFiles\`, \`listDirectory\`, \`executeShell\`, \`searchMemory\`, \`deleteMemory\`, \`saveMemory\`, \`searchConversation\`, \`webSearch\`, \`webTool\` ve MCP araçları (\`mcp:server:tool\` formatında).
 - MCP araçları harici servisler içindir (GitHub, filesystem, veritabanları, API'ler).
 - Kullanıcı bir işlem istediğinde "yapacağım" deme, BİZZAT ARAÇLARI KULLAN.
 - JSON parametrelerinde sayısal değerleri tırnak içine alma: "count": 5 doğru, "count": "5" yanlış.
@@ -166,6 +166,102 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                     path: { type: 'string' },
                 },
                 required: ['path'],
+            },
+        },
+        {
+            name: 'editFile',
+            description: 'Mevcut bir dosyada belirli bir metin parçasını bulur ve değiştirir. writeFile yerine küçük düzenlemeler için kullanılır — dosyanın tamamını yeniden yazmaz. ⚠️ oldText olarak yeterince spesifik ve benzersiz bir metin parçası kullanın; yaygın satırlar (örn: sadece "}" veya "return") yanlış konumlarda eşleşebilir.',
+            llmDescription: 'Dosyada düzenleme yap (eski metni yeni metinle değiştir — spesifik/metinsel eşleşme kullan)',
+            parameters: {
+                type: 'object',
+                properties: {
+                    path: {
+                        type: 'string',
+                        description: 'Düzenlenecek dosyanın tam yolu',
+                    },
+                    oldText: {
+                        type: 'string',
+                        description: 'Dosyada bulunacak ve değiştirilecek metin parçası',
+                    },
+                    newText: {
+                        type: 'string',
+                        description: 'Yerine yazılacak yeni metin',
+                    },
+                    replaceAll: {
+                        type: 'boolean',
+                        description: 'true ise tüm eşleşmeleri değiştir, false ise sadece ilkini (varsayılan: false)',
+                    },
+                },
+                required: ['path', 'oldText', 'newText'],
+            },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    path: { type: 'string' },
+                    oldText: { type: 'string' },
+                    newText: { type: 'string' },
+                    replaceAll: { type: 'boolean' },
+                },
+                required: ['path', 'oldText', 'newText'],
+            },
+        },
+        {
+            name: 'appendFile',
+            description: 'Mevcut bir dosyanın sonuna içerik ekler. Dosya yoksa oluşturur. Log, not ekleme veya dosyaya satır ekleme için kullanılır.',
+            llmDescription: 'Dosyaya ekleme yap (sonuna ekle)',
+            parameters: {
+                type: 'object',
+                properties: {
+                    path: {
+                        type: 'string',
+                        description: 'Eklenecek dosyanın tam yolu',
+                    },
+                    content: {
+                        type: 'string',
+                        description: 'Dosyanın sonuna eklenecek içerik',
+                    },
+                },
+                required: ['path', 'content'],
+            },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    path: { type: 'string' },
+                    content: { type: 'string' },
+                },
+                required: ['path', 'content'],
+            },
+        },
+        {
+            name: 'searchFiles',
+            description: 'Glob kalıbı kullanarak dosya arar. Dosya ismine göre hızlıca dosya bulmak için kullanılır. Örn: "**/*.ts", "src/**/*.json"',
+            llmDescription: 'Dosya ara (glob kalıbı ile)',
+            parameters: {
+                type: 'object',
+                properties: {
+                    pattern: {
+                        type: 'string',
+                        description: 'Glob arama kalıbı (örn: "**/*.ts", "src/**/*.json", "**/test_*.js")',
+                    },
+                    directory: {
+                        type: 'string',
+                        description: 'Aramanın yapılacağı kök dizin (belirtilmezse geçerli dizin)',
+                    },
+                    maxResults: {
+                        type: 'integer',
+                        description: 'Maksimum sonuç sayısı (varsayılan: 50, maksimum: 200)',
+                    },
+                },
+                required: ['pattern'],
+            },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    pattern: { type: 'string' },
+                    directory: { type: 'string' },
+                    maxResults: { type: 'integer' },
+                },
+                required: ['pattern'],
             },
         },
         {

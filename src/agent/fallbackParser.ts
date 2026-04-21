@@ -143,10 +143,12 @@ export function parseFallbackArgs(toolName: string, argsString: string): Record<
 }
 
 export function getPrimaryParam(toolName: string): string {
-    if (toolName === 'listDirectory' || toolName === 'readFile' || toolName === 'writeFile') return 'path';
+    if (toolName === 'listDirectory' || toolName === 'readFile' || toolName === 'writeFile' || toolName === 'editFile' || toolName === 'appendFile') return 'path';
+    if (toolName === 'searchFiles') return 'pattern';
     if (toolName === 'executeShell') return 'command';
     if (toolName === 'searchConversation' || toolName === 'webSearch' || toolName === 'searchMemory') return 'query';
     if (toolName === 'deleteMemory') return 'id';
+    if (toolName === 'saveMemory') return 'content';
     return 'path';
 }
 

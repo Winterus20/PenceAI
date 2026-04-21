@@ -56,7 +56,7 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
 
         // Rastgele soru şablonu seç (0-4 arası)
         const questionIdx = Math.floor(Math.random() * 5);
-        const thoughtResult = think(memory, neutralEmotion, lastSelectedSeedId, 30, questionIdx);
+        const thoughtResult = think(memory, neutralEmotion, lastSelectedSeedId, 30, questionIdx, undefined, 'autonomous_worker');
         if (!thoughtResult) {
             // Düşünecek bir tohum bulunamadı. Kısa bekle ve tekrar dene.
             taskQueue.enqueue({ id: `auto_tick_${Date.now()}`, type: 'autonomous_tick', priority: TaskPriority.P4_LOW, payload: {}, addedAt: Date.now() + (30 * 60 * 1000) });

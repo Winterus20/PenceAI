@@ -189,7 +189,7 @@ describe('MemoryExtractor', () => {
         });
 
         it('resets counter after extraction', () => {
-            for (let i = 0; i < MemoryExtractor.EXTRACTION_INTERVAL; i++) {
+            for (let i = 0; i < MemoryExtractor.DEFAULT_EXTRACTION_INTERVAL; i++) {
                 extractor.pushExtractionContext({ user: `msg${i}`, assistant: `resp${i}`, prevAssistant: '', userName: 'Test' });
             }
             const result = extractor.checkAndPrepareExtraction();

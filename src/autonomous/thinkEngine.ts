@@ -33,6 +33,27 @@ export interface EmotionalContext {
     description: string;   // Kısa açıklama
 }
 
+/** Düşünce günlüğü girdisi — tekrar önleme ve pattern çıkarma için */
+export interface ThoughtLogRecord {
+    id: number;
+    seedMemoryId: number;
+    seedType: SeedType;
+    associationCount: number;
+    totalRetentionScore: number;
+    emotionalPrimary: string;
+    generatedAt: string;        // ISO 8601
+    relevanceScore: number | null; // LLM'den gelen relevance skoru
+    timeSensitivity: number | null;
+}
+
+/** Zaman bağlamı — günün saatine göre düşünce stratejisi */
+export interface TimeContext {
+    period: 'morning' | 'afternoon' | 'evening' | 'night';
+    dayOfWeek: number;         // 0=Pazar, 6=Cumartesi
+    isWeekend: boolean;
+    suggestedStrategy: string;  // Önerilen düşünce stratejisi
+}
+
 // ═══════════════════════════════════════════════════════════
 //  Tipler
 // ═══════════════════════════════════════════════════════════
@@ -106,6 +127,8 @@ export interface ThinkEngineConfig {
     maxNeighborsPerHop?: number;       // Default: 5
     minRelationConfidence?: number;    // Default: 0.25
     seedCooldownMinutes?: number;      // Default: 30
+    thoughtLogMaxEntries?: number;     // Default: 100
+    adaptiveHopEnabled?: boolean;     // Default: true
 }
 
 /** Varsayılan yapılandırma */
@@ -116,6 +139,8 @@ export const DEFAULT_THINK_CONFIG: Readonly<ThinkEngineConfig> = {
     maxNeighborsPerHop: MAX_NEIGHBORS_PER_HOP,
     minRelationConfidence: MIN_RELATION_CONFIDENCE,
     seedCooldownMinutes: 30,
+    thoughtLogMaxEntries: 100,
+    adaptiveHopEnabled: true,
 };
 
 /** Yönlendirme soru şablonları — her düşüncede farklı bir soru seçilir */
@@ -148,14 +173,259 @@ export const REFLECTION_QUESTION_TEMPLATES = [
 ];
 
 // ═══════════════════════════════════════════════════════════
+//  Zaman Bağlamı (Time Context)
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Mevcut zaman bağlamını hesaplar.
+ * Günün saatine ve haftanın gününe göre düşünce stratejisi önerir.
+ */
+export function getTimeContext(now?: Date): TimeContext {
+    const time = now ?? new Date();
+    const hour = time.getHours();
+    const dayOfWeek = time.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+    let period: TimeContext['period'];
+    let suggestedStrategy: string;
+
+    if (hour >= 6 && hour < 12) {
+        period = 'morning';
+        suggestedStrategy = isWeekend
+            ? 'Hafta sonu sabahı — rahat konular, hobiler, uzun vadeli planlar'
+            : 'Sabah rutini — günün planı, devam eden görevler, dünkü takip noktaları';
+    } else if (hour >= 12 && hour < 18) {
+        period = 'afternoon';
+        suggestedStrategy = isWeekend
+            ? 'Öğleden sonra — keşif, yeni konular, merak noktaları'
+            : 'Öğleden sonra — aktif görevler, teknik derinleşme, problem çözme';
+    } else if (hour >= 18 && hour < 23) {
+        period = 'evening';
+        suggestedStrategy = isWeekend
+            ? 'Akşam — sosyal bağlam, eğlence, günlük değerlendirme'
+            : 'Akşam — gün sonu değerlendirmesi, yarınki planlar, öğrenilen dersler';
+    } else {
+        period = 'night';
+        suggestedStrategy = 'Gece — derin düşünce, felsefi sorular, yaratıcı bağlantılar';
+    }
+
+    return { period, dayOfWeek, isWeekend, suggestedStrategy };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Duygusal Bağlam Çıkarma (Emotion Extraction)
+// ═══════════════════════════════════════════════════════════
+
+/** Duygu kalıpları — anahtar kelimeler → duygu etiketleri */
+const EMOTION_PATTERNS: Array<{ keywords: string[]; primary: string; intensity: EmotionalContext['intensity'] }> = [
+    { keywords: ['teşekkür', 'sağol', 'süper', 'mükemmel', 'awesome', 'great', 'thanks', 'happy'], primary: 'Memnun', intensity: 'medium' },
+    { keywords: ['merak', 'nasıl', 'neden', 'niçin', 'acaba', 'ilginç', 'curious', 'wonder', 'interesting'], primary: 'Meraklı', intensity: 'medium' },
+    { keywords: ['endişe', 'kaygı', 'dert', 'sorun', 'problem', 'korku', 'worry', 'anxious', 'concerned', 'afraid'], primary: 'Endişeli', intensity: 'high' },
+    { keywords: ['kızgın', 'öfkeli', 'sinirli', 'öfke', 'lanet', 'angry', 'furious', 'mad', 'upset'], primary: 'Öfkeli', intensity: 'high' },
+    { keywords: ['üzgün', 'mutsuz', 'kederli', 'ağla', 'sad', 'unhappy', 'disappointed', 'cry'], primary: 'Üzgün', intensity: 'medium' },
+    { keywords: ['heyecan', 'coşku', 'müjde', 'tutku', 'harika', 'excited', 'thrilled', 'passionate'], primary: 'Heyecanlı', intensity: 'high' },
+    { keywords: ['yorgun', 'bıktı', 'usandı', 'bunalım', 'tükenmiş', 'tired', 'exhausted', 'burnout', 'overwhelmed'], primary: 'Yorgun', intensity: 'low' },
+];
+
+/**
+ * Son mesajlardan duygusal bağlam çıkarır.
+ * Basit anahtar kelime eşleşmesi ile çalışır — VAD modeli gerektirmez.
+ */
+export function extractEmotionalContext(recentMessages: Array<{ role: string; content: string }>): EmotionalContext {
+    if (recentMessages.length === 0) {
+        return { primary: 'Nötr', intensity: 'low', description: 'Yeni konuşma — duygusal bağlam yok.' };
+    }
+
+    // Son 5 kullanıcı mesajını analiz et
+    const userMessages = recentMessages
+        .filter(m => m.role === 'user')
+        .slice(-5)
+        .map(m => m.content.toLowerCase());
+
+    if (userMessages.length === 0) {
+        return { primary: 'Nötr', intensity: 'low', description: 'Kullanıcı mesajı yok.' };
+    }
+
+    const allText = userMessages.join(' ');
+
+    // En çok eşleşen duygu kalıbını bul
+    let bestMatch: { primary: string; intensity: EmotionalContext['intensity']; matchCount: number } | null = null;
+
+    for (const pattern of EMOTION_PATTERNS) {
+        let matchCount = 0;
+        for (const keyword of pattern.keywords) {
+            // Tek kelimeler için word boundary, çok kelimeler için basit includes
+            if (keyword.includes(' ')) {
+                if (allText.includes(keyword)) matchCount++;
+            } else {
+                const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
+                const matches = allText.match(regex);
+                if (matches) matchCount += matches.length;
+            }
+        }
+        if (matchCount > 0 && (!bestMatch || matchCount > bestMatch.matchCount)) {
+            bestMatch = { primary: pattern.primary, intensity: pattern.intensity, matchCount };
+        }
+    }
+
+    if (bestMatch) {
+        const descriptions: Record<string, string> = {
+          'Memnun': 'Kullanıcı memnun veya teşekkür ediyor.',
+          'Meraklı': 'Kullanıcı merak içinde, sorular soruyor.',
+          'Endişeli': 'Kullanıcı endişeli veya kaygılı görünüyor.',
+          'Öfkeli': 'Kullanıcı öfkeli veya hayal kırıklığı yaşıyor.',
+          'Üzgün': 'Kullanıcı üzgün veya kederli.',
+          'Heyecanlı': 'Kullanıcı heyecanlı veya coşkulu.',
+          'Yorgun': 'Kullanıcı yorgun veya bunalmış görünüyor.',
+        };
+        return {
+          primary: bestMatch.primary,
+          intensity: bestMatch.intensity,
+          description: descriptions[bestMatch.primary] ?? 'Duygusal bağlam algılandı.',
+        };
+    }
+
+    return { primary: 'Nötr', intensity: 'low', description: 'Belirgin duygu algılanmadı — nötr konuşma tonu.' };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Düşünce Günlüğü (Thought Log)
+// ═══════════════════════════════════════════════════════════
+
+/** Bellek içi düşünce günlüğü — tekrar önleme ve pattern çıkarma (oturum bazlı) */
+class ThoughtLog {
+    private entries: ThoughtLogRecord[] = [];
+    private maxEntries: number;
+    private sessionId: string;
+
+    constructor(maxEntries: number = 100, sessionId: string = 'default') {
+        this.maxEntries = maxEntries;
+        this.sessionId = sessionId;
+    }
+
+    /** Oturum kimliğini getir */
+    getSessionId(): string {
+        return this.sessionId;
+    }
+
+    /** Yeni düşünce günlük girdisi ekle */
+    record(entry: Omit<ThoughtLogRecord, 'id'>): void {
+        const id = this.entries.length > 0
+            ? Math.max(...this.entries.map(e => e.id)) + 1
+            : 1;
+        this.entries.push({ ...entry, id });
+
+        // Kapasite aşılırsa en eski girdileri sil
+        if (this.entries.length > this.maxEntries) {
+            this.entries = this.entries.slice(-this.maxEntries);
+        }
+    }
+
+    /** Bir bellek ID'si son N düşüncede kullanıldı mı? (tekrar önleme) */
+    isRecentlyUsed(memoryId: number, lookbackCount: number = 5): boolean {
+        const recent = this.entries.slice(-lookbackCount);
+        return recent.some(e => e.seedMemoryId === memoryId);
+    }
+
+    /** Son N düşüncenin ortalama relevance skoru */
+    getAverageRelevance(count: number = 10): number {
+        const recent = this.entries.slice(-count);
+        const scored = recent.filter(e => e.relevanceScore !== null);
+        if (scored.length === 0) return 0.5; // Bilgi yoksa varsayılan
+        return scored.reduce((sum, e) => sum + (e.relevanceScore ?? 0), 0) / scored.length;
+    }
+
+    /** En çok tekrar eden duygu pattern'ini getir */
+    getDominantEmotionPattern(count: number = 20): string | null {
+        const recent = this.entries.slice(-count);
+        if (recent.length < 3) return null;
+
+        const emotionCounts = new Map<string, number>();
+        for (const entry of recent) {
+            emotionCounts.set(entry.emotionalPrimary, (emotionCounts.get(entry.emotionalPrimary) ?? 0) + 1);
+        }
+
+        let dominant: string | null = null;
+        let maxCount = 0;
+        for (const [emotion, cnt] of emotionCounts) {
+            if (cnt > maxCount && cnt >= 3) {
+                dominant = emotion;
+                maxCount = cnt;
+            }
+        }
+        return dominant;
+    }
+
+    /** Son N düşünce günlüğünü getir */
+    getRecent(count: number = 10): ThoughtLogRecord[] {
+        return this.entries.slice(-count);
+    }
+
+    /** Son düşünce günlüğü girdisine LLM geri bildirimini kaydet */
+    updateLastFeedback(relevanceScore: number, timeSensitivity: number): void {
+        if (this.entries.length === 0) return;
+        const last = this.entries[this.entries.length - 1];
+        last.relevanceScore = relevanceScore;
+        last.timeSensitivity = timeSensitivity;
+    }
+}
+
+// Oturum bazlı düşünce günlüğü havuzu — eşzamanlı oturumları güvenli şekilde yönetir
+const thoughtLogPool = new Map<string, ThoughtLog>();
+
+/** Son erişim zamanı takibi — LRU temizleme için */
+const thoughtLogLastAccess = new Map<string, number>();
+
+/** Oturum kimliğine göre düşünce günlüğü getir veya oluştur */
+function getThoughtLog(sessionId: string = 'default', maxEntries?: number): ThoughtLog {
+    const key = sessionId;
+    if (!thoughtLogPool.has(key)) {
+        thoughtLogPool.set(key, new ThoughtLog(maxEntries ?? DEFAULT_THINK_CONFIG.thoughtLogMaxEntries ?? 100, sessionId));
+    }
+    thoughtLogLastAccess.set(key, Date.now());
+    return thoughtLogPool.get(key)!;
+}
+
+/** Eski/terk edilmiş oturum günlüklerini temizle — LRU yaklaşımı (bellek sızıntısı önleme) */
+export function cleanupStaleThoughtLogs(maxAgeMs: number = 24 * 60 * 60 * 1000): number {
+    const now = Date.now();
+    let cleaned = 0;
+
+    // Son erişim zamanı maxAgeMs'den eski olan günlükleri sil
+    for (const [key, lastAccess] of thoughtLogLastAccess) {
+        if (now - lastAccess > maxAgeMs) {
+            thoughtLogPool.delete(key);
+            thoughtLogLastAccess.delete(key);
+            cleaned++;
+        }
+    }
+
+    // Güvenlik limiti: 100'den fazla günlük varsa, en eski erişimlileri temizle
+    if (thoughtLogPool.size > 100) {
+        const sorted = Array.from(thoughtLogLastAccess.entries())
+            .sort((a, b) => a[1] - b[1]); // En eski erişimliler önce
+        const toRemove = thoughtLogPool.size - 50; // 50'ye kadar düşür
+        for (let i = 0; i < toRemove && i < sorted.length; i++) {
+            const key = sorted[i][0];
+            thoughtLogPool.delete(key);
+            thoughtLogLastAccess.delete(key);
+            cleaned++;
+        }
+    }
+
+    return cleaned;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Tohum Seçimi (Seed Selection)
 // ═══════════════════════════════════════════════════════════
 
 /**
  * Düşüncenin başlangıç noktasını seçer.
- * Birden fazla stratejiyi sırayla dener; ilk bulunan tohum döner.
+ * Zaman bağlamı ve düşünce günlüğü ile zenginleştirilmiş strateji.
  *
  * Strateji Sırası:
+ *   0. Zaman bağlamı stratejisi (sabah rutin, akşam değerlendirme)
  *   1. Son erişilen taze bir anı (son 24 saat, retention > threshold)
  *   2. Yüksek önemli bir anı (importance >= 7)
  *   3. Rastgele aktif bir anı (keşif modu — fallback)
@@ -164,10 +434,13 @@ export function selectSeed(
     manager: MemoryManager,
     recentlySelectedSeedId?: number,
     cooldownMinutes?: number,
-    config?: ThinkEngineConfig
+    config?: ThinkEngineConfig,
+    sessionId?: string,
 ): ThoughtSeed | null {
     const db = manager.getDatabase();
     const effectiveCooldown = cooldownMinutes ?? config?.seedCooldownMinutes ?? 30;
+    const timeContext = getTimeContext();
+    const log = getThoughtLog(sessionId);
 
     // Eğer recentlySelectedSeedId verilmişse, bu belleğin son erişim zamanını kontrol et
     if (recentlySelectedSeedId) {
@@ -181,8 +454,74 @@ export function selectSeed(
             const cooldownMs = effectiveCooldown * 60 * 1000;
 
             if (elapsed < cooldownMs) {
-                // Cooldown süresi dolmamış, bu seed'i atla
                 logger.debug(`[ThinkEngine] Seed #${recentlySelectedSeedId} cooldown'da (${Math.ceil((cooldownMs - elapsed) / 60000)} dk kaldı)`);
+            }
+        }
+    }
+
+    // Strateji 0: Zaman bağlamı stratejisi — günün saatine göre önceliklendirme
+    if (timeContext.period === 'morning' && !timeContext.isWeekend) {
+        // Sabah rutini — devam eden görevler ve planları öne çıkar
+        const morningSQL = `
+            SELECT id, content, importance, stability, last_accessed, category
+            FROM memories
+            WHERE is_archived = 0
+                AND category IN ('project', 'task', 'event')
+                AND last_accessed > datetime('now', '-7 days')
+                ${recentlySelectedSeedId ? 'AND id != ?' : ''}
+            ORDER BY importance DESC, last_accessed DESC
+            LIMIT 3
+        `;
+        const morningMemories = (recentlySelectedSeedId
+            ? db.prepare(morningSQL).all(recentlySelectedSeedId)
+            : db.prepare(morningSQL).all()
+        ) as Array<MemoryRow>;
+
+        for (const mem of morningMemories) {
+            if (log.isRecentlyUsed(mem.id)) continue;
+            const retention = computeRetention(
+                mem.stability ?? mem.importance * 2.0,
+                daysSinceAccess(mem.last_accessed)
+            );
+            if (retention >= FRESHNESS_THRESHOLD * 0.7) {
+                return {
+                    type: 'time_context',
+                    memoryId: mem.id,
+                    content: mem.content,
+                    reason: `Sabah rutini — ${timeContext.suggestedStrategy} (retention: ${retention.toFixed(2)})`,
+                };
+            }
+        }
+    } else if (timeContext.period === 'evening') {
+        // Akşam değerlendirmesi — gün boyunca konuşulanları özetle
+        const eveningSQL = `
+            SELECT id, content, importance, stability, last_accessed
+            FROM memories
+            WHERE is_archived = 0
+                AND last_accessed > datetime('now', '-1 day')
+                AND category NOT IN ('knowledge', 'concept')
+                ${recentlySelectedSeedId ? 'AND id != ?' : ''}
+            ORDER BY last_accessed DESC
+            LIMIT 5
+        `;
+        const eveningMemories = (recentlySelectedSeedId
+            ? db.prepare(eveningSQL).all(recentlySelectedSeedId)
+            : db.prepare(eveningSQL).all()
+        ) as Array<MemoryRow>;
+
+        for (const mem of eveningMemories) {
+            if (log.isRecentlyUsed(mem.id)) continue;
+            const retention = computeRetention(
+                mem.stability ?? mem.importance * 2.0,
+                daysSinceAccess(mem.last_accessed)
+            );
+            if (retention >= FRESHNESS_THRESHOLD * 0.5) {
+                return {
+                    type: 'time_context',
+                    memoryId: mem.id,
+                    content: mem.content,
+                    reason: `Akşam değerlendirmesi — ${timeContext.suggestedStrategy} (retention: ${retention.toFixed(2)})`,
+                };
             }
         }
     }
@@ -204,6 +543,8 @@ export function selectSeed(
     ) as Array<MemoryRow>;
 
     for (const mem of recentMemory) {
+        // Düşünce günlüğünde tekrar kontrolü
+        if (log.isRecentlyUsed(mem.id)) continue;
         const retention = computeRetention(
             mem.stability ?? mem.importance * 2.0,
             daysSinceAccess(mem.last_accessed)
@@ -287,13 +628,35 @@ export function selectSeed(
  * @param maxDepth   — Maksimum hop derinliği (varsayılan: 2)
  * @returns Tazelik filtresinden geçen çağrışım listesi
  */
+/**
+ * Adaptif hop derinliği hesaplar.
+ * Son düşüncelerin ortalama relevance skoruna göre:
+ *   - Yüksek relevance (>= 0.6) → 1 hop (odaklanmış, az çağrışım)
+ *   - Orta relevance (0.3-0.6) → 2 hop (dengeli)
+ *   - Düşük relevance (< 0.3) → 3 hop (geniş keşif — yeni bağlantılar ara)
+ */
+export function computeAdaptiveHopDepth(config?: ThinkEngineConfig, sessionId?: string): number {
+    if (!config?.adaptiveHopEnabled) return MAX_HOP_DEPTH;
+
+    const log = getThoughtLog(sessionId);
+    const avgRelevance = log.getAverageRelevance(10);
+
+    if (avgRelevance >= 0.6) return 1;       // Yüksek relevance — odaklanmış
+    if (avgRelevance >= 0.3) return 2;       // Orta relevance — dengeli
+    const maxAllowed = config?.maxHopDepth ?? MAX_HOP_DEPTH;
+    return Math.min(3, maxAllowed);          // Düşük relevance — geniş keşif (config sınırıyla)
+}
+
 export function graphWalk(
     manager: MemoryManager,
     seedId: number,
     maxDepth?: number,
-    config?: ThinkEngineConfig
+    config?: ThinkEngineConfig,
+    sessionId?: string,
 ): Association[] {
-    const effectiveMaxDepth = maxDepth ?? config?.maxHopDepth ?? MAX_HOP_DEPTH;
+    // Adaptif hop derinliği — config'de açıksa dinamik hesapla
+    const adaptiveDepth = config?.adaptiveHopEnabled ? computeAdaptiveHopDepth(config, sessionId) : MAX_HOP_DEPTH;
+    const effectiveMaxDepth = maxDepth ?? adaptiveDepth;
     const effectiveMaxAssociations = config?.maxAssociations ?? MAX_ASSOCIATIONS;
     const effectiveMaxNeighbors = config?.maxNeighborsPerHop ?? MAX_NEIGHBORS_PER_HOP;
     const visited = new Set<number>([seedId]);
@@ -492,20 +855,26 @@ export function synthesizeThoughtPrompt(
  */
 export function think(
     manager: MemoryManager,
-    emotion: EmotionalContext,
+    emotion?: EmotionalContext,
     recentlySelectedSeedId?: number,
     seedCooldownMinutes?: number,
     questionTemplateIndex?: number,
-    config?: ThinkEngineConfig
+    config?: ThinkEngineConfig,
+    sessionId?: string,
+    recentMessages?: Array<{ role: string; content: string }>,
 ): ThoughtLogEntry | null {
+    // Duygusal bağlam: dışarıdan verilmediyse son mesajlardan çıkar
+    const effectiveEmotion = emotion ?? 
+        (recentMessages ? extractEmotionalContext(recentMessages) : { primary: 'Nötr', intensity: 'low' as const, description: 'Duygusal bağlam belirtilmedi.' });
+
     // 1. Tohum seç (bir önceki seçileni dışla)
-    const seed = selectSeed(manager, recentlySelectedSeedId, seedCooldownMinutes, config);
+    const seed = selectSeed(manager, recentlySelectedSeedId, seedCooldownMinutes, config, sessionId);
     if (!seed) {
         return null;
     }
 
     // 2. Ağı Gez (Graph Walk)
-    const associations = graphWalk(manager, seed.memoryId, undefined, config);
+    const associations = graphWalk(manager, seed.memoryId, undefined, config, sessionId);
     if (associations.length === 0) {
         logger.info('[ThinkEngine] No associations found — generating lonely thought.');
     }
@@ -518,10 +887,45 @@ export function think(
     );
 
     // 3. Düşünce zinciri
-    const chain = buildThoughtChain(seed, associations, emotion);
+    const chain = buildThoughtChain(seed, associations, effectiveEmotion);
 
     // 4. Prompt sentezi
     const prompt = synthesizeThoughtPrompt(chain, questionTemplateIndex);
 
+    // 5. Düşünce günlüğüne kaydet (tekrar önleme ve pattern çıkarma için)
+    const log = getThoughtLog(sessionId);
+    log.record({
+        seedMemoryId: seed.memoryId,
+        seedType: seed.type,
+        associationCount: associations.length,
+        totalRetentionScore: chain.totalRetentionScore,
+        emotionalPrimary: effectiveEmotion.primary,
+        generatedAt: chain.generatedAt,
+        relevanceScore: null,
+        timeSensitivity: null,
+    });
+
     return { thought: chain, prompt };
+}
+
+/**
+ * LLM yanıtından relevance ve timeSensitivity skorlarını düşünce günlüğüne kaydeder.
+ * Bu, adaptif hop derinliği hesaplamasında kullanılır.
+ */
+export function recordThoughtFeedback(relevanceScore: number, timeSensitivity: number, sessionId?: string): void {
+    getThoughtLog(sessionId).updateLastFeedback(relevanceScore, timeSensitivity);
+}
+
+/**
+ * Düşünce günlüğünün son kayıtlarını getir (debug/dashboard için).
+ */
+export function getRecentThoughtLog(count: number = 10, sessionId?: string): ThoughtLogRecord[] {
+    return getThoughtLog(sessionId).getRecent(count);
+}
+
+/**
+ * Düşünce günlüğündeki dominant duygu pattern'ini getir.
+ */
+export function getThoughtDominantEmotion(sessionId?: string): string | null {
+    return getThoughtLog(sessionId).getDominantEmotionPattern();
 }

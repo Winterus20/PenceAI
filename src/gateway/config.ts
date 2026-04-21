@@ -54,6 +54,7 @@ const ConfigSchema = z.object({
 
   // Security
   allowShellExecution: z.coerce.boolean().default(false),
+  shellTimeout: z.coerce.number().min(5000).max(300000).catch(30000).default(30000),
   fsRootDir: z.string().optional(),
   dashboardPassword: z.string().optional(),
   braveSearchApiKey: z.string().optional(),
@@ -144,6 +145,7 @@ export function loadConfig(): AppConfig {
         discordAllowedUsers: process.env.DISCORD_ALLOWED_USERS,
         whatsappEnabled: process.env.WHATSAPP_ENABLED,
         allowShellExecution: process.env.ALLOW_SHELL_EXECUTION,
+        shellTimeout: process.env.SHELL_TIMEOUT,
         fsRootDir: process.env.FS_ROOT_DIR,
         dashboardPassword: process.env.DASHBOARD_PASSWORD,
         braveSearchApiKey: process.env.BRAVE_SEARCH_API_KEY,

@@ -1,5 +1,5 @@
 import type { ConversationMessage } from '../router/types.js';
-import { DEFAULT_USER_NAME, type MemoryRow, type MemoryWriteMetadata } from './types.js';
+import { DEFAULT_USER_NAME, type MemoryRow, type MemoryWriteMetadata, type MessageSearchRow } from './types.js';
 import { computeRetention } from './ebbinghaus.js';
 import { daysSince } from '../utils/datetime.js';
 
@@ -79,6 +79,52 @@ export function rrfFusion<T>(
         scoreEntries,
         explain: scoreEntries.map(entry => explainMap.get(getId(entry.item))).filter((entry): entry is RRFExplainEntry => Boolean(entry)),
     };
+}
+
+/**
+ * Mesaj arama sonuçlarına recency (yakınlık) ağırlıklandırması uygular.
+ * Son 24 saatteki mesajlara %30 bonus, son 7 gündekilere %15 bonus verir.
+ * created_at null/undefined olan girdilere bonus uygulanmaz.
+ */
+export function applyRecencyWeighting(
+    entries: RRFScoreEntry<MessageSearchRow>[],
+    limit: number,
+): MessageSearchRow[] {
+    const nowMs = Date.now();
+    const DAY_MS = 86400000;
+
+    // Kopya oluştur — orijinal dizi mutasyona uğratılmaz
+    const copy = entries.map(entry => ({
+        score: entry.score,
+        item: entry.item,
+    }));
+
+    for (const entry of copy) {
+        const msg = entry.item;
+        if (!msg.created_at) continue; // null/undefined guard
+
+        try {
+            const msgDateStr = typeof msg.created_at === 'string' && !msg.created_at.endsWith('Z')
+                ? msg.created_at.replace(' ', 'T') + 'Z'
+                : msg.created_at;
+            const msgMs = new Date(msgDateStr as string).getTime();
+            if (!Number.isFinite(msgMs)) continue; // geçersiz tarih guard
+
+            const ageMs = nowMs - msgMs;
+            if (ageMs < DAY_MS) {
+                entry.score *= 1.30; // Son 24 saat — %30 bonus
+            } else if (ageMs < 7 * DAY_MS) {
+                entry.score *= 1.15; // Son 7 gün — %15 bonus
+            }
+        } catch {
+            // Tarih parse hatası — bonus uygulanmaz, devam et
+        }
+    }
+
+    return copy
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .map(e => e.item);
 }
 
 export function applyRetentionToRrf(entries: RRFScoreEntry<MemoryRow>[], limit: number): MemoryRow[] {

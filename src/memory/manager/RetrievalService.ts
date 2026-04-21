@@ -22,7 +22,7 @@ import {
   type MessageSearchRow,
   type GraphAwareSearchResult,
 } from '../types.js';
-import { rrfFusion, applyRetentionToRrfWithExplain } from '../contextUtils.js';
+import { rrfFusion, applyRetentionToRrfWithExplain, applyRecencyWeighting } from '../contextUtils.js';
 import { computeNextReview } from '../ebbinghaus.js';
 import type { EmbeddingProvider } from '../embeddings.js';
 import type { TaskQueue } from '../../autonomous/queue.js';
@@ -272,6 +272,7 @@ export class RetrievalService {
   /**
    * Mesajlarda hibrit arama — FTS (kelime eşleşmesi) + Semantik (anlam benzerliği).
    * Reciprocal Rank Fusion (RRF) ile sıralama yapar.
+   * Sonuçlar mesaj tarihinin yakınlığına göre ağırlıklandırılır (recency weighting).
    */
   async hybridSearchMessages(query: string, limit: number = 10): Promise<MessageSearchRow[]> {
     // 1. FTS arama — konuşma bilgisiyle join
@@ -303,16 +304,21 @@ export class RetrievalService {
       ftsResults, semanticResults,
       (m) => m.id, (m) => m, limit,
     );
+
+    // 4. Recency weighting — son 24 saatteki mesajlara %30 bonus,
+    // son 7 gündekilere %15 bonus, eskilere bonus yok
+    const recencyScored = applyRecencyWeighting(fused.scoreEntries, limit);
+
     this.recordRetrievalDebug('hybridSearchMessages', {
       query,
       limit,
-      strategy: 'hybrid_rrf',
+      strategy: 'hybrid_rrf_recency',
       ftsCount: ftsResults.length,
       semanticCount: semanticResults.length,
       explain: fused.explain ?? [],
-      resultIds: fused.results.map(item => item.id),
+      resultIds: recencyScored.map(item => item.id),
     });
-    return fused.results;
+    return recencyScored;
   }
 
   // ========== Graph-Aware Arama ==========
@@ -443,7 +449,7 @@ export class RetrievalService {
         FROM matched w
         JOIN memories m ON m.id = w.rowid
         WHERE m.is_archived = 1
-        AND w.distance <= 0.4
+        AND w.distance <= 0.30
         ORDER BY w.distance ASC
         LIMIT ?
       `).all(queryArrayBuffer, queryArrayBuffer, limit) as (MemoryRow & { similarity: number })[];

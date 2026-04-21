@@ -35,30 +35,91 @@ interface FileAttachment {
   size: number;
 }
 
-const COMPACT_SUMMARY_PROMPT = `Aşağıdaki konuşma geçmişini analiz et ve bağlamı kaybetmeden özetle.
+/** Teknik/Programlama konuşmaları için özet prompt'u */
+const COMPACT_SUMMARY_PROMPT_TECHNICAL = `Aşağıdaki teknik konuşma geçmişini analiz et ve bağlamı kaybetmeden özetle.
 
 ## Görev
 Bu bir CONTEXT COMPACTION özetidir — konuşma devam edecek, bu yüzden agent'ın çalışmaya devam edebilmesi için TÜM bağlamsal bilgiyi korumalısın.
 
 ## Özette MUTLAKA olması gerekenler:
-1. Yapılan işlemler ve sonuçları (araç çağrıları, dosya değişiklikleri, aramalar)
+1. Yapılan işlemler ve sonuçları (dosya değişiklikleri, komutlar, aramalar) — dosya yolları ve değişiklik detayları tam olarak belirtilmeli
 2. Alınan kararlar ve bunların gerekçeleri
 3. Kullanıcının açık tercihleri ve istekleri
-4. Henüz çözülmemiş sorunlar veya devam eden görevler
-5. Önemli teknik detaylar (dosya yolları, konfigürasyonlar, hata mesajları)
+4. Henüz çözülmemiş sorunlar veya devam eden görevler (TODO olarak işaretle)
+5. Önemli teknik detaylar: dosya yolları, konfigürasyon değerleri, hata mesajları, API yanıtları
+6. Kod değişikliklerinin tam dosya yolları ve yapılan spesifik değişiklikler
 
 ## Özette OLMAMASI gerekenler:
 - Genel selamlamalar veya tekrarlar
 - Detaylı hata yığınları (sadece ana hata mesajını tut)
 - Orta düzey debug çıktıları
+- Onay mesajları ("tamam", "yapıldı" vb.)
 
 ## Format
 SADECE özet metnini yaz. JSON formatı KULLANMA. Kod bloğu KULLANMA. Açıklama ekleme.
 3-6 paragraf, her biri belirli bir konuya odaklı.
 Özetin dili konuşmanın ağırlıklı yapıldığı dilde olsun.`;
 
+/** Sohbet/Genel konuşmalar için özet prompt'u */
+const COMPACT_SUMMARY_PROMPT_CONVERSATIONAL = `Aşağıdaki konuşma geçmişini analiz et ve bağlamı kaybetmeden özetle.
+
+## Görev
+Bu bir CONTEXT COMPACTION özetidir — konuşma devam edecek, bu yüzden agent'ın çalışmaya devam edebilmesi için TÜM bağlamsal bilgiyi korumalısın.
+
+## Özette MUTLAKA olması gerekenler:
+1. Tartışılan konular ve varılan sonuçlar
+2. Kullanıcının açık tercihleri ve duygusal durumu
+3. Paylaşılan kişisel bilgiler ve anılar
+4. Henüz bitmemiş konular veya takip edilmesi gerekenler
+5. Önemli isimler, tarihler, yerler ve olaylar
+
+## Özette OLMAMASI gerekenler:
+- Genel selamlamalar veya tekrarlar
+- Detaylı günlük rutin anlatıları
+- Konu dışı geçici konuşmalar
+
+## Format
+SADECE özet metnini yaz. JSON formatı KULLANMA. Kod bloğu KULLANMA. Açıklama ekleme.
+3-6 paragraf, her biri belirli bir konuya odaklı.
+Özetin dili konuşmanın ağırlıklı yapıldığı dilde olsun.`;
+
+/** Artımlı özetleme — mevcut özete yeni mesajları eklemek için */
+const COMPACT_INCREMENTAL_PROMPT = `Aşağıda mevcut bir konuşma özeti ve sonrasında yapılan yeni mesajlar var.
+Mevcut özeti, yeni mesajlardaki bilgileri dahil ederek güncelle.
+
+## Kurallar:
+1. Mevcut özetteki bilgileri kaybetme — sadece gereksiz tekrarları çıkar
+2. Yeni mesajlardaki tüm önemli bilgileri ekle
+3. Çelişkili bilgi varsa yeni bilgiye öncelik ver
+4. Özetin toplam uzunluğu mevcut uzunluğun 1.5 katını geçmemeli
+5. Aynı formatı koru — paragraf tabanlı, JSON değil
+
+## Mevcut Özet:
+{EXISTING_SUMMARY}
+
+## Yeni Mesajlar:
+{NEW_MESSAGES}`;
+
+/** Zaman dilimi tipleri — teleskopik compaction için */
+type TimeSpan = 'recent' | 'medium' | 'old';
+
+/** Zaman dilimi yapılandırması */
+interface TimeSpanConfig {
+  label: string;
+  maxContentLength: number;  // Her mesaj için maksimum karakter uzunluğu
+  summaryDetail: 'full' | 'condensed' | 'brief';
+}
+
+const TIMESPAN_CONFIGS: Record<TimeSpan, TimeSpanConfig> = {
+  recent:  { label: 'Son 1 saat',    maxContentLength: 500,  summaryDetail: 'full' },
+  medium:  { label: 'Son 24 saat',    maxContentLength: 250,  summaryDetail: 'condensed' },
+  old:     { label: '24 saatten eski', maxContentLength: 100,  summaryDetail: 'brief' },
+};
+
 export class CompactEngine {
   private llm: LLMProvider;
+  private lastBoundarySummary: string | null = null;
+  private lastSessionId: string | null = null;
 
   constructor(llm: LLMProvider) {
     this.llm = llm;
@@ -87,6 +148,12 @@ export class CompactEngine {
       threshold,
       messageCount: llmMessages.length,
     }, '[CompactEngine] Context compaction needed');
+
+    // Oturum değişikliği tespiti — farklı konuşmaya geçince incremental state'i sıfırla
+    if (this.lastSessionId !== null && this.lastSessionId !== sessionId) {
+      this.lastBoundarySummary = null;
+    }
+    this.lastSessionId = sessionId;
 
     const hookRegistry = getHookRegistry();
     const startTime = Date.now();
@@ -165,7 +232,32 @@ export class CompactEngine {
     const messagesToCompact = chunksToCompact.flatMap(c => c.messages);
     const preservedMessages = chunksToPreserve.flatMap(c => c.messages);
 
-    const summary = await this.generateSummary(messagesToCompact);
+    // Teleskopik compaction: mesajları zaman dilimlerine ayır ve detay seviyesini ayarla
+    const timeSpanGroups = this.categorizeByTimeSpan(messagesToCompact, conversationHistory);
+    const transcript = this.formatTelescopicTranscript(timeSpanGroups);
+
+    // Artımlı compaction: mevcut boundary özeti varsa genişlet
+    let summary: string;
+    if (this.lastBoundarySummary) {
+      summary = await this.generateIncrementalSummary(this.lastBoundarySummary, transcript);
+    } else {
+      const isTechnical = this.detectConversationType(messagesToCompact) === 'technical';
+      summary = await this.generateSummary(transcript, isTechnical);
+    }
+
+    // Özet token sınırı — çok fazla compaction cycle'ında sınırsız büyümeyi engelle
+    const MAX_SUMMARY_TOKENS = 1500;
+    const summaryTokens = encode(summary).length;
+    if (summaryTokens > MAX_SUMMARY_TOKENS) {
+      logger.warn({
+        summaryTokens,
+        maxTokens: MAX_SUMMARY_TOKENS,
+      }, '[CompactEngine] Summary exceeds token limit, forcing fresh summary next cycle');
+      // Token sınırını aşarsa incremental state'i sıfırla → bir sonraki cycle taze özet üretir
+      this.lastBoundarySummary = null;
+    } else {
+      this.lastBoundarySummary = summary;
+    }
 
     const fileAttachments: FileAttachment[] = preserveFiles
       ? this.preserveFileAttachments(conversationHistory, maxFileBytes)
@@ -194,14 +286,209 @@ export class CompactEngine {
     };
   }
 
-  private async generateSummary(messages: LLMMessage[]): Promise<string> {
-    const transcript = this.formatMessagesForSummary(messages);
+  /**
+   * Konuşma tipini tespit eder — teknik (kod, araç çağrısı ağırlıklı) veya sohbet.
+   */
+  private detectConversationType(messages: LLMMessage[]): 'technical' | 'conversational' {
+    let toolCallCount = 0;
+    let codeSnippetCount = 0;
+    let totalContent = 0;
+
+    for (const msg of messages) {
+      const content = typeof msg.content === 'string' ? msg.content : '';
+      totalContent += content.length;
+
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        toolCallCount += msg.toolCalls.length;
+      }
+
+      // Kod bloğu tespiti
+      if (/```[\s\S]*?```/.test(content) || /\b(function|class|import|export|const |let |var |return |if \()\b/.test(content)) {
+        codeSnippetCount++;
+      }
+    }
+
+    const toolDensity = toolCallCount / Math.max(1, messages.length);
+    const codeDensity = codeSnippetCount / Math.max(1, messages.length);
+
+    // Araç çağrısı yoğunluğu veya kod yoğunluğu yüksekse teknik
+    return (toolDensity > 0.3 || codeDensity > 0.2) ? 'technical' : 'conversational';
+  }
+
+  /**
+   * Mesajları zaman dilimlerine göre kategorize eder (teleskopik compaction).
+   * recent: son 1 saat, medium: son 24 saat, old: daha eski
+   */
+  private categorizeByTimeSpan(
+    messages: LLMMessage[],
+    conversationHistory: ConversationMessage[],
+  ): Map<TimeSpan, LLMMessage[]> {
+    const nowMs = Date.now();
+    const HOUR_MS = 3600000;
+    const DAY_MS = 86400000;
+
+    const result = new Map<TimeSpan, LLMMessage[]>([
+      ['recent', []],
+      ['medium', []],
+      ['old', []],
+    ]);
+
+    // conversationHistory'den zaman damgalarını eşleştir
+    // id → timestamp haritası (content bazlı lookup yerine — aynı içerikli
+    // mesajlar content key'inde birbirinin timestamp'ını overwrite ediyordu)
+    const timestampById = new Map<number, number>();
+    for (const msg of conversationHistory) {
+      if (msg.id !== undefined && msg.timestamp) {
+        const ts = msg.timestamp instanceof Date
+          ? msg.timestamp.getTime()
+          : new Date(msg.timestamp).getTime();
+        if (Number.isFinite(ts)) {
+          timestampById.set(msg.id, ts);
+        }
+      }
+    }
+
+    // role:content → id[] haritası (aynı content'li mesajları sırayla eşleştirmek için)
+    const idsByContentRole = new Map<string, number[]>();
+    for (const msg of conversationHistory) {
+      if (msg.id !== undefined) {
+        const key = `${msg.role}:${msg.content}`;
+        const list = idsByContentRole.get(key);
+        if (list) {
+          list.push(msg.id);
+        } else {
+          idsByContentRole.set(key, [msg.id]);
+        }
+      }
+    }
+
+    // Her key için tüketim indeksi — aynı content'li mesajlar sırayla eşleşir
+    const consumeIndex = new Map<string, number>();
+
+    // Mesajları zaman damgalarına göre kategorize et
+    let lastKnownCategory: TimeSpan = 'recent';
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      let category: TimeSpan;
+
+      // Tool result → bir önceki kategoriyi miras al
+      if (msg.role === 'tool') {
+        category = lastKnownCategory;
+      } else {
+        const content = typeof msg.content === 'string' ? msg.content : '';
+        const lookupKey = `${msg.role}:${content}`;
+        const idList = idsByContentRole.get(lookupKey);
+        const idx = consumeIndex.get(lookupKey) ?? 0;
+
+        let ts: number | undefined;
+        if (idList && idx < idList.length) {
+          ts = timestampById.get(idList[idx]);
+          consumeIndex.set(lookupKey, idx + 1);
+        }
+
+        if (ts !== undefined) {
+          const ageMs = nowMs - ts;
+          if (ageMs < HOUR_MS) {
+            category = 'recent';
+          } else if (ageMs < DAY_MS) {
+            category = 'medium';
+          } else {
+            category = 'old';
+          }
+        } else {
+          // Zaman damgası yoksa — pozisyon bazlı tahmin
+          const positionRatio = i / Math.max(1, messages.length - 1);
+          if (positionRatio < 0.3) {
+            category = 'old';
+          } else if (positionRatio < 0.7) {
+            category = 'medium';
+          } else {
+            category = 'recent';
+          }
+        }
+        lastKnownCategory = category;
+      }
+
+      result.get(category)!.push(msg);
+    }
+
+    return result;
+  }
+
+  /**
+   * Teleskopik transkript oluşturur — zaman dilimine göre farklı detay seviyesi uygular.
+   */
+  private formatTelescopicTranscript(timeSpanGroups: Map<TimeSpan, LLMMessage[]>): string {
+    const parts: string[] = [];
+
+    // Eski → Yeni sıralama
+    const order: TimeSpan[] = ['old', 'medium', 'recent'];
+
+    for (const span of order) {
+      const messages = timeSpanGroups.get(span) ?? [];
+      if (messages.length === 0) continue;
+
+      const config = TIMESPAN_CONFIGS[span];
+      parts.push(`\n--- ${config.label} (${messages.length} mesaj, detay: ${config.summaryDetail}) ---\n`);
+
+      for (const msg of messages) {
+        const formatted = this.formatSingleMessage(msg, config.maxContentLength);
+        parts.push(formatted);
+      }
+    }
+
+    return parts.join('\n');
+  }
+
+  /**
+   * Tek bir mesajı belirli bir maksimum uzunlukta formatlar.
+   */
+  private formatSingleMessage(msg: LLMMessage, maxContentLength: number): string {
+    if (msg.role === 'user') {
+      const content = typeof msg.content === 'string' ? msg.content : '';
+      return `[Kullanıcı]: ${this.truncateContent(content, maxContentLength)}`;
+    } else if (msg.role === 'assistant') {
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        const toolParts = msg.toolCalls.map(tc =>
+          `${tc.name}(${this.truncateContent(JSON.stringify(tc.arguments), 150)})`
+        ).join('; ');
+        const contentPreview = typeof msg.content === 'string' && msg.content.length > 0
+          ? ` — ${this.truncateContent(msg.content, 80)}`
+          : '';
+        return `[Asistan/Tool]: ${toolParts}${contentPreview}`;
+      } else {
+        const content = typeof msg.content === 'string' ? msg.content : '';
+        return `[Asistan]: ${this.truncateContent(content, maxContentLength)}`;
+      }
+    } else if (msg.role === 'tool') {
+      if (msg.toolResults) {
+        const resultParts = msg.toolResults.map(tr => {
+          const resultStr = typeof tr.result === 'string' ? tr.result : JSON.stringify(tr.result);
+          return `[Sonuç/${tr.name}]: ${this.truncateContent(resultStr, maxContentLength)}`;
+        });
+        return resultParts.join('\n');
+      }
+    }
+    return '';
+  }
+
+  /**
+   * İçeriği belirli bir uzunlukta kırpar.
+   */
+  private truncateContent(content: string, maxLength: number): string {
+    if (content.length <= maxLength) return content;
+    return content.substring(0, maxLength) + '...';
+  }
+
+  private async generateSummary(transcript: string, isTechnical: boolean): Promise<string> {
+    const systemPrompt = isTechnical ? COMPACT_SUMMARY_PROMPT_TECHNICAL : COMPACT_SUMMARY_PROMPT_CONVERSATIONAL;
 
     try {
       const result = await this.llm.chat(
         [{ role: 'user', content: transcript }],
         {
-          systemPrompt: COMPACT_SUMMARY_PROMPT,
+          systemPrompt,
           temperature: 0.2,
           maxTokens: 2048,
         },
@@ -215,79 +502,64 @@ export class CompactEngine {
       logger.error({ err }, '[CompactEngine] LLM summarization failed, using heuristic summary');
     }
 
-    return this.heuristicSummary(messages);
+    return this.heuristicSummaryFromTranscript(transcript);
   }
 
-  private heuristicSummary(messages: LLMMessage[]): string {
-    const userMessages = messages.filter(m => m.role === 'user');
-    const assistantMessages = messages.filter(m => m.role === 'assistant');
-    const toolCalls = messages.filter(m => m.toolCalls && m.toolCalls.length > 0);
+  /**
+   * Artımlı özetleme — mevcut özete yeni mesajları entegre eder.
+   */
+  private async generateIncrementalSummary(existingSummary: string, newTranscript: string): Promise<string> {
+    const prompt = COMPACT_INCREMENTAL_PROMPT
+      .replace('{EXISTING_SUMMARY}', existingSummary)
+      .replace('{NEW_MESSAGES}', newTranscript);
 
-    const userTopics = userMessages
-      .map(m => (typeof m.content === 'string' ? m.content : '').substring(0, 100))
-      .filter(c => c.length > 0)
-      .slice(-5);
+    try {
+      const result = await this.llm.chat(
+        [{ role: 'user', content: prompt }],
+        {
+          systemPrompt: 'Sen bir özet asistanısın. Mevcut bir özeti yeni bilgilerle güncelle, hiçbir bilgiyi kaybetme.',
+          temperature: 0.2,
+          maxTokens: 2048,
+        },
+      );
 
-    const toolsUsed = toolCalls.flatMap(m => m.toolCalls?.map(tc => tc.name) ?? []);
-
-    let summary = `[Otomatik özet — ${messages.length} mesaj sıkıştırıldı]\n`;
-    if (userTopics.length > 0) {
-      summary += `Konuşulan konular: ${userTopics.join('; ')}\n`;
+      const summary = result.content.trim();
+      if (summary.length > 0) {
+        return summary;
+      }
+    } catch (err) {
+      logger.error({ err }, '[CompactEngine] Incremental summarization failed, using existing summary + new transcript');
     }
-    if (assistantMessages.length > 0) {
-      summary += `Asistan yanıtları: ${assistantMessages.length}\n`;
-    }
+
+    // Fallback: mevcut özet + yeni transkriptin kısa versiyonu
+    return `${existingSummary}\n\n--- Sonraki mesajlar ---\n${this.heuristicSummaryFromTranscript(newTranscript)}`;
+  }
+
+  private heuristicSummaryFromTranscript(transcript: string): string {
+    const lineCount = transcript.split('\n').filter(l => l.trim().length > 0).length;
+    const toolMentions = transcript.match(/\[Asistan\/Tool\]:/g);
+    const toolsUsed = [...new Set(
+      (transcript.match(/\[Sonuç\/([^\]]+)\]/g) ?? [])
+        .map(m => m.replace('[Sonuç/', '').replace(']', ''))
+    )];
+
+    let summary = `[Otomatik özet — ${lineCount} satır sıkıştırıldı]\n`;
     if (toolsUsed.length > 0) {
-      summary += `Kullanılan araçlar: ${[...new Set(toolsUsed)].join(', ')}\n`;
+      summary += `Kullanılan araçlar: ${toolsUsed.join(', ')}\n`;
     }
-
-    return summary;
-  }
-
-  private formatMessagesForSummary(messages: LLMMessage[]): string {
-    const parts: string[] = [];
-
-    for (const msg of messages) {
-      if (msg.role === 'user') {
-        const content = typeof msg.content === 'string' ? msg.content : '';
-        if (content.length > 500) {
-          parts.push(`[Kullanıcı]: ${content.substring(0, 500)}...`);
-        } else {
-          parts.push(`[Kullanıcı]: ${content}`);
-        }
-      } else if (msg.role === 'assistant') {
-        if (msg.toolCalls && msg.toolCalls.length > 0) {
-          const toolNames = msg.toolCalls.map(tc => tc.name).join(', ');
-          const argsPreview = msg.toolCalls.map(tc =>
-            `${tc.name}(${JSON.stringify(tc.arguments).substring(0, 200)})`
-          ).join('; ');
-          const contentPreview = typeof msg.content === 'string' && msg.content.length > 0
-            ? ` — ${msg.content.substring(0, 100)}`
-            : '';
-          parts.push(`[Asistan/Tool]: ${argsPreview}${contentPreview}`);
-        } else {
-          const content = typeof msg.content === 'string' ? msg.content : '';
-          if (content.length > 400) {
-            parts.push(`[Asistan]: ${content.substring(0, 400)}...`);
-          } else {
-            parts.push(`[Asistan]: ${content}`);
-          }
-        }
-      } else if (msg.role === 'tool') {
-        if (msg.toolResults) {
-          for (const tr of msg.toolResults) {
-            const resultStr = typeof tr.result === 'string' ? tr.result : JSON.stringify(tr.result);
-            if (resultStr.length > 300) {
-              parts.push(`[Sonuç/${tr.name}]: ${resultStr.substring(0, 300)}...`);
-            } else {
-              parts.push(`[Sonuç/${tr.name}]: ${resultStr}`);
-            }
-          }
-        }
+    if (toolMentions) {
+      summary += `Araç çağrısı sayısı: ${toolMentions.length}\n`;
+    }
+    // İlk ve son kullanıcı mesajlarını tut
+    const userLines = transcript.split('\n').filter(l => l.startsWith('[Kullanıcı]:'));
+    if (userLines.length > 0) {
+      summary += `İlk konu: ${userLines[0].replace('[Kullanıcı]: ', '').substring(0, 100)}\n`;
+      if (userLines.length > 1) {
+        summary += `Son konu: ${userLines[userLines.length - 1].replace('[Kullanıcı]: ', '').substring(0, 100)}\n`;
       }
     }
 
-    return parts.join('\n');
+    return summary;
   }
 
   private chunkMessages(messages: LLMMessage[]): LLMChunk[] {
