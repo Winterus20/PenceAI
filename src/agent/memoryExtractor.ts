@@ -278,8 +278,9 @@ export class MemoryExtractor {
                         title = parsed.title.trim().substring(0, 200);
                     }
                 }
-            } catch {
+            } catch (err) {
                 // Fallback: ham metin olduğu gibi kaydedilir
+                logger.debug({ err: err instanceof Error ? err.message : err }, '[MemoryExtractor] Conversation summary JSON parse failed');
             }
 
             this.memory.updateConversationSummary(conversationId, summary);
@@ -325,7 +326,8 @@ export class MemoryExtractor {
                 // 6) Fallback: Satır satır JSON objesi çıkarma
                 return this.fallbackParseMemories(jsonStr);
             }
-        } catch {
+        } catch (err) {
+            logger.debug({ err: err instanceof Error ? err.message : err }, '[MemoryExtractor] Extraction response parse failed');
             return [];
         }
     }
@@ -367,8 +369,9 @@ export class MemoryExtractor {
                         importance: typeof parsed.importance === 'number' ? Math.min(10, Math.max(1, parsed.importance)) : 5,
                     });
                 }
-            } catch {
+            } catch (err) {
                 // Bu objeyi atla, sonrakine devam et
+                logger.debug({ err: err instanceof Error ? err.message : err }, '[MemoryExtractor] Fallback individual object parse failed');
             }
         }
 
@@ -448,7 +451,8 @@ export class MemoryExtractor {
                 let parsed: ParsedGraphResult;
                 try {
                     parsed = JSON.parse(jsonStr);
-                } catch {
+                } catch (err) {
+                    logger.debug({ err: err instanceof Error ? err.message : err }, '[MemoryExtractor] Graph entity JSON parse failed');
                     return { entities: [], relations: [] };
                 }
                 return {

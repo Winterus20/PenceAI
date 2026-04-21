@@ -463,18 +463,11 @@ export class MemoryRetrievalOrchestrator {
                     query,
                     agenticActive,
                     critique,
-                    async (refinedQuery, hop, target) => {
-                        let extraResults: MemoryRow[] = [];
-                        if (target === 'graphRAG' && resolvedEngine) {
-                            const result = await resolvedEngine.retrieve(refinedQuery, { maxHops: 1 });
-                            if (result.success && result.memories) {
-                                extraResults = result.memories;
-                            }
-                        } else {
-                            const res = await this.deps.graphAwareSearch(refinedQuery, effectiveSearchLimit, 0);
-                            extraResults = res.active;
-                        }
-                        return extraResults;
+                    async (refinedQuery, _hop, _target) => {
+                        // Multi-hop retrieveFn: GraphRAG intentionally bypassed to prevent
+                        // recursive graph traversal. Standard hybrid search used instead.
+                        const res = await this.deps.graphAwareSearch(refinedQuery, effectiveSearchLimit, 0);
+                        return res.active;
                     }
                 );
                 

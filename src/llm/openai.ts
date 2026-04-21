@@ -3,6 +3,7 @@ import { LLMProvider, type ChatOptions } from './provider.js';
 import type { LLMMessage, LLMResponse, ToolCall, LLMToolDefinition, ImageBlock } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
 import { extractThinkingFromTags } from '../utils/thinkTags.js';
+import { logger } from '../utils/logger.js';
 
 interface NormalizedMessage {
     role: 'user' | 'assistant';
@@ -186,7 +187,13 @@ export class OpenAIProvider extends LLMProvider {
     }
 
     protected client: OpenAI;
-    private toolsDisabled = false;
+
+    // Circuit breaker: geçici tool disable — transient error sonrası otomatik kurtarma
+    private toolsCircuitOpen = false;
+    private toolsCircuitOpenSince = 0;
+    private static readonly CIRCUIT_HALF_OPEN_MS = 30_000; // 30s sonra retry denemesi
+    private static readonly CIRCUIT_MAX_FAILURES = 3;       // arka arkaya bu kadar hata → circuit open
+    private toolsConsecutiveFailures = 0;
 
     private isToolRelatedError(error: unknown): boolean {
         if (!(error instanceof Error)) return false;
@@ -194,16 +201,54 @@ export class OpenAIProvider extends LLMProvider {
         return /tool.?choice|auto.?tool|tool.?call.?parser|enable.?auto.?tool|tool.*not.*support|invalid.*tool|function.*call.*not|does not support.*function/i.test(error.message);
     }
 
+    /** Circuit breaker durumunu kontrol et — half-open ise retry'a izin ver */
+    private isToolsCircuitOpen(): boolean {
+        if (!this.toolsCircuitOpen) return false;
+        // Half-open: belirli süre sonra tek bir retry'a izin ver
+        const elapsed = Date.now() - this.toolsCircuitOpenSince;
+        if (elapsed >= OpenAIProvider.CIRCUIT_HALF_OPEN_MS) {
+            logger.info('[OpenAI] Circuit half-open — retrying tool calls');
+            return false; // retry'a izin ver
+        }
+        return true; // hala open — tools yok
+    }
+
+    /** Tool-related hatası sonrası circuit breaker'ı güncelle */
+    private onToolError(): void {
+        this.toolsConsecutiveFailures++;
+        if (this.toolsConsecutiveFailures >= OpenAIProvider.CIRCUIT_MAX_FAILURES) {
+            this.toolsCircuitOpen = true;
+            this.toolsCircuitOpenSince = Date.now();
+            logger.warn(`[OpenAI] Circuit OPEN — tool calls disabled for ${OpenAIProvider.CIRCUIT_HALF_OPEN_MS / 1000}s (${this.toolsConsecutiveFailures} consecutive failures)`);
+        } else {
+            logger.debug(`[OpenAI] Tool failure ${this.toolsConsecutiveFailures}/${OpenAIProvider.CIRCUIT_MAX_FAILURES}`);
+        }
+    }
+
+    /** Başarılı tool call sonrası circuit breaker'ı sıfırla */
+    private onToolSuccess(): void {
+        if (this.toolsConsecutiveFailures > 0 || this.toolsCircuitOpen) {
+            logger.info('[OpenAI] Circuit CLOSED — tool calls re-enabled after successful call');
+        }
+        this.toolsConsecutiveFailures = 0;
+        this.toolsCircuitOpen = false;
+    }
+
     private async createChatCompletionWithToolFallback(reqOpts: OpenAI.Chat.ChatCompletionCreateParams): Promise<OpenAI.Chat.ChatCompletion> {
-        if (this.toolsDisabled) {
+        if (this.isToolsCircuitOpen()) {
             const { tools: _, tool_choice: __, ...noToolsReqOpts } = reqOpts;
             return await this.client.chat.completions.create(noToolsReqOpts) as OpenAI.Chat.ChatCompletion;
         }
         try {
-            return await this.client.chat.completions.create(reqOpts) as OpenAI.Chat.ChatCompletion;
+            const result = await this.client.chat.completions.create(reqOpts) as OpenAI.Chat.ChatCompletion;
+            // Başarılı call — eğer tool kullanıldıysa circuit'i sıfırla
+            if (reqOpts.tools && reqOpts.tools.length > 0) {
+                this.onToolSuccess();
+            }
+            return result;
         } catch (error) {
             if (reqOpts.tools && reqOpts.tools.length > 0 && this.isToolRelatedError(error)) {
-                this.toolsDisabled = true;
+                this.onToolError();
                 const { tools: _, tool_choice: __, ...fallbackReqOpts } = reqOpts;
                 return await this.client.chat.completions.create(fallbackReqOpts) as OpenAI.Chat.ChatCompletion;
             }
@@ -212,15 +257,22 @@ export class OpenAIProvider extends LLMProvider {
     }
 
     private async createChatCompletionWithToolFallbackStream(reqOpts: OpenAI.Chat.ChatCompletionCreateParamsStreaming): Promise<AsyncIterable<OpenAI.Chat.ChatCompletionChunk>> {
-        if (this.toolsDisabled) {
+        if (this.isToolsCircuitOpen()) {
             const { tools: _, tool_choice: __, ...noToolsReqOpts } = reqOpts;
             reqOpts = noToolsReqOpts;
         }
         try {
-            return await this.client.chat.completions.create(reqOpts) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+            const result = await this.client.chat.completions.create(reqOpts) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
+            // Note: onToolSuccess() çağrısı stream başlangıcında yapılır.
+            // Tool-support hataları create() anında surface olur, stream consumption
+            // sırasında tool hatası oluşmaz — bu nedenle erken çağrı güvenlidir.
+            if (reqOpts?.tools && reqOpts.tools.length > 0) {
+                this.onToolSuccess();
+            }
+            return result;
         } catch (error) {
-            if (!this.toolsDisabled && reqOpts?.tools && reqOpts.tools.length > 0 && this.isToolRelatedError(error)) {
-                this.toolsDisabled = true;
+            if (!this.isToolsCircuitOpen() && reqOpts?.tools && reqOpts.tools.length > 0 && this.isToolRelatedError(error)) {
+                this.onToolError();
                 const { tools: _, tool_choice: __, ...fallbackReqOpts } = reqOpts;
                 return await this.client.chat.completions.create(fallbackReqOpts) as AsyncIterable<OpenAI.Chat.ChatCompletionChunk>;
             }

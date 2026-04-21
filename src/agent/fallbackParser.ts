@@ -1,4 +1,5 @@
 import type { ToolCall } from '../router/types.js';
+import { logger } from '../utils/logger.js';
 
 export interface FallbackToolCallResult {
     calls: ToolCall[];
@@ -43,7 +44,8 @@ export function extractFallbackToolCalls(content: string, knownToolNames: Set<st
                     rawMatches.push(m[0]);
                 }
             }
-        } catch {
+        } catch (err) {
+            logger.debug({ err: err instanceof Error ? err.message : err }, '[FallbackParser] JSON block parse failed');
         }
     }
 
@@ -65,7 +67,8 @@ export function extractFallbackToolCalls(content: string, knownToolNames: Set<st
                         rawMatches.push(m[0]);
                     }
                 }
-            } catch {
+            } catch (err) {
+                logger.debug({ err: err instanceof Error ? err.message : err }, '[FallbackParser] Greedy JSON parse failed');
             }
         }
     }
@@ -117,11 +120,14 @@ export function parseFallbackArgs(toolName: string, argsString: string): Record<
     if (argsString.trim().startsWith('{')) {
         try {
             return JSON.parse(argsString);
-        } catch {
+        } catch (err) {
+            logger.debug({ err: err instanceof Error ? err.message : err }, '[FallbackParser] JSON args parse failed, trying escaped');
             try {
                 const escaped = argsString.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
                 return JSON.parse(escaped);
-            } catch { }
+            } catch (err2) {
+                logger.debug({ err: err2 instanceof Error ? err2.message : err2 }, '[FallbackParser] Escaped JSON args parse also failed');
+            }
         }
     }
 
@@ -153,7 +159,11 @@ export function getPrimaryParam(toolName: string): string {
 }
 
 export function safeJsonParse(str: string): Record<string, unknown> {
-    try { return JSON.parse(str); } catch {  }
-    try { return JSON.parse(str.replace(/\\(?!["\\/bfnrtu])/g, '\\\\')); } catch {  }
+    try { return JSON.parse(str); } catch (err) {
+        logger.debug({ err: err instanceof Error ? err.message : err }, '[FallbackParser] safeJsonParse primary failed');
+    }
+    try { return JSON.parse(str.replace(/\\(?!["\\/bfnrtu])/g, '\\\\')); } catch (err) {
+        logger.debug({ err: err instanceof Error ? err.message : err }, '[FallbackParser] safeJsonParse escaped failed');
+    }
     return {};
 }

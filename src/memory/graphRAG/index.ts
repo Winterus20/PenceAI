@@ -16,7 +16,6 @@ export { GraphWorker, FULL_PHASE_CONFIG } from './GraphWorker.js';
 export { GraphRAGEngine } from './GraphRAGEngine.js';
 export { GlobalSearchEngine } from './GlobalSearchEngine.js';
 export { TokenPruner } from './TokenPruner.js';
-export { ShadowMode } from './ShadowMode.js';
 export { BehaviorDiscoveryShadow } from './BehaviorDiscoveryShadow.js';
 export { GraphRAGConfigManager, DEFAULT_GRAPH_RAG_CONFIG } from './config.js';
 
@@ -67,13 +66,6 @@ export type {
   PruningResult,
   MemoryPriorityWeights,
 } from './TokenPruner.js';
-
-export type {
-  ShadowModeConfig,
-  ShadowModeComparison,
-  ShadowModeMetrics,
-  ShadowModeReport,
-} from './ShadowMode.js';
 
 export type {
   BehaviorDiscoveryConfig,

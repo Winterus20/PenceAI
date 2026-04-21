@@ -170,11 +170,12 @@ export class RetrievalService {
    * Sonuçlar Ebbinghaus retrievability değeriyle ağırlıklandırılır.
    */
   async hybridSearch(query: string, limit: number = 10): Promise<MemoryRow[]> {
-    // 1. FTS arama (raw — stability güncellenmez, Ebbinghaus ağırlıklandırması doğru çalışsın)
+    // 1. FTS senkron arama → ardından semantic async arama
+    // FTS anında tamamlanır (sync), semantic ise API çağrısı gerektirir (async)
     const ftsResults = this._searchMemoriesRaw(query, limit);
-
-    // 2. Semantik arama
     const semanticResults = await this.semanticSearch(query, limit);
+
+    // 2. Sonuçları birleştir
 
     if (semanticResults.length === 0) {
       this.recordRetrievalDebug('hybridSearch', { query, limit, strategy: 'fts_only', ftsCount: ftsResults.length, semanticCount: 0, resultIds: ftsResults.map(item => item.id) });
@@ -275,7 +276,7 @@ export class RetrievalService {
    * Sonuçlar mesaj tarihinin yakınlığına göre ağırlıklandırılır (recency weighting).
    */
   async hybridSearchMessages(query: string, limit: number = 10): Promise<MessageSearchRow[]> {
-    // 1. FTS arama — konuşma bilgisiyle join
+    // 1. FTS senkron arama → ardından semantic async arama
     const ftsQuery = escapeFtsQuery(query);
     const ftsResults: MessageSearchRow[] = ftsQuery ? (this.deps.db.prepare(`
       SELECT m.*, 0.0 as similarity, COALESCE(c.title, '') as conversation_title, c.channel_type
@@ -286,8 +287,6 @@ export class RetrievalService {
       ORDER BY rank
       LIMIT ?
     `).all(ftsQuery, limit) as MessageSearchRow[]) : [];
-
-    // 2. Semantik arama
     const semanticResults = await this.semanticSearchMessages(query, limit);
 
     if (semanticResults.length === 0) {
@@ -464,6 +463,7 @@ export class RetrievalService {
    * Aktif hybridSearch ile aynı mantık, is_archived = 1 filtresi ile.
    */
   private async archivalSearch(query: string, limit: number = 5): Promise<MemoryRow[]> {
+    // FTS senkron arama → ardından semantic async arama
     const ftsResults = this._searchMemoriesRawArchival(query, limit);
     const semanticResults = await this.semanticSearchArchival(query, limit);
 

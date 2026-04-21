@@ -44,7 +44,7 @@ import { PageRankScorer } from '../memory/graphRAG/PageRankScorer.js';
 import { CommunityDetector } from '../memory/graphRAG/CommunityDetector.js';
 import { CommunitySummarizer } from '../memory/graphRAG/CommunitySummarizer.js';
 import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
-import { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
+
 import { GraphWorker } from '../memory/graphRAG/GraphWorker.js';
 import { GraphRAGConfigManager, DEFAULT_GRAPH_RAG_CONFIG } from '../memory/graphRAG/config.js';
 
@@ -54,16 +54,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //  Bootstrap Helpers
 // ═══════════════════════════════════════════════════════════
 
-async function bootstrapDatabase(): Promise<{ database: PenceDatabase; memory: MemoryManager }> {
-    const embeddingProbe = createEmbeddingProvider();
-    const embeddingDimensions = embeddingProbe?.dimensions ?? 1536;
+async function bootstrapDatabase(): Promise<{ database: PenceDatabase; memory: MemoryManager; embeddingProvider: ReturnType<typeof createEmbeddingProvider> }> {
+    const embeddingProvider = createEmbeddingProvider();
+    const embeddingDimensions = embeddingProvider?.dimensions ?? 1536;
     const config = getConfig();
     const database = new PenceDatabase(config.dbPath, embeddingDimensions);
     const memory = new MemoryManager(database);
     logger.info(`[Gateway] 💾 Veritabanı hazır: ${config.dbPath} (embedding dim=${embeddingDimensions})`);
     metricsCollector.setDatabase(database.getDb());
     await initMCPPersistence(config.dbPath);
-    return { database, memory };
+    return { database, memory, embeddingProvider };
 }
 
 function bootstrapLLM(): LLMProvider {
@@ -96,7 +96,7 @@ async function main() {
     logger.info(`[Gateway] ⚙️  Port: ${config.port} | Provider: ${config.defaultLLMProvider} | Model: ${config.defaultLLMModel}`);
 
     // 2. Veritabanı
-    const { database, memory } = await bootstrapDatabase();
+    const { database, memory, embeddingProvider } = await bootstrapDatabase();
 
     // 3. LLM Provider
     let llm: LLMProvider;
@@ -135,7 +135,7 @@ async function main() {
     logger.info(`[Gateway] 🕸️ GraphRAG initializing: enabled=${graphRAGConfig.enabled}, phase=${GraphRAGConfigManager.getCurrentPhase()}`);
 
     // Initialize GraphRAG (optional — agent/memory work without it)
-    let graphRAGComponents: { engine: GraphRAGEngine; worker: GraphWorker; shadow: ShadowMode } | null = null;
+    let graphRAGComponents: { engine: GraphRAGEngine; worker: GraphWorker } | null = null;
     try {
         const db = database.getDb();
         const graphCache = new GraphCache(db);
@@ -178,10 +178,15 @@ async function main() {
             },
         );
 
-        const shadowMode = new ShadowMode(graphRAGEngine, hybridSearchFn);
-        agent.setGraphRAGComponents(graphRAGEngine, shadowMode);
+        agent.setGraphRAGComponents(graphRAGEngine);
         memory.setGraphRAGEngine(graphRAGEngine);
         memory.setConfidenceThreshold();
+
+        // Semantic Top-K: GlobalSearchEngine'e embedding provider bağla (bootstrap'ten reuse)
+        if (embeddingProvider) {
+            graphRAGEngine.setEmbeddingProvider(embeddingProvider);
+            logger.info('[Gateway] ✅ GlobalSearchEngine semantic Top-K enabled (embedding provider connected)');
+        }
 
         const { ResponseVerifier } = await import('../memory/retrieval/ResponseVerifier.js');
         const agenticVerifier = new ResponseVerifier(llm, {
@@ -197,7 +202,7 @@ async function main() {
         graphWorker.start();
         logger.info(`[Gateway] ✅ GraphRAG Background Worker started`);
 
-        graphRAGComponents = { engine: graphRAGEngine, worker: graphWorker, shadow: shadowMode };
+        graphRAGComponents = { engine: graphRAGEngine, worker: graphWorker };
     } catch (err) {
         logger.warn({ err }, '[Gateway] GraphRAG init failed, continuing without it');
     }
@@ -235,7 +240,7 @@ async function main() {
 
     // Background jobs ayrıştırıldı
     registerSystemJobs(taskQueue, { memory, agent, broadcastStats });
-    registerAutonomousWorkerJobs(taskQueue, { memory, llm, feedbackManager, subAgentManager, wss, config });
+    registerAutonomousWorkerJobs(taskQueue, { memory, llm, feedbackManager, subAgentManager, wss, config, worker: autonomousWorker });
 
     memory.setTaskQueue(taskQueue);
     agent.setTaskQueue(taskQueue);

@@ -19,11 +19,13 @@ env.useBrowserCache = false;
 interface EmbeddingRequest {
     id: number;
     text: string;
+    texts?: string[];   // Batch mode: multiple texts in one request
 }
 
 interface EmbeddingResponse {
     id: number;
     embedding: number[] | null;
+    embeddings: number[][] | null;  // Batch mode response
     error: string | null;
 }
 
@@ -53,25 +55,51 @@ async function ensureModel(): Promise<void> {
 }
 
 /**
- * Tek bir embedding request'ini işler.
+ * Tek bir embedding request'ini işler (tekil veya batch).
  */
 async function processRequest(request: EmbeddingRequest): Promise<void> {
     try {
         await ensureModel();
+
+        // Batch mode: birden fazla text'i tek inference'da işle
+        if (request.texts && request.texts.length > 0) {
+            const output = await extractor(request.texts, { pooling: 'mean', normalize: true });
+            // output.data: flat Float32Array of length batchSize × hiddenDim
+            // output.dims: [batchSize, hiddenDim]
+            const dim = output.dims[output.dims.length - 1]; // hidden dim (e.g. 384)
+            const flatData = output.data as Float32Array;
+            const embeddings: number[][] = [];
+            for (let i = 0; i < request.texts.length; i++) {
+                const start = i * dim;
+                embeddings.push(Array.from(flatData.slice(start, start + dim)));
+            }
+            const response: EmbeddingResponse = {
+                id: request.id,
+                embedding: null,
+                embeddings,
+                error: null,
+            };
+            parentPort?.postMessage(response);
+            return;
+        }
+
+        // Single mode
         const output = await extractor(request.text, { pooling: 'mean', normalize: true });
         const embedding = Array.from(output.data) as number[];
         
         const response: EmbeddingResponse = { 
             id: request.id, 
             embedding, 
+            embeddings: null,
             error: null 
         };
         parentPort?.postMessage(response);
     } catch (err: any) {
-        const response: EmbeddingResponse = { 
-            id: request.id, 
-            embedding: null, 
-            error: err.message ?? 'Unknown error' 
+        const response: EmbeddingResponse = {
+            id: request.id,
+            embedding: null,
+            embeddings: null,
+            error: err.message ?? 'Unknown error',
         };
         parentPort?.postMessage(response);
     }
@@ -102,7 +130,8 @@ function enqueueRequest(request: EmbeddingRequest): void {
         const response: EmbeddingResponse = {
             id: request.id,
             embedding: null,
-            error: `Queue overflow (max ${MAX_QUEUE_SIZE} pending requests)`
+            embeddings: null,
+            error: `Queue overflow (max ${MAX_QUEUE_SIZE} pending requests)`,
         };
         parentPort?.postMessage(response);
         return;

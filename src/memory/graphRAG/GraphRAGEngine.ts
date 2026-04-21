@@ -33,6 +33,7 @@ import type { GraphRAGFeatureFlag } from './config.js';
 import { TokenPruner, type TokenBudget, type PruningResult } from './TokenPruner.js';
 import { defaultMonitor } from './monitoring.js';
 import { GlobalSearchEngine, type GlobalSearchResult } from './GlobalSearchEngine.js';
+import type { EmbeddingProvider } from '../embeddings.js';
 
 /** GraphRAG konfigürasyonu */
 export interface GraphRAGConfig {
@@ -191,6 +192,13 @@ export class GraphRAGEngine {
       },
     });
     this.globalSearchEngine = new GlobalSearchEngine(db, llmProvider, communityDetector);
+  }
+
+  /**
+   * GlobalSearchEngine'e embedding provider bağla — semantic Top-K filtreleme için.
+   */
+  setEmbeddingProvider(provider: EmbeddingProvider): void {
+    this.globalSearchEngine.setEmbeddingProvider(provider);
   }
 
   /**

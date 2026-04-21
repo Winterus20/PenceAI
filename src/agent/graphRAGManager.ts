@@ -1,7 +1,6 @@
 import type { MemoryRow } from '../memory/types.js';
 import type { PromptContextBundle } from '../memory/manager/types.js';
 import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
-import { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
 import { GraphRAGConfigManager } from '../memory/graphRAG/config.js';
 import { logger } from '../utils/index.js';
 
@@ -13,25 +12,18 @@ export interface GraphRAGRetrieveResult {
     } | null;
     finalRelevantMemories: MemoryRow[];
     perfTimingGraphRAG: number | null;
-    perfTimingShadow: number | null;
 }
 
 export class GraphRAGManager {
     private engine?: GraphRAGEngine;
-    private shadow?: ShadowMode;
 
-    setEngine(engine: GraphRAGEngine, shadow?: ShadowMode): void {
+    setEngine(engine: GraphRAGEngine): void {
         this.engine = engine;
-        this.shadow = shadow;
-        logger.info('[GraphRAGManager] Components connected');
+        logger.info('[GraphRAGManager] Engine connected');
     }
 
     getEngine(): GraphRAGEngine | undefined {
         return this.engine;
-    }
-
-    getShadow(): ShadowMode | undefined {
-        return this.shadow;
     }
 
     async retrieve(
@@ -46,13 +38,11 @@ export class GraphRAGManager {
                 graphRAGResult: null,
                 finalRelevantMemories: relevantMemories,
                 perfTimingGraphRAG: null,
-                perfTimingShadow: null,
             };
         }
 
         let graphRAGResult: GraphRAGRetrieveResult['graphRAGResult'] = null;
         let perfTimingGraphRAG: number | null = null;
-        let perfTimingShadow: number | null = null;
 
         if (contextBundle.graphRAG && contextBundle.graphRAG.memories.length > 0) {
             graphRAGResult = {
@@ -64,12 +54,6 @@ export class GraphRAGManager {
                 graphContext: contextBundle.graphRAG.graphContext,
             };
             logger.info('[GraphRAGManager] Results reused from context bundle (no double retrieval)');
-        } else if (config.shadowMode && this.shadow) {
-            const shadowStart = Date.now();
-            this.shadow.runShadowQuery(query, relevantMemories)
-                .catch(err => logger.error({ err }, '[GraphRAGManager] Shadow mode query error'));
-            perfTimingShadow = Date.now() - shadowStart;
-            logger.info(`[GraphRAGManager] Shadow query: ${perfTimingShadow}ms`);
         } else if (config.enabled && this.engine) {
             const queryLength = query.trim().length;
             const hasActiveContext = recentMessageCount >= 3;
@@ -143,7 +127,6 @@ export class GraphRAGManager {
             graphRAGResult,
             finalRelevantMemories,
             perfTimingGraphRAG,
-            perfTimingShadow,
         };
     }
 

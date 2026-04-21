@@ -175,7 +175,7 @@ const WebSearchArgsSchema = z.object({
     invalid_type_error: '"query" parametresi bir string olmalıdır',
   }).min(1, '"query" parametresi boş olamaz'),
   count: z.coerce.number().int().min(1).max(10).optional().default(5),
-  freshness: z.string().optional(),
+  freshness: z.enum(['pd', 'pw', 'pm', 'py']).optional(),
 });
 
 /**
@@ -713,28 +713,40 @@ export function createBuiltinTools(
                 }
 
                 // Güvenlik kontrolü — tehlikeli komutları engelle
-                const dangerous = [
-                    'rm -rf /', 'rm -r /', 'rm -rf /*', 'rm -r /*',
-                    'format ', 'del /f /s /q', 'del /s /q',
-                    'mkfs', ':(){', 'fork bomb',
-                    'rd /s /q', 'rmdir /s /q',
-                    'remove-item -recurse -force c:',
-                    'remove-item -recurse -force /',
-                    '> /dev/sda', 'dd if=/dev/',
-                    'chmod -r 000 /', 'chown -r ',
-                    'shutdown', 'reboot', 'init 0', 'init 6',
-                    'reg delete', 'reg add',
-                    // wget ve curl kaldırıldı — legit kullanımlar var, pipe-to-shell dangerousPatterns ile yakalanıyor
-                ];
                 const normalized = command.toLowerCase().replace(/\s+/g, ' ').trim();
-                for (const d of dangerous) {
-                    if (normalized.includes(d.toLowerCase())) {
-                        return `⛔ Güvenlik: Bu komut tehlikeli olarak işaretlenmiş ve engellendi: ${command}`;
+                const dangerousPatterns: { pattern: RegExp; desc: string }[] = [
+                    { pattern: /\brm\s+-rf\s+\/(\s|$|--no-preserve-root)/i, desc: 'rm -rf /' },
+                    { pattern: /\brm\s+-r\s+\/(\s|$|--no-preserve-root)/i, desc: 'rm -r /' },
+                    { pattern: /\brm\s+-rf\s+\/\*/i, desc: 'rm -rf /*' },
+                    { pattern: /\brm\s+-r\s+\/\*/i, desc: 'rm -r /*' },
+                    { pattern: /\bformat\s+/i, desc: 'format' },
+                    { pattern: /\bdel\s+\/f\s+\/s\s+\/q/i, desc: 'del /f /s /q' },
+                    { pattern: /\bdel\s+\/s\s+\/q/i, desc: 'del /s /q' },
+                    { pattern: /\bmkfs\b/i, desc: 'mkfs' },
+                    { pattern: /:\s*\(\s*\)\s*\{/i, desc: 'fork bomb' },
+                    { pattern: /\brd\s+\/s\s+\/q/i, desc: 'rd /s /q' },
+                    { pattern: /\brmdir\s+\/s\s+\/q/i, desc: 'rmdir /s /q' },
+                    { pattern: /remove-item\s+-recurse\s+-force\s+c:/i, desc: 'remove-item C:' },
+                    { pattern: /remove-item\s+-recurse\s+-force\s+\//i, desc: 'remove-item /' },
+                    { pattern: />\s*\/dev\/sd[a-z]/i, desc: 'disk overwrite' },
+                    { pattern: /\bdd\s+if=\/dev\//i, desc: 'dd from /dev' },
+                    { pattern: /\bchmod\s+-r\s+000\s+\//i, desc: 'chmod -r 000 /' },
+                    { pattern: /\bchown\s+-r\s+/i, desc: 'chown -r' },
+                    { pattern: /\bshutdown\b/i, desc: 'shutdown' },
+                    { pattern: /\breboot\b/i, desc: 'reboot' },
+                    { pattern: /\binit\s+0\b/i, desc: 'init 0' },
+                    { pattern: /\binit\s+6\b/i, desc: 'init 6' },
+                    { pattern: /\breg\s+delete\b/i, desc: 'reg delete' },
+                    { pattern: /\breg\s+add\b/i, desc: 'reg add' },
+                ];
+                for (const { pattern, desc } of dangerousPatterns) {
+                    if (pattern.test(normalized)) {
+                        return `⛔ Güvenlik: Bu komut tehlikeli olarak işaretlenmiş ve engellendi (${desc}): ${command}`;
                     }
                 }
 
                 // Gelişmiş bypass kontrolleri
-                const dangerousPatterns = [
+                const bypassPatterns = [
                     /\|\s*(sh|bash|cmd|powershell|pwsh|zsh)\b/i,    // pipe ile kabuk çağrısı
                     /\$\(.*\)/,                                       // $(...) subshell
                     /`[^`]+`/,                                        // backtick command substitution
@@ -746,7 +758,7 @@ export function createBuiltinTools(
                     />\s*\/dev\/sd[a-z]/i,                            // disk yazma
                     /\bsudo\s+rm\b/i,                                 // sudo rm
                 ];
-                for (const pattern of dangerousPatterns) {
+                for (const pattern of bypassPatterns) {
                     if (pattern.test(command)) {
                         return `⛔ Güvenlik: Tehlikeli komut kalıbı tespit edildi ve engellendi: ${command}`;
                     }
@@ -805,7 +817,7 @@ export function createBuiltinTools(
 
                 const result = await searchEngine.search(query, {
                     count: Math.min(count, 10),
-                    freshness: freshness as 'pd' | 'pw' | 'pm' | 'py' | undefined,
+                    freshness,
                 });
 
                 if (result.results.length === 0) {

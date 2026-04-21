@@ -3,12 +3,14 @@ import type { MemoryManager } from '../../memory/manager.js';
 import type { LLMProvider } from '../../llm/provider.js';
 import type { FeedbackManager } from '../../autonomous/urgeFilter.js';
 import type { SubAgentManager } from '../../autonomous/curiosityEngine.js';
+import { BackgroundWorker } from '../../autonomous/index.js';
 import { filterThought } from '../../autonomous/urgeFilter.js';
 import { think } from '../../autonomous/thinkEngine.js';
 import { TaskPriority } from '../../autonomous/index.js';
 import { logger } from '../../utils/logger.js';
 import type { WebSocketServer } from 'ws';
 import type { AppConfig } from '../config.js';
+import { z } from 'zod';
 
 export interface AutonomousWorkerDeps {
     memory: MemoryManager;
@@ -17,18 +19,39 @@ export interface AutonomousWorkerDeps {
     subAgentManager: SubAgentManager;
     wss: WebSocketServer;
     config: AppConfig;
+    worker: BackgroundWorker;
 }
 
 export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: AutonomousWorkerDeps): void {
-    const { memory, llm, feedbackManager, subAgentManager, wss, config } = deps;
+    const { memory, llm, feedbackManager, subAgentManager, wss, config, worker } = deps;
 
     // Autonomous tick state — son seçilen seed'i takip et
     let lastSelectedSeedId: number | undefined = undefined;
     let lastSeedSelectedAt: number = 0; // Unix timestamp ms
 
+    // Zod schema for LLM self-reflection output (1.2)
+    const ThoughtSchema = z.object({
+        relevance: z.number().min(0).max(1).optional(),
+        timeSensitivity: z.number().min(0).max(1).optional(),
+        reasoning: z.string().optional(),
+    });
+
+    /** Compute dynamic idle threshold based on user activity feedback (4.1) */
+    function computeIdleThreshold(feedbackState: ReturnType<FeedbackManager['getState']>): number {
+        if (feedbackState.lastSignalAt === 0) return 60 * 60 * 1000; // default 1 hour
+        const hoursSinceActive = (Date.now() - feedbackState.lastSignalAt) / (1000 * 60 * 60);
+        if (hoursSinceActive < 0.5) return 2 * 60 * 60 * 1000;      // active: 2h
+        if (hoursSinceActive > 24) return 15 * 60 * 1000;           // >24h: 15m
+        if (hoursSinceActive > 4) return 30 * 60 * 1000;            // >4h: 30m
+        return 60 * 60 * 1000;                                       // default 1h
+    }
+
     // 1. Otonom Düşünme Döngüsü
     taskQueue.registerHandler('autonomous_tick', async (payload, signal) => {
         if (signal.aborted) return;
+
+        // --- 0. FEEDBACK DECAY (2.2) ---
+        feedbackManager.applyDecay();
 
         // --- 1. PRE-LLM GATEKEEPER: Feedback-based kontrol ---
         const preFeedback = feedbackManager.getState();
@@ -83,28 +106,41 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
 
         if (signal.aborted) return;
 
-        // --- 4. OPT F-15: URGE FILTER — Dinamik Değerlendirme ---
+        // --- 4. OPT F-15: URGE FILTER — Dinamik Değerlendirme (Zod schema 1.2) ---
         let relevanceScore = 0.5;
         let timeSensitivity = 0.3;
         let llmReasoning = '';
+        let parseValid = false;
         try {
             const codeFenceMatch = llmThoughtOutput.match(/```json\s*([\s\S]*?)```/i);
             const jsonStr = codeFenceMatch ? codeFenceMatch[1] : llmThoughtOutput;
             const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
-                const parsed = JSON.parse(jsonMatch[0]);
-                if (typeof parsed.relevance === 'number') {
-                    relevanceScore = Math.max(0, Math.min(1, parsed.relevance));
-                }
-                if (typeof parsed.timeSensitivity === 'number') {
-                    timeSensitivity = Math.max(0, Math.min(1, parsed.timeSensitivity));
-                }
-                if (typeof parsed.reasoning === 'string') {
-                    llmReasoning = parsed.reasoning;
+                const parsed = ThoughtSchema.safeParse(JSON.parse(jsonMatch[0]));
+                if (parsed.success) {
+                    parseValid = true;
+                    if (parsed.data.relevance !== undefined) {
+                        relevanceScore = Math.max(0, Math.min(1, parsed.data.relevance));
+                    }
+                    if (parsed.data.timeSensitivity !== undefined) {
+                        timeSensitivity = Math.max(0, Math.min(1, parsed.data.timeSensitivity));
+                    }
+                    if (parsed.data.reasoning !== undefined) {
+                        llmReasoning = parsed.data.reasoning;
+                    }
+                } else {
+                    logger.warn(`[Worker] LLM JSON schema violation: ${parsed.error.message}`);
                 }
             }
         } catch (err) {
-            logger.warn({ err }, '[Worker] LLM JSON parse başarısız, fallback değerler kullanılıyor.');
+            logger.warn({ err }, '[Worker] LLM JSON parse başarısız, güvenli mod devreye girdi.');
+        }
+
+        // Parse başarısızsa güvenli mod: relevance/time sıfırlanır → urge filter discard eder
+        if (!parseValid) {
+            relevanceScore = 0;
+            timeSensitivity = 0;
+            llmReasoning = '[LLM yanıtı parse edilemedi — güvenli mod]';
         }
 
         const evaluation = {
@@ -159,6 +195,11 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
             else if (hoursSinceActive > 4) delayMinutes = 120;
             else if (hoursSinceActive < 0.5) delayMinutes = Math.min(delayMinutes, 30);
         }
+
+        // Update idle threshold based on latest feedback state (4.1)
+        const updatedThreshold = computeIdleThreshold(feedback);
+        worker.updateIdleThreshold(updatedThreshold);
+        logger.debug(`[Worker] Idle threshold updated: ${Math.round(updatedThreshold / 60000)} min`);
 
         logger.info(`[Worker] ⏭️ Sonraki otonom tick: ${delayMinutes} dakika sonra`);
         taskQueue.enqueue({ id: `auto_tick_${Date.now()}`, type: 'autonomous_tick', priority: TaskPriority.P4_LOW, payload: {}, addedAt: Date.now() + (delayMinutes * 60 * 1000) });

@@ -136,11 +136,22 @@ export class CompactEngine {
       return this.noCompactResult(llmMessages);
     }
 
-    const totalTokens = this.countMessagesTokens(llmMessages);
     const threshold = config.compactTokenThreshold;
 
+    // Hızlı tahmin ile threshold kontrolü — sadece karar için kullanılır
+    const approxTotal = this.countMessagesTokens(llmMessages, threshold);
+
+    if (approxTotal < threshold) {
+      // Kesinlikle altında — yaklaşık değeri raporlama için kullan (tam sayıma gerek yok)
+      return this.noCompactResult(llmMessages, approxTotal);
+    }
+
+    // Threshold aşılmış olabilir — raporlama için tam sayım yap
+    const totalTokens = this.countMessagesTokens(llmMessages);
+
     if (totalTokens < threshold) {
-      return this.noCompactResult(llmMessages);
+      // Yaklaşık değer threshold'u aştı ama tam sayım altında — compaction gerekmez
+      return this.noCompactResult(llmMessages, totalTokens);
     }
 
     logger.info({
@@ -651,11 +662,44 @@ export class CompactEngine {
     };
   }
 
+  /** Hızlı yaklaşık token tahmini — char/4 oranı. Encode çağrısından ~100x hızlı. */
+  private estimateTokensApprox(text: string): number {
+    return Math.ceil(text.length / 4);
+  }
+
+  /** Tek bir mesajın yaklaşık token sayısı (hafif hesaplama). */
+  private estimateMessageTokensApprox(msg: LLMMessage): number {
+    let tokens = 0;
+
+    if (msg.content) {
+      tokens += this.estimateTokensApprox(msg.content as string);
+    }
+
+    if (msg.toolCalls) {
+      for (const tc of msg.toolCalls) {
+        tokens += this.estimateTokensApprox(tc.name);
+        tokens += this.estimateTokensApprox(JSON.stringify(tc.arguments));
+      }
+    }
+
+    if (msg.toolResults) {
+      for (const tr of msg.toolResults) {
+        tokens += this.estimateTokensApprox(tr.name);
+        const resultStr = typeof tr.result === 'string' ? tr.result : JSON.stringify(tr.result);
+        tokens += this.estimateTokensApprox(resultStr);
+      }
+    }
+
+    tokens += 4;
+
+    return tokens;
+  }
+
   private countMessageTokens(msg: LLMMessage): number {
     let tokens = 0;
 
     if (msg.content) {
-      tokens += encode(msg.content).length;
+      tokens += encode(msg.content as string).length;
     }
 
     if (msg.toolCalls) {
@@ -678,16 +722,41 @@ export class CompactEngine {
     return tokens;
   }
 
-  private countMessagesTokens(messages: LLMMessage[]): number {
+  /**
+   * Mesaj listesinin toplam token sayısını hesaplar.
+   * Optimizasyon: Önce hızlı tahmin (char/4) ile kontrol eder,
+   * sadece threshold'a yakın olduğunda tam sayım yapar.
+   */
+  private countMessagesTokens(messages: LLMMessage[], threshold?: number): number {
+    // Hızlı yol: yaklaşık tahmin
+    const approxTotal = messages.reduce((sum, msg) => sum + this.estimateMessageTokensApprox(msg), 0);
+
+    // Eğer threshold verilmişse ve yaklaşık değer threshold'dan belirgin derecede uzaksa,
+    // tam sayımı atla (±%15 tolerance)
+    if (threshold !== undefined) {
+      const margin = threshold * 0.15;
+      if (approxTotal < threshold - margin) {
+        // Kesinlikle altında — tam sayıma gerek yok
+        return approxTotal;
+      }
+      if (approxTotal > threshold + margin * 3) {
+        // Kesinlikle üstünde — tam sayıma gerek yok (compaction yapılacak)
+        return approxTotal;
+      }
+      // Threshold'a yakın — tam sayım yap
+    }
+
+    // Tam sayım: her mesaj için encode() çağır
     return messages.reduce((sum, msg) => sum + this.countMessageTokens(msg), 0);
   }
 
-  private noCompactResult(messages: LLMMessage[]): CompactResult {
+  private noCompactResult(messages: LLMMessage[], cachedTokenCount?: number): CompactResult {
+    const tokenCount = cachedTokenCount ?? this.countMessagesTokens(messages);
     return {
       messages,
       wasCompacted: false,
-      originalTokens: this.countMessagesTokens(messages),
-      compactedTokens: this.countMessagesTokens(messages),
+      originalTokens: tokenCount,
+      compactedTokens: tokenCount,
       messagesCompacted: 0,
       summaryLength: 0,
       durationMs: 0,

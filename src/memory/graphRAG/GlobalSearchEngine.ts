@@ -17,6 +17,7 @@
 import type Database from 'better-sqlite3';
 import type { LLMProvider } from '../../llm/provider.js';
 import type { LLMMessage } from '../../router/types.js';
+import type { EmbeddingProvider } from '../embeddings.js';
 import { logger } from '../../utils/logger.js';
 import type { CommunityDetector } from './CommunityDetector.js';
 import type { CommunitySummary } from './CommunitySummarizer.js';
@@ -72,11 +73,21 @@ interface SummaryRow {
 }
 
 export class GlobalSearchEngine {
+  private embeddingProvider?: EmbeddingProvider;
+
   constructor(
     private db: Database.Database,
     private llmProvider: LLMProvider,
     private communityDetector: CommunityDetector,
   ) {}
+
+  /**
+   * Embedding sağlayıcıyı bağla — semantic Top-K filtreleme için gerekli.
+   * Bağlanmazsa keyword-based filtreleme (mevcut davranış) kullanılır.
+   */
+  setEmbeddingProvider(provider: EmbeddingProvider): void {
+    this.embeddingProvider = provider;
+  }
 
   /**
    * Ana giriş noktası: Global Search (Map-Reduce).
@@ -112,9 +123,11 @@ export class GlobalSearchEngine {
 
       logger.info(`[GlobalSearch] Found ${summaries.length} community summaries at target level`);
 
-      // 2. Top-K filtreleme: Basit keyword eşleşmesi ile en alakalı toplulukları seç
-      const filtered = this.filterTopK(query, summaries, opts.topK);
-      logger.info(`[GlobalSearch] Top-K filtering: ${summaries.length} → ${filtered.length} communities`);
+      // 2. Top-K filtreleme: Semantic (embedding) varsa onu kullan, yoksa keyword-based fallback
+      const filtered = this.embeddingProvider
+        ? await this.filterTopKSemantic(query, summaries, opts.topK)
+        : this.filterTopK(query, summaries, opts.topK);
+      logger.info(`[GlobalSearch] Top-K filtering: ${summaries.length} → ${filtered.length} communities (method: ${this.embeddingProvider ? 'semantic' : 'keyword'})`);
 
       // 3. Map aşaması: Paralel LLM çağrıları (Promise.all)
       const mapStart = Date.now();
@@ -158,8 +171,70 @@ export class GlobalSearchEngine {
   }
 
   /**
+   * Semantic Top-K filtreleme: Sorgu embedding'i ile topluluk özetlerinin
+   * cos similarity'sini hesaplayarak en alakalı toplulukları seç.
+   * Keyword-based yönteme göre Türkçe morfoloji ve eşanlamlılar için çok daha iyi.
+   *
+   * Optimizasyon: Tüm metinleri tek batch'te embed eder → 1 API çağrısı.
+   */
+  private async filterTopKSemantic(
+    query: string,
+    summaries: CommunitySummary[],
+    topK: number,
+  ): Promise<CommunitySummary[]> {
+    if (summaries.length <= topK) return summaries;
+    if (!this.embeddingProvider) return this.filterTopK(query, summaries, topK);
+
+    try {
+      // Tüm metinleri hazırla: sorgu + her topluluk özeti
+      const texts = [
+        query,
+        ...summaries.map(s => [
+          s.summary,
+          ...s.topics,
+          ...s.keyEntities.map(e => e.name),
+        ].join(' ')),
+      ];
+
+      // Tek batch API çağrısı ile tüm embedding'leri al
+      const allEmbeddings = await this.embeddingProvider.embed(texts);
+      const queryEmbedding = allEmbeddings[0];
+      if (!queryEmbedding) return this.filterTopK(query, summaries, topK);
+
+      type ScoredSummary = { summary: CommunitySummary; score: number };
+      const scored: ScoredSummary[] = summaries.map((summary, i) => {
+        const summaryEmbedding = allEmbeddings[i + 1];
+        const score = summaryEmbedding
+          ? this.cosineSimilarity(queryEmbedding, summaryEmbedding)
+          : 0;
+        return { summary, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      const result = scored.slice(0, topK);
+      return result.map(s => s.summary);
+    } catch (err) {
+      logger.warn({ err }, '[GlobalSearch] Semantic Top-K failed, falling back to keyword-based');
+      return this.filterTopK(query, summaries, topK);
+    }
+  }
+
+  /** Cosine similarity hesapla. */
+  private cosineSimilarity(a: number[], b: number[]): number {
+    if (a.length !== b.length || a.length === 0) return 0;
+    let dot = 0, normA = 0, normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    const denom = Math.sqrt(normA) * Math.sqrt(normB);
+    return denom === 0 ? 0 : dot / denom;
+  }
+
+  /**
    * Top-K filtreleme: Basit keyword + topic eşleşmesi ile en alakalı toplulukları seç.
-   * Vektörel embedding kullanmadan hafif ve hızlı bir ön-filtreleme.
+   * Vektörel embedding kullanmadan hafif ve hızlı bir ön-filtreleme (fallback).
    */
   private filterTopK(
     query: string,

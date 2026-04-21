@@ -13,7 +13,6 @@ import { TaskPriority } from '../autonomous/queue.js';
 import { pruneConversationHistory } from './runtimeContext.js';
 import { getConfig } from '../gateway/config.js';
 import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
-import { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
 import { GraphRAGManager } from './graphRAGManager.js';
 import { ResponseVerifier } from '../memory/retrieval/ResponseVerifier.js';
 import { MetricsTracker } from './metricsTracker.js';
@@ -76,8 +75,8 @@ constructor(llm: LLMProvider, memory: MemoryManager) {
      * GraphRAG motorunu dış bağımlılıklarla bağlar.
      * MemoryManager üzerinden erişilebilir bileşenlerle çağrılmalıdır.
      */
-    setGraphRAGComponents(engine: GraphRAGEngine, shadow?: ShadowMode): void {
-        this.graphRAGManager.setEngine(engine, shadow);
+    setGraphRAGComponents(engine: GraphRAGEngine): void {
+        this.graphRAGManager.setEngine(engine);
         this.memory.setGraphRAGEngine(engine);
         logger.info('[Agent] GraphRAG components connected');
     }
@@ -97,10 +96,6 @@ constructor(llm: LLMProvider, memory: MemoryManager) {
      */
     getGraphRAGEngine(): GraphRAGEngine | undefined {
         return this.graphRAGManager.getEngine();
-    }
-
-    getShadowMode(): ShadowMode | undefined {
-        return this.graphRAGManager.getShadow();
     }
 
     private beginConversationTurn(message: UnifiedMessage, userMessage: ConversationMessage) {
@@ -331,7 +326,6 @@ const graphRAGResult = await this.graphRAGManager.retrieve(
         const finalRelevantMemories = graphRAGResult.finalRelevantMemories;
 
         if (graphRAGResult.perfTimingGraphRAG !== null) this.metricsTracker.recordPerf('graphRAG', graphRAGResult.perfTimingGraphRAG);
-        if (graphRAGResult.perfTimingShadow !== null) this.metricsTracker.recordPerf('graphRAGShadow', graphRAGResult.perfTimingShadow);
 
         const requiresFallback = !this.llm.supportsNativeToolCalling;
         const isToolingDisabled = message.channelType === 'discord';

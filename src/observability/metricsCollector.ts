@@ -175,6 +175,7 @@ class MetricsCollector {
 
   /**
    * Aggrege metrics özeti - son N gün
+   * SQL SUM/AVG/COUNT ile aggregation — binlerce satır yerine tek satır döner.
    */
   getAggregatedMetrics(days: number = 1): AggregatedMetrics {
     if (!this.isDbReady()) {
@@ -183,22 +184,48 @@ class MetricsCollector {
     }
     try {
       const db = this.getDb();
-      const rows = db.prepare(`
-        SELECT * FROM metrics
+
+      // Ana aggregation — tüm hesaplama SQL'de, JS'e tek satır döner
+      const row = db.prepare(`
+        SELECT
+          COUNT(*)                                              as totalQueries,
+          COALESCE(SUM(json_extract(cost_json, '$.totalTokens')), 0)  as totalTokens,
+          COALESCE(SUM(json_extract(cost_json, '$.total')), 0)        as totalCost,
+          COALESCE(SUM(json_extract(performance_json, '$.total')), 0) as totalTime,
+          COALESCE(SUM(json_extract(performance_json, '$.retrieval')), 0) as retrievalTime,
+          COALESCE(SUM(json_extract(performance_json, '$.graphRAG')), 0)  as graphRAGTime,
+          COALESCE(SUM(json_extract(performance_json, '$.tools')), 0)     as toolTime
+        FROM metrics
         WHERE timestamp >= datetime('now', '-' || ? || ' days')
-        ORDER BY timestamp DESC
-      `).all(days) as Array<Record<string, unknown>>;
+      `).get(days) as Record<string, unknown>;
 
-      const metrics: MessageMetrics[] = rows.map(row => ({
-        conversationId: row.conversation_id as string,
-        messageId: row.message_id as string | undefined,
-        timestamp: row.timestamp as string,
-        performance: JSON.parse(row.performance_json as string),
-        cost: JSON.parse(row.cost_json as string),
-        context: JSON.parse((row.context_json as string) || '{}')
-      }));
+      const totalQueries = (row.totalQueries as number) ?? 0;
+      const totalTokens = (row.totalTokens as number) ?? 0;
+      const totalCost = (row.totalCost as number) ?? 0;
+      const totalTime = (row.totalTime as number) ?? 0;
+      const retrievalTime = (row.retrievalTime as number) ?? 0;
+      const graphRAGTime = (row.graphRAGTime as number) ?? 0;
+      const toolTime = (row.toolTime as number) ?? 0;
 
-      return this.aggregate(metrics);
+      const avgResponseTime = totalQueries > 0 ? totalTime / totalQueries : 0;
+      const avgTokensPerQuery = totalQueries > 0 ? totalTokens / totalQueries : 0;
+      const costPerToken = totalTokens > 0 ? totalCost / totalTokens : 0;
+
+      // Provider breakdown — json_each ile llmCalls array'ini SQL'de aç
+      const byProvider = this.getProviderBreakdown(days);
+
+      return {
+        totalQueries,
+        totalTokens,
+        totalCost,
+        avgResponseTime,
+        avgTokensPerQuery,
+        costPerToken,
+        byProvider,
+        retrievalTime,
+        graphRAGTime,
+        toolTime,
+      };
     } catch (error: unknown) {
       logger.error({ err: error, days }, '[MetricsCollector] Failed to get aggregated metrics');
       throw error;
@@ -206,7 +233,7 @@ class MetricsCollector {
   }
 
   /**
-   * Provider bazlı istatistikler
+   * Provider bazlı istatistikler — SQL json_each ile aggregation
    */
   getProviderStats(days: number = 7): Record<string, { count: number; totalTokens: number; totalCost: number; avgLatency: number }> {
     if (!this.isDbReady()) {
@@ -214,33 +241,15 @@ class MetricsCollector {
       return {};
     }
     try {
-      const db = this.getDb();
-      const rows = db.prepare(`
-        SELECT performance_json FROM metrics
-        WHERE timestamp >= datetime('now', '-' || ? || ' days')
-      `).all(days) as Array<Record<string, unknown>>;
+      const providerBreakdown = this.getProviderBreakdown(days);
 
-      const providerStats: Record<string, { count: number; totalTokens: number; totalCost: number; totalTime: number }> = {};
-
-      for (const row of rows) {
-        const perf = JSON.parse(row.performance_json as string) as PerformanceMetrics;
-        for (const llmCall of perf.llmCalls || []) {
-          if (!providerStats[llmCall.key]) {
-            providerStats[llmCall.key] = { count: 0, totalTokens: 0, totalCost: 0, totalTime: 0 };
-          }
-          providerStats[llmCall.key].count += 1;
-          providerStats[llmCall.key].totalTime += llmCall.ms;
-        }
-      }
-
-      // Ortalama latency ekle
       const result: Record<string, { count: number; totalTokens: number; totalCost: number; avgLatency: number }> = {};
-      for (const [key, stats] of Object.entries(providerStats)) {
+      for (const [key, stats] of Object.entries(providerBreakdown)) {
         result[key] = {
-          count: stats.count,
-          totalTokens: stats.totalTokens,
-          totalCost: stats.totalCost,
-          avgLatency: stats.count > 0 ? stats.totalTime / stats.count : 0
+          count: stats.calls,
+          totalTokens: stats.tokens,
+          totalCost: stats.cost,
+          avgLatency: stats.calls > 0 ? stats.totalTime / stats.calls : 0,
         };
       }
 
@@ -252,54 +261,47 @@ class MetricsCollector {
   }
 
   /**
+   * SQL json_each ile provider breakdown — llmCalls array'ini SQL'de açar.
+   * Hem getAggregatedMetrics hem getProviderStats tarafından kullanılır.
+   */
+  private getProviderBreakdown(days: number): Record<string, { calls: number; tokens: number; cost: number; totalTime: number }> {
+    const db = this.getDb();
+
+    const providerRows = db.prepare(`
+      SELECT
+        json_extract(j.value, '$.key')                       as provider_key,
+        COUNT(*)                                              as calls,
+        COALESCE(SUM(json_extract(j.value, '$.ms')), 0)     as totalTime
+      FROM (
+        SELECT performance_json
+        FROM metrics
+        WHERE timestamp >= datetime('now', '-' || ? || ' days')
+          AND json_type(performance_json, '$.llmCalls') = 'array'
+      ) sub
+      CROSS JOIN json_each(json_extract(sub.performance_json, '$.llmCalls')) j
+      GROUP BY json_extract(j.value, '$.key')
+    `).all(days) as Array<Record<string, unknown>>;
+
+    const byProvider: Record<string, { calls: number; tokens: number; cost: number; totalTime: number }> = {};
+    for (const row of providerRows) {
+      const key = row.provider_key as string;
+      byProvider[key] = {
+        calls: (row.calls as number) ?? 0,
+        tokens: 0,
+        cost: 0,
+        totalTime: (row.totalTime as number) ?? 0,
+      };
+    }
+
+    return byProvider;
+  }
+
+  /**
    * Hata istatistikleri (şimdilik basit)
    */
   getErrorStats(): { totalTraces: number; errorTraces: number; errorRate: number } {
     // Şimdilik basit - gelecekte error logging eklenebilir
     return { totalTraces: 0, errorTraces: 0, errorRate: 0 };
-  }
-
-  /**
-   * Metrics'leri aggregate et
-   */
-  private aggregate(metrics: MessageMetrics[]): AggregatedMetrics {
-    const totalQueries = metrics.length;
-    const totalTokens = metrics.reduce((sum, m) => sum + (m.cost.totalTokens || 0), 0);
-    const totalCost = metrics.reduce((sum, m) => sum + (m.cost.total || 0), 0);
-    const totalTime = metrics.reduce((sum, m) => sum + (m.performance.total || 0), 0);
-
-    const avgResponseTime = totalQueries > 0 ? totalTime / totalQueries : 0;
-    const avgTokensPerQuery = totalQueries > 0 ? totalTokens / totalQueries : 0;
-    const costPerToken = totalTokens > 0 ? totalCost / totalTokens : 0;
-
-    const retrievalTime = metrics.reduce((sum, m) => sum + (m.performance.retrieval || 0), 0);
-    const graphRAGTime = metrics.reduce((sum, m) => sum + (m.performance.graphRAG || 0), 0);
-    const toolTime = metrics.reduce((sum, m) => sum + (m.performance.tools || 0), 0);
-
-    // Provider breakdown
-    const byProvider: Record<string, { calls: number; tokens: number; cost: number; totalTime: number }> = {};
-    for (const m of metrics) {
-      for (const call of m.performance.llmCalls || []) {
-        if (!byProvider[call.key]) {
-          byProvider[call.key] = { calls: 0, tokens: 0, cost: 0, totalTime: 0 };
-        }
-        byProvider[call.key].calls += 1;
-        byProvider[call.key].totalTime += call.ms;
-      }
-    }
-
-    return {
-      totalQueries,
-      totalTokens,
-      totalCost,
-      avgResponseTime,
-      avgTokensPerQuery,
-      costPerToken,
-      byProvider,
-      retrievalTime,
-      graphRAGTime,
-      toolTime
-    };
   }
 
   private emptyAggregatedMetrics(): AggregatedMetrics {

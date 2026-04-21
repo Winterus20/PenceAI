@@ -39,13 +39,15 @@ interface EmbeddingResponse {
     id?: number;
     type?: string;
     embedding: number[] | null;
+    embeddings: number[][] | null;  // Batch mode response
     error: string | null;
 }
 
 interface PendingRequest {
-    resolve: (v: number[]) => void;
+    resolve: (v: number[] | number[][]) => void;
     reject: (e: Error) => void;
     timer: NodeJS.Timeout;
+    isBatch?: boolean;
 }
 
 export class SemanticRouter<TContext = Record<string, unknown>> {
@@ -179,7 +181,9 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
                     clearTimeout(pending.timer);
                     if (msg.error) {
                         pending.reject(new Error(msg.error));
-                    } else if (msg.embedding) {
+                    } else if (pending.isBatch && msg.embeddings) {
+                        pending.resolve(msg.embeddings);
+                    } else if (!pending.isBatch && msg.embedding) {
                         pending.resolve(msg.embedding);
                     } else {
                         pending.reject(new Error('Empty embedding response'));
@@ -312,21 +316,69 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
             this._pendingRequests.set(id, {
                 resolve: (embedding) => {
                     clearTimeout(timer);
-                    resolve(embedding);
+                    resolve(embedding as number[]);
                 },
                 reject: (err) => {
                     clearTimeout(timer);
                     reject(err);
                 },
                 timer,
+                isBatch: false,
             });
             this.worker!.postMessage({ id, text });
         });
     }
 
     /**
+     * Batch embedding: birden fazla text'i tek bir worker mesajında gönderir.
+     * 10 intent × 5 example = 50 sequential mesaj yerine 1 mesaj ile çözülür.
+     */
+    private async getEmbeddingsBatch(texts: string[], customTimeout?: number): Promise<number[][]> {
+        if (!this.worker) {
+            await this.initialize();
+        }
+        if (!this.worker) throw new Error('Worker not initialized');
+
+        if (texts.length === 0) return [];
+
+        // Tek eleman → tekil çağrı (batch overhead'inden kaçın)
+        if (texts.length === 1) {
+            return [await this.getEmbedding(texts[0], customTimeout)];
+        }
+
+        const id = ++this._requestId;
+        const timeoutMs = customTimeout ?? (this.isFirstLoad
+            ? this.timeoutConfig.initialLoadMs
+            : Math.max(this.timeoutConfig.normalMs, texts.length * 2000)); // batch için ek süre
+
+        return new Promise<number[][]>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this._pendingRequests.delete(id);
+                reject(new Error(`Batch embedding worker timeout (${timeoutMs}ms for ${texts.length} texts)`));
+            }, timeoutMs);
+
+            this._pendingRequests.set(id, {
+                resolve: (embeddings) => {
+                    clearTimeout(timer);
+                    resolve(embeddings as number[][]);
+                },
+                reject: (err) => {
+                    clearTimeout(timer);
+                    reject(err);
+                },
+                timer,
+                isBatch: true,
+            });
+            this.worker!.postMessage({ id, text: '', texts });
+        });
+    }
+
+    /**
      * Mesajı intent'lere göre yönlendirir.
      * Threshold altında eşleşme olursa fallback mechanism devreye girer.
+     *
+     * Optimizasyon: Cache'e alınmamış example embedding'leri batch olarak worker'a gönderir
+     * (sequential yerine tek bir toplu istek — ~50× daha az IPC mesajı).
      */
     public async route(message: string, context?: TContext): Promise<{ handled: boolean, response: string | null }> {
         if (!this.isReady) {
@@ -337,75 +389,112 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
         try {
             const inputEmbedding = await this.getEmbedding(message);
 
-            let bestMatch = { 
-                intent: null as SemanticIntent<TContext> | null, 
-                exampleKey: null as string | null,
-                score: 0 
-            };
+            // --- Batch embedding: tüm cache'siz example'ları topla ---
+            const uncachedItems: Array<{ intentIdx: number; exampleIdx: number; text: string }> = [];
+            const exampleEmbeddings: (number[] | null)[][] = []; // [intentIdx][exampleIdx]
 
-            for (const intent of this.intents) {
-                // Lazy initialize cached embeddings for examples — paralel çalıştır
+            for (let iIdx = 0; iIdx < this.intents.length; iIdx++) {
+                const intent = this.intents[iIdx];
                 if (!intent._cachedEmbeddings) {
                     intent._cachedEmbeddings = new Map<string, CachedEmbedding>();
                 }
-
-                // Cache cleanup (lazy)
                 this.cleanupCache(intent._cachedEmbeddings);
 
-                for (const example of intent.examples) {
-                    // Cache'den al veya yeni hesapla
-                    let exampleEmbedding: number[] | null = null;
+                exampleEmbeddings[iIdx] = [];
+                for (let eIdx = 0; eIdx < intent.examples.length; eIdx++) {
+                    const example = intent.examples[eIdx];
                     const cached = intent._cachedEmbeddings.get(example);
-                    
+
                     if (cached) {
                         const age = new Date().getTime() - cached.lastAccessed.getTime();
                         const ttlMs = this.cacheConfig.ttlMinutes * 60 * 1000;
-                        
                         if (age < ttlMs) {
-                            // Cache valid
-                            exampleEmbedding = cached.vector;
-                            cached.lastAccessed = new Date(); // Update access time
+                            exampleEmbeddings[iIdx][eIdx] = cached.vector;
+                            cached.lastAccessed = new Date();
+                            continue;
                         } else {
-                            // Cache expired
                             intent._cachedEmbeddings.delete(example);
                             this.totalCacheSize -= cached.size;
                         }
                     }
 
-                    if (!exampleEmbedding) {
-                        // Yeni embedding hesapla
-                        exampleEmbedding = await this.getEmbedding(example);
-                        
-                        // Cache limits kontrolü
-                        const embeddingSize = exampleEmbedding.length * 4; // float32 = 4 bytes
+                    // Cache'de yok → batch listesine ekle
+                    exampleEmbeddings[iIdx][eIdx] = null;
+                    uncachedItems.push({ intentIdx: iIdx, exampleIdx: eIdx, text: example });
+                }
+            }
+
+            // --- Batch embedding hesapla (tek worker mesajı) ---
+            if (uncachedItems.length > 0) {
+                const batchTexts = uncachedItems.map(item => item.text);
+                let batchResults: number[][];
+
+                try {
+                    batchResults = await this.getEmbeddingsBatch(batchTexts);
+                } catch (batchErr) {
+                    // Batch başarısız → tekil fallback
+                    logger.warn({ err: batchErr }, '[SemanticRouter] Batch embedding failed, falling back to sequential');
+                    batchResults = [];
+                    for (const item of uncachedItems) {
+                        try {
+                            batchResults.push(await this.getEmbedding(item.text));
+                        } catch {
+                            batchResults.push([]);
+                        }
+                    }
+                }
+
+                // Sonuçları yerleştir ve cache'e al
+                for (let i = 0; i < uncachedItems.length; i++) {
+                    const { intentIdx, exampleIdx } = uncachedItems[i];
+                    const embedding = batchResults[i];
+
+                    if (embedding && embedding.length > 0) {
+                        exampleEmbeddings[intentIdx][exampleIdx] = embedding;
+
+                        // Cache'e kaydet
+                        const intent = this.intents[intentIdx];
+                        const example = intent.examples[exampleIdx];
+                        const embeddingSize = embedding.length * 4;
                         this.totalCacheSize += embeddingSize;
 
-                        // Memory limit aşıldıysa LRU eviction
                         const maxMemoryBytes = this.cacheConfig.maxMemoryMB * 1024 * 1024;
                         while (this.totalCacheSize > maxMemoryBytes) {
-                            this.evictLRU(intent._cachedEmbeddings);
+                            this.evictLRU(intent._cachedEmbeddings!);
+                        }
+                        while (intent._cachedEmbeddings!.size >= this.cacheConfig.maxEntries) {
+                            this.evictLRU(intent._cachedEmbeddings!);
                         }
 
-                        // Entry count limit aşıldıysa LRU eviction
-                        while (intent._cachedEmbeddings.size >= this.cacheConfig.maxEntries) {
-                            this.evictLRU(intent._cachedEmbeddings);
-                        }
-
-                        intent._cachedEmbeddings.set(example, {
-                            vector: exampleEmbedding,
+                        intent._cachedEmbeddings!.set(example, {
+                            vector: embedding,
                             createdAt: new Date(),
                             lastAccessed: new Date(),
                             size: embeddingSize,
                         });
                     }
+                }
+            }
+
+            // --- Similarity hesapla ---
+            let bestMatch = {
+                intent: null as SemanticIntent<TContext> | null,
+                exampleKey: null as string | null,
+                score: 0,
+            };
+
+            for (let iIdx = 0; iIdx < this.intents.length; iIdx++) {
+                const intent = this.intents[iIdx];
+                for (let eIdx = 0; eIdx < intent.examples.length; eIdx++) {
+                    const exampleEmbedding = exampleEmbeddings[iIdx]?.[eIdx];
+                    if (!exampleEmbedding) continue;
 
                     const score = this.calculateSimilarity(inputEmbedding, exampleEmbedding);
-
                     if (score > bestMatch.score) {
-                        bestMatch = { 
-                            intent: intent, 
-                            exampleKey: example,
-                            score 
+                        bestMatch = {
+                            intent,
+                            exampleKey: intent.examples[eIdx],
+                            score,
                         };
                     }
                 }

@@ -432,7 +432,7 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                         enum: ['quick', 'deep'],
                     },
                 },
-                required: ['url', 'mode'],
+                required: ['url'],
             },
             llmParameters: {
                 type: 'object',
@@ -440,7 +440,7 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                     url: { type: 'string' },
                     mode: { type: 'string', enum: ['quick', 'deep'] },
                 },
-                required: ['url', 'mode'],
+                required: ['url'],
             },
         },
     ];

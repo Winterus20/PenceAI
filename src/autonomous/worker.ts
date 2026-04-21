@@ -48,6 +48,13 @@ export class BackgroundWorker {
         logger.info('[Worker] Autonomous background worker stopped.');
     }
 
+    /** Update idle threshold at runtime (e.g. based on user activity feedback). */
+    public updateIdleThreshold(ms: number): void {
+        if (ms > 0) {
+            this.config.idleThresholdMs = ms;
+        }
+    }
+
     public registerUserActivity(): void {
         this.lastActivityAt = Date.now();
         // If we are currently running background tasks, GRACEFULLY INTERRUPT immediately.

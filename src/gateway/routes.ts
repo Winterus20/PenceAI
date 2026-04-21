@@ -292,7 +292,6 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         phaseName: GraphRAGRolloutPhase[phase],
         config,
         enabled: config.enabled,
-        shadowMode: config.shadowMode,
         sampleRate: config.sampleRate,
       });
     });
@@ -331,23 +330,6 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
-    });
-
-    // GET /api/graphrag/shadow-report — Shadow mode raporu
-    app.get('/api/graphrag/shadow-report', (_req, res) => {
-      const config = GraphRAGConfigManager.getConfig();
-      if (!config.shadowMode) {
-        return res.status(400).json({ error: 'Shadow mode is not active' });
-      }
-
-      // ShadowMode instance'ına agent üzerinden eriş
-      const shadowMode = agent.getShadowMode();
-      if (!shadowMode) {
-        return res.status(400).json({ error: 'ShadowMode instance not available' });
-      }
-
-      const report = shadowMode.generateReport();
-      res.json(report);
     });
 
     // ============ Behavior Discovery Shadow API ============
