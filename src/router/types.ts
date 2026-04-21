@@ -64,6 +64,7 @@ export interface AttachmentMeta {
 }
 
 export interface ConversationMessage {
+    id?: number;
     role: 'user' | 'assistant' | 'system' | 'tool';
     content: string;
     timestamp: Date;

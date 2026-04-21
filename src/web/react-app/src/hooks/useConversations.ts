@@ -85,11 +85,8 @@ export function useConversations() {
     [setActiveConversationId]
   );
 
-  // Konuşma sil
   const deleteConversation = useCallback(
     async (conversationId: string) => {
-      if (!window.confirm('Bu sohbet silinsin mi?')) return false;
-
       try {
         await conversationService.delete(conversationId);
         removeConversation(conversationId);
@@ -97,12 +94,11 @@ export function useConversations() {
           clearMessages();
           setActiveConversationId(null);
         }
-        // React Query cache'ini invalid et
         queryClient.invalidateQueries({ queryKey: [CONVERSATIONS_QUERY_KEY] });
         return true;
       } catch (error: any) {
-        if (error?.response?.status === 409) {
-          const branches = error?.response?.data?.branches || [];
+        if (error?.status === 409) {
+          const branches = error?.data?.branches || [];
           return { hasChildren: true, branches, conversationId };
         }
         console.error('Konuşma silinemedi:', error);

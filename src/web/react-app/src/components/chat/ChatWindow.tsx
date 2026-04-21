@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { BrainCircuit, Wrench, Menu, X, PanelLeftOpen, Command, ArrowLeft } from 'lucide-react';
 import { api } from '@/lib/api-client';
+import { conversationService } from '@/services/conversationService';
 import { useAgentStore } from '../../store/agentStore';
 import { useAgentSocket } from '../../hooks/useAgentSocket';
 import { useConversations } from '../../hooks/useConversations';
@@ -30,38 +31,51 @@ const BranchDeleteDialog: React.FC<{
   onConfirm: (deleteBranches: boolean) => void;
   onCancel: () => void;
 }> = ({ open, branches, onConfirm, onCancel }) => {
+  const [deleteOption, setDeleteOption] = React.useState<'all' | 'onlyMain'>('all');
+
   if (!open) return null;
+
+  const hasBranches = branches.length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-card border border-border/60 rounded-xl p-6 max-w-md w-full shadow-2xl">
         <h3 className="text-lg font-semibold text-foreground mb-2">
-          Bu konuşmanın {branches.length} alt dalı var
+          {hasBranches
+            ? `Bu konuşmanın ${branches.length} alt dalı var`
+            : 'Konuşmayı sil'}
         </h3>
-        <p className="text-sm text-muted-foreground mb-4">
-          Silme işlemini nasıl yapmak istersiniz?
-        </p>
-        <div className="space-y-2 mb-4">
-          <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-white/5 cursor-pointer border border-border/30">
-            <input type="radio" name="deleteOption" value="all" defaultChecked className="mt-1" />
-            <div>
-              <div className="text-sm font-medium text-foreground">Dallarla birlikte sil</div>
-              <div className="text-xs text-muted-foreground">Ana konuşma ve tüm alt dallar silinecek</div>
+        {hasBranches ? (
+          <>
+            <p className="text-sm text-muted-foreground mb-4">
+              Silme işlemini nasıl yapmak istersiniz?
+            </p>
+            <div className="space-y-2 mb-4">
+              <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-white/5 cursor-pointer border border-border/30">
+                <input type="radio" name="deleteOption" value="all" checked={deleteOption === 'all'} onChange={() => setDeleteOption('all')} className="mt-1" />
+                <div>
+                  <div className="text-sm font-medium text-foreground">Dallarla birlikte sil</div>
+                  <div className="text-xs text-muted-foreground">Ana konuşma ve tüm alt dallar silinecek</div>
+                </div>
+              </label>
+              <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-white/5 cursor-pointer border border-border/30">
+                <input type="radio" name="deleteOption" value="onlyMain" checked={deleteOption === 'onlyMain'} onChange={() => setDeleteOption('onlyMain')} className="mt-1" />
+                <div>
+                  <div className="text-sm font-medium text-foreground">Sadece ana konuşmayı sil</div>
+                  <div className="text-xs text-muted-foreground">Dallar bağımsız konuşma olarak kalır</div>
+                </div>
+              </label>
             </div>
-          </label>
-          <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-white/5 cursor-pointer border border-border/30">
-            <input type="radio" name="deleteOption" value="onlyMain" className="mt-1" />
-            <div>
-              <div className="text-sm font-medium text-foreground">Sadece ana konuşmayı sil</div>
-              <div className="text-xs text-muted-foreground">Dallar bağımsız konuşma olarak kalır</div>
-            </div>
-          </label>
-        </div>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground mb-4">
+            Bu konuşmayı silmek istediğinize emin misiniz?
+          </p>
+        )}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onCancel}>İptal</Button>
           <Button variant="destructive" size="sm" onClick={() => {
-            const selected = document.querySelector<HTMLInputElement>('input[name="deleteOption"]:checked');
-            onConfirm(selected?.value === 'all');
+            onConfirm(hasBranches ? deleteOption === 'all' : false);
           }}>Sil</Button>
         </div>
       </div>
@@ -115,15 +129,13 @@ export const ChatWindow = () => {
     pinnedConversations,
     loadConversations,
     loadConversation: loadConversationFromHook,
-    deleteConversation,
     confirmDeleteWithBranches,
+    forkConversation,
     togglePinned,
     handleNewChat: handleNewChatFromHook,
   } = useConversations();
 
   const { buildRenderableMessages } = useMessageBuilder();
-
-  const { forkConversation } = useConversations();
 
   const {
     pendingAttachments,
@@ -310,19 +322,27 @@ export const ChatWindow = () => {
   };
 
   const handleDeleteConversation = useCallback(async (conversationId: string) => {
-    if (!window.confirm('Bu sohbet silinsin mi?')) return;
+    const conversation = conversations.find(c => c.id === conversationId);
+    const hasBranches = !!conversation && (conversation.has_children === 1);
 
-    const result = await deleteConversation(conversationId);
-    if (result && typeof result === 'object' && result.hasChildren) {
-      setDeleteBranchDialog({
-        isOpen: true,
-        conversationId: result.conversationId,
-        branches: result.branches,
-      });
+    if (hasBranches) {
+      try {
+        const branches = await conversationService.getBranches(conversationId);
+        setDeleteBranchDialog({ isOpen: true, conversationId, branches });
+      } catch {
+        setDeleteBranchDialog({ isOpen: true, conversationId, branches: [] });
+      }
+    } else {
+      setDeleteBranchDialog({ isOpen: true, conversationId, branches: [] });
     }
-  }, [deleteConversation]);
+  }, [conversations]);
 
-  const handleForkMessage = useCallback(async (_messageId: string, dbMessageId?: number) => {
+  /**
+   * Belirli bir mesajdan yeni bir dal (branch) oluşturur.
+   * @param _uiMessageId - React render key olarak kullanılan UI mesaj ID'si (şu an kullanılmıyor)
+   * @param dbMessageId - Veritabanındaki messages.id (fork noktası)
+   */
+  const handleForkMessage = useCallback(async (_uiMessageId: string, dbMessageId?: number) => {
     if (!activeConversationId || !dbMessageId) return;
     const result = await forkConversation(activeConversationId, dbMessageId);
     if (result) {

@@ -916,6 +916,12 @@ describe('memoryController API endpoints', () => {
       expect(res.status).toBe(200);
       expect((res.body as Record<string, unknown>).hasChildren).toBe(true);
     });
+
+    test('returns 404 when conversation not found', async () => {
+      const res = await apiGet('/api/conversations/non-existent/branch-info');
+
+      expect(res.status).toBe(404);
+    });
   });
 
   describe('DELETE /api/conversations/:id', () => {
@@ -956,10 +962,10 @@ describe('memoryController API endpoints', () => {
       expect((res.body as Record<string, unknown>).success).toBe(true);
     });
 
-    test('returns 500 when conversation not found (getConversationBranchInfo throws)', async () => {
+    test('returns 404 when conversation not found (getConversationBranchInfo throws)', async () => {
       const res = await apiDelete('/api/conversations/non-existent', { deleteBranches: true });
 
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(404);
     });
   });
 });

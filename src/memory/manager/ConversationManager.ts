@@ -163,6 +163,7 @@ export class ConversationManager {
     `).all(conversationId, limit) as MessageRow[];
 
     return rows.map(row => ({
+      id: row.id,
       role: row.role as ConversationMessage['role'],
       content: row.content,
       timestamp: new Date(row.created_at.endsWith('Z') ? row.created_at : row.created_at.replace(' ', 'T') + 'Z'),

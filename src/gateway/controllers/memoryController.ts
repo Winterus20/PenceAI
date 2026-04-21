@@ -65,6 +65,9 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       const info = memory.getConversationBranchInfo(id);
       return res.json(info);
     } catch (err: any) {
+      if (err.message?.includes('not found')) {
+        return res.status(404).json({ error: err.message });
+      }
       logger.error({ err }, '[API] Get branch info failed');
       return res.status(500).json({ error: 'Failed to get branch info' });
     }
@@ -96,7 +99,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
 
     try {
       const branchInfo = memory.getConversationBranchInfo(id);
-      if (branchInfo.hasChildren && !deleteBranches) {
+      if (branchInfo.hasChildren && typeof deleteBranches !== 'boolean') {
         const branches = memory.getChildBranches(id);
         return res.status(409).json({
           error: 'Conversation has child branches',
@@ -112,6 +115,9 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       broadcastStats();
       res.json({ success: true });
     } catch (err: any) {
+      if (err.message?.includes('not found')) {
+        return res.status(404).json({ error: err.message });
+      }
       logger.error({ err }, '[API] Delete conversation failed');
       res.status(500).json({ error: 'Delete failed' });
     }

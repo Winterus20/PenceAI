@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Plus, Pin, PinOff, Trash2, PanelLeftClose, MoreVertical, Pencil, GitBranch } from 'lucide-react';
+import { Search, Plus, Pin, PinOff, Trash2, PanelLeftClose, MoreVertical, Pencil, GitBranch, ChevronRight, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -67,8 +67,8 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
   onCloseMobile,
   onToggleSidebar,
 }) => {
-  const groupedConversations = React.useMemo(() => {
-    const filtered = conversations
+  const filtered = React.useMemo(() => {
+    return conversations
       .filter((conversation) => (conversation.title || conversation.user_name || 'Sohbet').toLowerCase().includes(searchQuery.trim().toLowerCase()))
       .sort((a, b) => {
         if (sortOrder === 'oldest') {
@@ -81,15 +81,18 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
 
         return new Date(normalizeTimestamp(b.updated_at || b.created_at)).getTime() - new Date(normalizeTimestamp(a.updated_at || a.created_at)).getTime();
       });
+  }, [conversations, searchQuery, sortOrder]);
 
+  const groupedConversations = React.useMemo(() => {
+    const isSearching = searchQuery.trim().length > 0;
     const pinned = filtered.filter(
-      (conversation) => pinnedConversations.includes(conversation.id) && !conversation.is_branch
+      (conversation) => pinnedConversations.includes(conversation.id) && (!conversation.is_branch || isSearching)
     );
     const pinnedBranches = filtered.filter(
       (conversation) => pinnedConversations.includes(conversation.id) && conversation.is_branch === 1
     );
     const others = filtered.filter(
-      (conversation) => !pinnedConversations.includes(conversation.id) && !conversation.is_branch
+      (conversation) => !pinnedConversations.includes(conversation.id) && (!conversation.is_branch || isSearching)
     );
 
     const groups: Record<string, typeof others> = { today: [], yesterday: [], thisWeek: [], older: [] };
@@ -109,7 +112,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
     });
 
     return { pinned, pinnedBranches, groups };
-  }, [conversations, pinnedConversations, searchQuery, sortOrder]);
+  }, [filtered, pinnedConversations, searchQuery]);
 
   const handleLoadConversation = (id: string) => {
     onLoadConversation(id);
@@ -120,6 +123,16 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const handleStartRename = (conversation: ConversationItem) => {
     setEditingId(conversation.id);
@@ -135,12 +148,14 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
     setEditTitle('');
   };
 
-  const renderConversationItem = (conversation: ConversationItem, isPinned: boolean, depth: number = 0) => {
+  const renderConversationItem = (conversation: ConversationItem, isPinned: boolean, depth: number = 0, sourceList: ConversationItem[] = conversations) => {
     const isEditing = editingId === conversation.id;
     const isBranch = depth > 0;
-    const childBranches = isBranch ? [] : conversations.filter(
+    const childBranches = sourceList.filter(
       c => c.parent_conversation_id === conversation.id
     );
+    const hasChildren = childBranches.length > 0;
+    const isExpanded = expandedIds.has(conversation.id);
 
     return (
       <React.Fragment key={conversation.id}>
@@ -165,19 +180,31 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
               </div>
             ) : (
               <>
-                <button
-                  type="button"
-                  onClick={() => handleLoadConversation(conversation.id)}
-                  className="min-w-0 flex-1 text-left flex flex-col gap-0.5"
-                >
-                  <div className="truncate text-[14px] font-normal text-foreground/90 flex items-center gap-1.5">
-                    {isBranch && <GitBranch size={11} className="text-purple-400/60 flex-shrink-0" />}
-                    {conversation.title || conversation.user_name || 'Sohbet'}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground/50">
-                    {formatRelativeTime(conversation.updated_at || conversation.created_at)}
-                  </div>
-                </button>
+                <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                  {hasChildren && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); toggleExpand(conversation.id); }}
+                      className="flex-shrink-0 p-0.5 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label={isExpanded ? 'Alt dalları gizle' : 'Alt dalları göster'}
+                    >
+                      {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleLoadConversation(conversation.id)}
+                    className="min-w-0 flex-1 text-left flex flex-col gap-0.5"
+                  >
+                    <div className="truncate text-[14px] font-normal text-foreground/90 flex items-center gap-1.5">
+                      {isBranch && <GitBranch size={11} className="text-purple-400/60 flex-shrink-0" />}
+                      {conversation.title || conversation.user_name || 'Sohbet'}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground/50">
+                      {formatRelativeTime(conversation.updated_at || conversation.created_at)}
+                    </div>
+                  </button>
+                </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -219,7 +246,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
             )}
           </div>
         </div>
-        {childBranches.map(branch => renderConversationItem(branch, false, depth + 1))}
+        {isExpanded && childBranches.map(branch => renderConversationItem(branch, false, depth + 1, sourceList))}
       </React.Fragment>
     );
   };
@@ -267,10 +294,10 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
           <div className="mb-6">
             <div className="mb-1 px-2 text-xs font-semibold text-muted-foreground">Sabitlenmiş</div>
             <div className="space-y-[2px]">
-              {groupedConversations.pinned.map((conversation) => renderConversationItem(conversation, true))}
+              {groupedConversations.pinned.map((conversation) => renderConversationItem(conversation, true, 0, filtered))}
               {groupedConversations.pinnedBranches
                 .filter(b => !groupedConversations.pinned.some(p => p.id === b.parent_conversation_id))
-                .map(branch => renderConversationItem(branch, true, 1))}
+                .map(branch => renderConversationItem(branch, true, 1, filtered))}
             </div>
           </div>
         ) : null}
@@ -288,7 +315,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
             <div key={key} className="mb-6">
               <div className="mb-1 px-2 text-xs font-semibold text-muted-foreground">{label}</div>
               <div className="space-y-[2px]">
-                {items.map((conversation) => renderConversationItem(conversation, false))}
+                {items.map((conversation) => renderConversationItem(conversation, false, 0, filtered))}
               </div>
             </div>
           );
