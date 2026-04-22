@@ -6,7 +6,7 @@ import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import TurndownService from 'turndown';
 import { z } from 'zod';
-import { glob } from 'glob';
+import glob from 'glob';
 import { getConfig } from '../gateway/config.js';
 import { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/logger.js';
@@ -433,7 +433,7 @@ export function createBuiltinTools(
           }
 
           try {
-            const allFiles = await glob(pattern, {
+            const allFiles = glob.sync(pattern, {
               cwd: searchDir,
               nodir: true,
               absolute: true,

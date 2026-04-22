@@ -19,6 +19,12 @@ import type { MemoryGraph, GraphNode, GraphEdge } from '../memory/types.js';
 import { createMCPController } from './controllers/mcpController.js';
 import { createMemoryController } from './controllers/memoryController.js';
 import { metricsCollector } from '../observability/metricsCollector.js';
+import {
+  validateBody, validateQuery,
+  SensitivePathSchema, FeedbackSchema, OnboardingSchema,
+  GraphRAGSetPhaseSchema, BehaviorDiscoveryConfigSchema,
+  MetricsLimitQuerySchema, MetricsDaysQuerySchema,
+} from './middleware/validate.js';
 
 export interface RouteDeps {
     memory: MemoryManager;
@@ -69,26 +75,19 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         res.json(paths);
     });
 
-    app.post('/api/settings/sensitive-paths', (req, res) => {
+    app.post('/api/settings/sensitive-paths', validateBody(SensitivePathSchema), (req, res) => {
         const { path: newPath } = req.body;
-        if (!newPath || typeof newPath !== 'string') {
-            return res.status(400).json({ error: 'Geçersiz dizin yolu' });
-        }
         const paths = memory.getSensitivePaths();
-        const trimmed = newPath.trim();
-        if (paths.includes(trimmed)) {
+        if (paths.includes(newPath.trim())) {
             return res.status(409).json({ error: 'Bu dizin zaten listede' });
         }
-        paths.push(trimmed);
+        paths.push(newPath.trim());
         memory.setSensitivePaths(paths);
         res.json(paths);
     });
 
-    app.delete('/api/settings/sensitive-paths', (req, res) => {
+    app.delete('/api/settings/sensitive-paths', validateBody(SensitivePathSchema), (req, res) => {
         const { path: removePath } = req.body;
-        if (!removePath || typeof removePath !== 'string') {
-            return res.status(400).json({ error: 'Geçersiz dizin yolu' });
-        }
         const paths = memory.getSensitivePaths();
         const filtered = paths.filter(p => p !== removePath.trim());
         memory.setSensitivePaths(filtered);
@@ -185,7 +184,8 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       } else {
         res.json({ success: true, requiresRestart: false });
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       logger.error({ err }, '[Gateway] .env güncellemesi başarısız oldu');
       res.status(500).json({ error: '.env dosyası güncellenemedi.' });
     }
@@ -193,11 +193,8 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
 
     // ============ Onboarding Bio İşleme API ============
 
-    app.post('/api/onboarding/process', async (req, res) => {
+    app.post('/api/onboarding/process', validateBody(OnboardingSchema), async (req, res) => {
         const { bio, userName } = req.body;
-        if (!bio || typeof bio !== 'string') {
-            return res.status(400).json({ error: 'Biyografi (bio) zorunludur' });
-        }
         try {
             const jobId = `onboard_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
             // Arka planda derin analiz başlat (non-blocking)
@@ -208,7 +205,8 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
             });
 
             res.json({ success: true, jobId, message: 'Bellek çıkarımı arka planda başlatıldı' });
-        } catch (err: any) {
+        } catch (error: unknown) {
+            const err = error instanceof Error ? error : new Error(String(error));
             res.status(500).json({ error: err.message });
         }
     });
@@ -236,21 +234,9 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
 
     // ============ Feedback API ============
   
-    app.post('/api/feedback', (req, res) => {
+    app.post('/api/feedback', validateBody(FeedbackSchema), (req, res) => {
       const { messageId, conversationId, type, comment } = req.body;
-      
-      if (!messageId || typeof messageId !== 'string') {
-        return res.status(400).json({ error: 'Mesaj ID (messageId) zorunludur' });
-      }
-      
-      if (!conversationId || typeof conversationId !== 'string') {
-        return res.status(400).json({ error: 'Konuşma ID (conversationId) zorunludur' });
-      }
-      
-      if (!type || !['positive', 'negative'].includes(type)) {
-        return res.status(400).json({ error: 'Feedback tipi (type) "positive" veya "negative" olmalıdır' });
-      }
-  
+
       try {
         // Feedback'i veritabanına kaydet
         const feedback = memory.saveFeedback({
@@ -263,7 +249,8 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         
         logger.info({ messageId, conversationId, type }, '[API] Feedback kaydedildi');
         res.json({ success: true, feedback });
-      } catch (err: any) {
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
         logger.error({ err }, '[API] Feedback kaydetme hatası');
         res.status(500).json({ error: err.message });
       }
@@ -275,7 +262,8 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       try {
         const feedbacks = memory.getFeedbacks(conversationId);
         res.json(feedbacks);
-      } catch (err: any) {
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
         res.status(500).json({ error: err.message });
       }
     });
@@ -305,20 +293,15 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
           phaseName: GraphRAGRolloutPhase[newPhase],
           message: `GraphRAG rollout phase advanced to ${GraphRAGRolloutPhase[newPhase]}`
         });
-      } catch (err: any) {
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
         res.status(500).json({ error: err.message });
       }
     });
 
     // POST /api/graphrag/set-phase — Belirli bir phase'e set et
-    app.post('/api/graphrag/set-phase', (req, res) => {
-      const { phase } = req.body;
-      const phaseNum = parseInt(phase, 10);
-      const validPhases = Object.values(GraphRAGRolloutPhase).filter(v => typeof v === 'number') as number[];
-
-      if (!validPhases.includes(phaseNum) || isNaN(phaseNum)) {
-        return res.status(400).json({ error: 'Invalid phase. Use 1 (OFF), 2 (SHADOW), 3 (PARTIAL), or 4 (FULL).' });
-      }
+    app.post('/api/graphrag/set-phase', validateBody(GraphRAGSetPhaseSchema), (req, res) => {
+      const { phase: phaseNum } = req.body;
 
       try {
         GraphRAGConfigManager.setRolloutPhase(phaseNum as GraphRAGRolloutPhase);
@@ -327,7 +310,8 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
           phaseName: GraphRAGRolloutPhase[phaseNum],
           message: `GraphRAG rollout phase set to ${GraphRAGRolloutPhase[phaseNum]}`
         });
-      } catch (err: any) {
+      } catch (error: unknown) {
+        const err = error instanceof Error ? error : new Error(String(error));
         res.status(500).json({ error: err.message });
       }
     });
@@ -349,21 +333,9 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     });
 
     // POST /api/behavior-discovery/config — BehaviorDiscovery konfigürasyonunu güncelle
-    app.post('/api/behavior-discovery/config', (req, res) => {
+    app.post('/api/behavior-discovery/config', validateBody(BehaviorDiscoveryConfigSchema), (req, res) => {
       const shadow = getBehaviorDiscoveryShadow();
-      const { enabled, sampleRate, maxComparisons, logToFile } = req.body;
-      
-      const config: Record<string, unknown> = {};
-      if (typeof enabled === 'boolean') config.enabled = enabled;
-      if (typeof sampleRate === 'number' && sampleRate >= 0 && sampleRate <= 1) config.sampleRate = sampleRate;
-      if (typeof maxComparisons === 'number' && maxComparisons > 0) config.maxComparisons = maxComparisons;
-      if (typeof logToFile === 'boolean') config.logToFile = logToFile;
-
-      if (Object.keys(config).length === 0) {
-        return res.status(400).json({ error: 'Geçerli bir konfigürasyon sağlanmalıdır' });
-      }
-
-      shadow.updateConfig(config);
+      shadow.updateConfig(req.body);
       res.json({ success: true, config: shadow.getConfig() });
     });
 
@@ -377,9 +349,9 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     // ============ Metrics API ============
   
     // GET /api/metrics/all — Tüm metrics'leri getir (limit ile)
-    app.get('/api/metrics/all', (req, res) => {
+    app.get('/api/metrics/all', validateQuery(MetricsLimitQuerySchema), (req, res) => {
       try {
-        const limit = parseInt(req.query.limit as string) || 100;
+        const { limit } = req.query;
         const metrics = metricsCollector.getAllMetrics(limit);
         res.json({ success: true, metrics });
       } catch (error: unknown) {
@@ -392,9 +364,9 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     // otherwise Express matches /metrics/summary as :conversationId="summary" etc.
   
     // GET /api/metrics/summary — Aggrege metrics özeti
-    app.get('/api/metrics/summary', (req, res) => {
+    app.get('/api/metrics/summary', validateQuery(MetricsDaysQuerySchema), (req, res) => {
       try {
-        const days = parseInt(req.query.days as string) || 1;
+        const { days } = req.query;
         const summary = metricsCollector.getAggregatedMetrics(days);
         res.json({ success: true, ...summary });
       } catch (error: unknown) {
@@ -404,9 +376,9 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     });
   
     // GET /api/metrics/provider-stats — Provider bazlı istatistikler
-    app.get('/api/metrics/provider-stats', (req, res) => {
+    app.get('/api/metrics/provider-stats', validateQuery(MetricsDaysQuerySchema), (req, res) => {
       try {
-        const days = parseInt(req.query.days as string) || 7;
+        const days = Number(req.query.days) || 7;
         const stats = metricsCollector.getProviderStats(days);
         res.json({ success: true, providerStats: stats });
       } catch (error: unknown) {

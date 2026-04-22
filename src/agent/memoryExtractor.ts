@@ -501,7 +501,9 @@ export class MemoryExtractor {
 
                     setTimeout(() => {
                         this.graphQueue.unshift({ task, retries: retries + 1, maxRetries, description: queueItem.description });
-                        this._runGraphQueue().catch(() => {});
+                        this._runGraphQueue().catch((err) => {
+                            logger.debug({ err: err instanceof Error ? err.message : err }, '[MemoryExtractor] Background graph queue continuation failed');
+                        });
                     }, backoffMs);
                     break;
                 } else {
@@ -524,7 +526,9 @@ export class MemoryExtractor {
 
     enqueueGraphTask(task: () => Promise<void>, description: string = 'unnamed'): void {
         this.graphQueue.push({ task, retries: 0, maxRetries: MemoryExtractor.MAX_GRAPH_QUEUE_RETRIES, description });
-        this._runGraphQueue().catch(() => {});
+        this._runGraphQueue().catch((err) => {
+            logger.debug({ err: err instanceof Error ? err.message : err }, '[MemoryExtractor] Enqueued graph task auto-start failed');
+        });
     }
 
     /**

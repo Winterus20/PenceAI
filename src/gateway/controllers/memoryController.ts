@@ -5,6 +5,14 @@ import type { MessageRouter } from '../../router/index.js';
 import { PageRankScorer } from '../../memory/graphRAG/PageRankScorer.js';
 import { CommunityDetector } from '../../memory/graphRAG/CommunityDetector.js';
 import type { MemoryGraph, GraphNode, GraphEdge } from '../../memory/types.js';
+import {
+  validateBody, validateQuery, validateParams,
+  CreateMemorySchema, UpdateMemorySchema, MemoryIdParamSchema,
+  ConversationIdParamSchema, ForkConversationSchema,
+  UpdateConversationSchema, DeleteConversationsSchema,
+  DeleteConversationSchema, SearchMemoriesQuerySchema,
+  UsageStatsQuerySchema, MemoryGraphQuerySchema,
+} from '../middleware/validate.js';
 
 export function createMemoryController(memory: MemoryManager, router: MessageRouter, broadcastStats: () => void): Router {
   const expressRouter = express.Router();
@@ -23,23 +31,20 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       res.json(conversations);
   });
 
-  expressRouter.get('/conversations/:id/messages', (req, res) => {
+  expressRouter.get('/conversations/:id/messages', validateParams(ConversationIdParamSchema), (req, res) => {
       const messages = memory.getConversationHistory(req.params.id, 100);
       res.json(messages);
   });
 
-  expressRouter.post('/conversations/:id/fork', (req, res) => {
+  expressRouter.post('/conversations/:id/fork', validateParams(ConversationIdParamSchema), validateBody(ForkConversationSchema), (req, res) => {
     const { id } = req.params;
     const { forkFromMessageId } = req.body;
-
-    if (!forkFromMessageId || typeof forkFromMessageId !== 'number') {
-      return res.status(400).json({ error: 'forkFromMessageId is required and must be a number' });
-    }
 
     try {
       const result = memory.forkConversation(id, forkFromMessageId);
       return res.json(result);
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       if (err.message?.includes('not found')) {
         return res.status(404).json({ error: err.message });
       }
@@ -48,23 +53,25 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
     }
   });
 
-  expressRouter.get('/conversations/:id/branches', (req, res) => {
+  expressRouter.get('/conversations/:id/branches', validateParams(ConversationIdParamSchema), (req, res) => {
     const { id } = req.params;
     try {
       const branches = memory.getChildBranches(id);
       return res.json(branches);
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       logger.error({ err }, '[API] Get branches failed');
       return res.status(500).json({ error: 'Failed to get branches' });
     }
   });
 
-  expressRouter.get('/conversations/:id/branch-info', (req, res) => {
+  expressRouter.get('/conversations/:id/branch-info', validateParams(ConversationIdParamSchema), (req, res) => {
     const { id } = req.params;
     try {
       const info = memory.getConversationBranchInfo(id);
       return res.json(info);
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       if (err.message?.includes('not found')) {
         return res.status(404).json({ error: err.message });
       }
@@ -73,27 +80,20 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
     }
   });
 
-  expressRouter.patch('/conversations/:id', (req, res) => {
+  expressRouter.patch('/conversations/:id', validateParams(ConversationIdParamSchema), validateBody(UpdateConversationSchema), (req, res) => {
     const { id } = req.params;
     const { title } = req.body;
-
-    if (!title || typeof title !== 'string') {
-      return res.status(400).json({ error: 'Başlık zorunludur' });
-    }
-
-    if (title.length > 200) {
-      return res.status(400).json({ error: 'Başlık maksimum 200 karakter olabilir' });
-    }
 
     try {
       memory.updateConversationTitle(id, title.trim(), true);
       res.json({ success: true, title: title.trim() });
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       res.status(500).json({ error: err.message });
     }
   });
 
-  expressRouter.delete('/conversations/:id', (req, res) => {
+  expressRouter.delete('/conversations/:id', validateParams(ConversationIdParamSchema), validateBody(DeleteConversationSchema), (req, res) => {
     const { id } = req.params;
     const { deleteBranches } = req.body;
 
@@ -114,7 +114,8 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       }
       broadcastStats();
       res.json({ success: true });
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       if (err.message?.includes('not found')) {
         return res.status(404).json({ error: err.message });
       }
@@ -123,11 +124,8 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
     }
   });
 
-  expressRouter.delete('/conversations', (req, res) => {
+  expressRouter.delete('/conversations', validateBody(DeleteConversationsSchema), (req, res) => {
     const { ids } = req.body;
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ error: 'Silinecek ID\'ler (ids) bir dizi olarak verilmelidir' });
-    }
 
     try {
       const { deletedCount, results } = memory.deleteConversations(ids);
@@ -138,7 +136,8 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
         deletedCount,
         results
       });
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       res.status(500).json({ error: err.message });
     }
   });
@@ -148,11 +147,8 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       res.json(memories);
   });
 
-  expressRouter.post('/memories', async (req, res) => {
+  expressRouter.post('/memories', validateBody(CreateMemorySchema), async (req, res) => {
     const { content, category, importance } = req.body;
-    if (!content || typeof content !== 'string') {
-      return res.status(400).json({ error: 'İçerik (content) zorunludur' });
-    }
     try {
       const added = await memory.addMemory(content, category || 'general', importance || 5);
       broadcastStats();
@@ -160,19 +156,15 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       const db = memory.getDatabase();
       const memoryRow = db.prepare(`SELECT * FROM memories WHERE id = ?`).get(added.id);
       res.json({ success: true, memory: memoryRow ?? { id: added.id }, isUpdate: added.isUpdate });
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       res.status(500).json({ error: err.message });
     }
   });
 
-  expressRouter.put('/memories/:id', async (req, res) => {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) return res.status(400).json({ error: 'Geçersiz bellek ID' });
-
+  expressRouter.put('/memories/:id', validateParams(MemoryIdParamSchema), validateBody(UpdateMemorySchema), async (req, res) => {
+      const id = Number(req.params.id);
       const { content, category, importance } = req.body;
-      if (!content || typeof content !== 'string') {
-          return res.status(400).json({ error: 'İçerik (content) zorunludur' });
-      }
 
       try {
           const updated = await memory.editMemory(id, content, category || 'general', importance || 5);
@@ -181,27 +173,25 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
           } else {
               res.status(404).json({ error: 'Bellek bulunamadı veya güncellenemedi' });
           }
-      } catch (err: any) {
+      } catch (error: unknown) {
+          const err = error instanceof Error ? error : new Error(String(error));
           res.status(500).json({ error: err.message });
       }
   });
 
-  expressRouter.get('/memories/search', (req, res) => {
-      const q = req.query.q as string;
-      if (!q || typeof q !== 'string' || q.trim().length < 2) {
-          return res.status(400).json({ error: 'Arama sorgusu en az 2 karakter olmalı' });
-      }
+  expressRouter.get('/memories/search', validateQuery(SearchMemoriesQuerySchema), (req, res) => {
+      const q = (req.query as Record<string, string>).q;
       try {
           const results = memory.searchMemories(q.trim(), 20);
           res.json(results);
-      } catch (err: any) {
+      } catch (error: unknown) {
+          const err = error instanceof Error ? error : new Error(String(error));
           res.status(500).json({ error: err.message });
       }
   });
 
-  expressRouter.delete('/memories/:id', (req, res) => {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) return res.status(400).json({ error: 'Geçersiz bellek ID' });
+  expressRouter.delete('/memories/:id', validateParams(MemoryIdParamSchema), (req, res) => {
+      const id = Number(req.params.id);
       try {
           const deleted = memory.deleteMemory(id);
           if (deleted) {
@@ -210,20 +200,18 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
           } else {
               res.status(404).json({ error: 'Bellek bulunamadı' });
           }
-      } catch (err: any) {
+      } catch (error: unknown) {
+          const err = error instanceof Error ? error : new Error(String(error));
           res.status(500).json({ error: err.message });
       }
   });
 
-  expressRouter.get('/memory-graph', (req, res) => {
+  expressRouter.get('/memory-graph', validateQuery(MemoryGraphQuerySchema), (req, res) => {
       try {
-          const {
-              limit = 100,
-              includePageRank = 'true',
-              includeCommunities = 'true',
-          } = req.query;
-
-          const graphLimit = parseInt(limit as string, 10);
+          const parsedQuery = req.query as Record<string, string | undefined>;
+          const graphLimit = Number(parsedQuery.limit) || 100;
+          const includePageRank = parsedQuery.includePageRank ?? 'true';
+          const includeCommunities = parsedQuery.includeCommunities ?? 'true';
           let doPageRank = includePageRank === 'true';
           let doCommunities = includeCommunities === 'true';
 
@@ -256,7 +244,8 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
                           pageRankScores = scorer.scoreSubgraph(allNodeIds);
                       }
                   }
-              } catch (err) {
+              } catch (error: unknown) {
+                  const err = error instanceof Error ? error : new Error(String(error));
                   logger.warn({ err }, '[API] PageRank computation failed:');
               }
           }
@@ -274,7 +263,8 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
                           }
                       }
                   }
-              } catch (err) {
+              } catch (error: unknown) {
+                  const err = error instanceof Error ? error : new Error(String(error));
                   logger.warn({ err }, '[API] Community detection failed:');
               }
           }
@@ -330,14 +320,16 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
                   includeCommunities: doCommunities,
               },
           });
-      } catch (err: any) {
+      } catch (error: unknown) {
+          const err = error instanceof Error ? error : new Error(String(error));
           res.status(500).json({ error: err.message });
       }
   });
 
-  expressRouter.get('/usage/stats', (req, res) => {
+  expressRouter.get('/usage/stats', validateQuery(UsageStatsQuerySchema), (req, res) => {
     try {
-      const period = (req.query.period as string) || 'week';
+      const parsedQuery = req.query as Record<string, string | undefined>;
+      const period = parsedQuery.period ?? 'week';
       const stats = memory.getTokenUsageStats(period);
       const dailyUsage = memory.getDailyUsage(period);
       
@@ -348,7 +340,8 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
         providerBreakdown: stats.providerBreakdown,
         dailyUsage,
       });
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
       logger.error({ err }, '[API] Token usage stats error:');
       res.status(500).json({ error: 'Token usage stats alınamadı' });
     }

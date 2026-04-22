@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useAgentStore } from '@/store/agentStore';
 import type { MessageMetrics } from '@/store/types';
-import { BarChart3, DollarSign, MessageSquare, Clock, TrendingUp, Search, Cpu, Layers, RefreshCw } from 'lucide-react';
+import { BarChart3, DollarSign, MessageSquare, Clock, TrendingUp, Search, Cpu, Layers, RefreshCw, ArrowLeft } from 'lucide-react';
 import { useAllMetrics, useMetricsSummary } from '@/hooks/queries/useMetrics';
 import type { MetricsEntry } from '@/services/observabilityService';
 
@@ -223,6 +223,7 @@ function ProviderRow({
 
 export default function MetricsPage() {
   const messageMetrics = useAgentStore((s) => s.messageMetrics);
+  const setActiveView = useAgentStore((s) => s.setActiveView);
 
   // Time range ve auto-refresh state
   const [timeRange, setTimeRange] = useState<'1d' | '7d' | '30d'>('1d');
@@ -284,11 +285,20 @@ export default function MetricsPage() {
 
   if (entries.length === 0) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-6 flex items-center justify-center">
-        <div className="text-center">
-          <BarChart3 className="w-16 h-16 mx-auto text-gray-600 mb-4" />
-          <h2 className="text-xl font-semibold text-gray-400">No Metrics Yet</h2>
-          <p className="text-gray-500 mt-2 text-sm">Send a message to start collecting metrics.</p>
+      <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col">
+        <button
+          onClick={() => setActiveView('chat')}
+          className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors mb-4 self-start"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Chat
+        </button>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <BarChart3 className="w-16 h-16 mx-auto text-gray-600 mb-4" />
+            <h2 className="text-xl font-semibold text-gray-400">No Metrics Yet</h2>
+            <p className="text-gray-500 mt-2 text-sm">Send a message to start collecting metrics.</p>
+          </div>
         </div>
       </div>
     );
@@ -298,17 +308,26 @@ export default function MetricsPage() {
     <div className="min-h-screen bg-gray-900 text-white p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <BarChart3 className="w-7 h-7 text-indigo-400" />
-            Metrics Dashboard
-          </h1>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setActiveView('chat')}
+            className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
+            title="Back to Chat"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <BarChart3 className="w-7 h-7 text-indigo-400" />
+              Metrics Dashboard
+            </h1>
           <p className="text-gray-400 text-sm mt-1">
             {backendSummary?.success
               ? `Backend + Client merged data (${agg.totalQueries} queries)`
               : `Cumulative metrics across all conversations (${agg.totalQueries} queries)`
             }
           </p>
+          </div>
         </div>
 
         {/* Filtreleme ve Auto-refresh kontrolleri */}

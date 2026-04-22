@@ -8,7 +8,7 @@ import { QueryProvider } from './providers/QueryProvider';
 
 // Lazy load MCP Marketplace and Metrics Page
 const MCPMarketplace = lazy(() => import('./components/mcp/MCPMarketplace'));
-const MetricsPage = lazy(() => import('./pages/MetricsPage'));
+const MetricsPage = lazy(() => import('./components/observability/MetricsPage'));
 
 function App() {
   const activeView = useAgentStore((state) => state.activeView);

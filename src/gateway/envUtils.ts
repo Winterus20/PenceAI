@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { logger } from '../utils/logger.js';
 
 /**
  * Environment variable key format regex
@@ -79,7 +80,10 @@ export async function secureUpdateEnv(updates: Record<string, string>): Promise<
       // Windows'ta rename() EPERM verebilir, fallback kullan
       if (err.code === 'EPERM' || err.code === 'EBUSY') {
           await fs.promises.copyFile(tempPath, envPath);
-          await fs.promises.unlink(tempPath).catch(() => {});
+          await fs.promises.unlink(tempPath).catch((e) => {
+              // Temp dosya silinemezse kritik değil — OS tarafından temizlenecek
+              logger.debug({ tempPath, err: e instanceof Error ? e.message : e }, '[envUtils] Failed to delete temp file, will be cleaned by OS');
+          });
       } else {
           throw err;
       }

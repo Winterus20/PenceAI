@@ -55,7 +55,9 @@ export class TaskQueue {
                 let parsedPayload = {};
                 try {
                     parsedPayload = JSON.parse(row.payload);
-                } catch (e) { }
+                } catch (e) {
+                    logger.debug({ taskId: row.id, err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to parse task payload, using empty object');
+                }
 
                 this.queue.push({
                     id: row.id,
@@ -106,7 +108,9 @@ export class TaskQueue {
                 try {
                     this.db.prepare(`UPDATE autonomous_tasks SET payload = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
                         .run(JSON.stringify(newPayload), taskId);
-                } catch (e) { }
+                } catch (e) {
+                    logger.warn({ taskId, err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to update task payload in DB');
+                }
             }
         }
     }
@@ -154,14 +158,18 @@ export class TaskQueue {
         if (!this.db) return;
         try {
             this.db.prepare(`UPDATE autonomous_tasks SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(taskId);
-        } catch (e) { }
+        } catch (e) {
+            logger.warn({ taskId, err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to mark task completed in DB');
+        }
     }
 
     markFailed(taskId: string): void {
         if (!this.db) return;
         try {
             this.db.prepare(`UPDATE autonomous_tasks SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(taskId);
-        } catch (e) { }
+        } catch (e) {
+            logger.warn({ taskId, err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to mark task failed in DB');
+        }
     }
 
     peek(): AutonomousTask | undefined {
@@ -176,7 +184,9 @@ export class TaskQueue {
         if (taskToRemove && this.db) {
             try {
                 this.db.prepare(`DELETE FROM autonomous_tasks WHERE id = ?`).run(taskId);
-            } catch (e) { }
+            } catch (e) {
+                logger.warn({ taskId, err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to delete task from DB');
+            }
         }
 
         return this.queue.length < initialLength;
@@ -191,7 +201,9 @@ export class TaskQueue {
         if (this.db) {
             try {
                 this.db.prepare(`DELETE FROM autonomous_tasks WHERE status IN ('pending', 'running')`).run();
-            } catch (e) { }
+            } catch (e) {
+                logger.warn({ err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to clear pending/running tasks from DB');
+            }
         }
     }
 
