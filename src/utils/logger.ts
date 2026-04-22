@@ -107,7 +107,19 @@ export const logger = pino(
     level: logLevel,
     // Hassas verileri otomatik olarak redact et
     redact: {
-      paths: ['req.headers.authorization', '*.apiKey', '*.secret', '*.password', '*.token'],
+      paths: [
+        'req.headers.authorization',
+        'req.headers.cookie',
+        '*.apiKey',
+        '*.secret',
+        '*.password',
+        '*.token',
+        'apiKey',
+        'password',
+        'token',
+        'secret',
+        'authorization',
+      ],
       censor: '**redacted**',
     },
     mixin() {

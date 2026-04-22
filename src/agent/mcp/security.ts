@@ -224,6 +224,14 @@ export class OutputSanitizer {
       ':\\/\\/[^:]+:([^@]+)@',
       // JWT tokens
       'eyJ[A-Za-z0-9_-]+\\.eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+',
+      // Email addresses
+      '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}',
+      // SSN (US-style)
+      '\\b\\d{3}-\\d{2}-\\d{4}\\b',
+      // Credit cards (basic regex for common issuers)
+      '\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12}|(?:2131|1800|35\\d{3})\\d{11})\\b',
+      // Phone numbers (basic international / US formats)
+      '(?:\\+?1[-.\\s]?)?\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}',
     ];
   }
 

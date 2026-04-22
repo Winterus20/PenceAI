@@ -644,7 +644,7 @@ export class MCPClientManager {
       throw new Error(`Invalid tool name format: ${fullyQualifiedName}. Expected: mcp:{server}:{tool}`);
     }
 
-    const serverName = parts[1];
+    const serverName = parts[1]!;
     const toolName = parts.slice(2).join(':'); // Tool adı içinde : olabilir
 
     const entry = this.servers.get(serverName);
@@ -667,15 +667,33 @@ export class MCPClientManager {
       throw new Error(`Tool call validation failed for "${fullyQualifiedName}": ${validation.error}`);
     }
 
+    // ── Security: Tool Input Schema Validation (best-effort) ──
+    const resolvedToolName = toolName || '';
+    const toolMeta = entry.tools.find(t => t.name === resolvedToolName);
+    if (toolMeta?.inputSchema && typeof toolMeta.inputSchema === 'object') {
+      const schemaObj = toolMeta.inputSchema as Record<string, unknown>;
+      if (schemaObj.type === 'object' && schemaObj.properties && typeof schemaObj.properties === 'object') {
+        const requiredFields = Array.isArray(schemaObj.required) ? schemaObj.required as string[] : [];
+        for (const req of requiredFields) {
+          if (!(req in args)) {
+            throw new Error(`Tool call validation failed for "${fullyQualifiedName}": missing required argument "${req}"`);
+          }
+        }
+      }
+    }
+
     // ── Security: Concurrency Limiting ──
     await this.security.concurrencyLimiter.acquire();
+
+    const safeServerName = serverName || '';
+    const safeToolName = toolName || '';
 
     // Tool call start event
     this.emitEvent({
       type: 'tool_call_start',
-      serverName,
+      serverName: safeServerName,
       timestamp: Date.now(),
-      data: { toolName, arguments: args },
+      data: { toolName: safeToolName, arguments: args },
     });
 
     const timeout = entry.config.timeout ?? 30000;
@@ -705,24 +723,27 @@ export class MCPClientManager {
       // Tool call end event
       this.emitEvent({
         type: 'tool_call_end',
-        serverName,
+        serverName: safeServerName,
         timestamp: Date.now(),
-        data: { toolName, result: textResult.substring(0, 500) },
+        data: { toolName: safeToolName, result: textResult.substring(0, 500) },
       });
 
       return textResult;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
+      // ── Security: Sanitize error messages that may contain secrets ──
+      const sanitizedErrorMessage = this.security.sanitizer.sanitize(errorMessage);
+
       // Tool call error event
       this.emitEvent({
         type: 'tool_call_error',
-        serverName,
+        serverName: safeServerName,
         timestamp: Date.now(),
-        data: { toolName, error: errorMessage },
+        data: { toolName: safeToolName, error: sanitizedErrorMessage },
       });
 
-      throw new Error(`MCP tool call failed (${serverName}:${toolName}): ${errorMessage}`);
+      throw new Error(`MCP tool call failed (${safeServerName}:${safeToolName}): ${sanitizedErrorMessage}`);
     } finally {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
       this.security.concurrencyLimiter.release();
@@ -791,13 +812,13 @@ export class MCPClientManager {
     const parts = fullyQualifiedName.split(':');
     if (parts.length < 3 || parts[0] !== 'mcp') return false;
 
-    const serverName = parts[1];
+    const serverName = parts[1]!;
     const toolName = parts.slice(2).join(':');
 
     const entry = this.servers.get(serverName);
     if (!entry || entry.status !== 'connected') return false;
 
-    return entry.tools.some((t) => t.name === toolName);
+    return entry.tools.some((t) => t.name === (toolName || ''));
   }
 
   /**

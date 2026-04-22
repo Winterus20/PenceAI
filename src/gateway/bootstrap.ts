@@ -53,6 +53,7 @@ export function createDashboardAuthMiddleware(dashboardPassword?: string): Reque
         }
 
         if (providedPassword !== dashboardPassword) {
+            logger.warn({ path: req.path, ip: req.ip }, '[Gateway] ❌ Dashboard auth failed — invalid password');
             res.setHeader('WWW-Authenticate', 'Basic realm="PençeAI Dashboard"');
             return res.status(401).send('PençeAI: Geçersiz parola');
         }
@@ -122,6 +123,7 @@ export function attachDashboardWebSocketUpgrade(
         req.headers.authorization,
         req.headers['sec-websocket-protocol'],
       )) {
+        logger.warn({ remoteAddress, userAgent: req.headers['user-agent'] }, '[Gateway] ❌ WS auth failed');
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;

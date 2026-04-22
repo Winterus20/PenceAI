@@ -36,11 +36,13 @@ export const STDIO_RUNTIMES = [
  */
 export const DANGEROUS_COMMAND_PATTERNS: RegExp[] = [
   /rm\s+(-rf?|--recursive)/i,
+  /rm\s+-rf\s+\//i,
   /del\s+\/f/i,
   /format/i,
   /mkfs/i,
   /dd\s+if=/i,
   /chmod\s+-r/i,
+  /chmod\s+-R\s+777\s+\//i,
   /chown\s+-r/i,
   /shutdown/i,
   /reboot/i,
@@ -49,6 +51,11 @@ export const DANGEROUS_COMMAND_PATTERNS: RegExp[] = [
   /eval\s+/i,
   /\$\(/, // command substitution
   /`/, // backtick
+  /curl\s+.*\|\s*(sh|bash|cmd|powershell|pwsh|zsh)/i,
+  /wget\s+.*\|\s*(sh|bash|cmd|powershell|pwsh|zsh)/i,
+  /chattr/i,
+  /iptables/i,
+  /fdisk/i,
 ];
 
 // ============================================================
@@ -85,11 +92,11 @@ export function isCommandSafe(command: string): boolean {
   }
 
   // Allowlist kontrolü — sadece executable ismini kontrol et
-  const baseCommand = command.split(/\s+/)[0];
+  const baseCommand = command.split(/\s+/)[0] || '';
 
   // Path traversal koruması: sadece dosya ismini al
   const pathParts = baseCommand.replace(/^(?:\.\/|\.\\)?/, '').split(/[\\/]/);
-  const executableName = pathParts[pathParts.length - 1].toLowerCase();
+  const executableName = (pathParts[pathParts.length - 1] || '').toLowerCase();
 
   // Boş executable name kontrolü
   if (!executableName) {

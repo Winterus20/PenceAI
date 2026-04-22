@@ -24,43 +24,46 @@ function validateEnvKey(key: string): void {
   if (!ENV_KEY_REGEX.test(key)) {
     throw new ValidationError(`Geçersiz environment variable key formatu: ${key}`);
   }
-  
+
   if (PROTECTED_KEYS.has(key)) {
     throw new ValidationError(`Protected environment variable değiştirilemez: ${key}`);
   }
 }
 
 /**
- * Value escaping
+ * Value escaping — prevents shell injection and comment injection in .env files.
+ * Always quotes values that contain special characters.
  */
 function escapeEnvValue(value: string): string {
+  const needsQuote = /[\s"'\\#$&|<>;`]/.test(value);
   const escaped = value
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
+    .replace(/'/g, "\\'")
     .replace(/\n/g, '\\n')
     .replace(/\r/g, '\\r');
-  
-  if (value.includes('\n') || value.includes('"') || value.includes('\\')) {
+
+  if (needsQuote || value.includes('\n') || value.includes('"') || value.includes("'") || value.includes('\\') || value.includes('#')) {
     return `"${escaped}"`;
   }
-  
+
   return value;
 }
 
 export async function secureUpdateEnv(updates: Record<string, string>): Promise<void> {
   const envPath = getEnvPath();
-  
+
   if (!fs.existsSync(envPath)) {
     throw new ValidationError(`.env file not found at ${envPath}`);
   }
-  
+
   let content = await fs.promises.readFile(envPath, 'utf-8');
-  
+
   for (const [key, value] of Object.entries(updates)) {
     validateEnvKey(key);
     const safeValue = escapeEnvValue(value);
     const regex = new RegExp(`^${key}=.*$`, 'm');
-    
+
     if (value === '') {
       content = content.replace(regex, '').replace(/\n{2,}/g, '\n');
     } else {
@@ -71,7 +74,7 @@ export async function secureUpdateEnv(updates: Record<string, string>): Promise<
       }
     }
   }
-  
+
   // Atomic write: temp dosyaya yaz, sonra rename
   const tempPath = `${envPath}.${uuidv4()}.tmp`;
   await fs.promises.writeFile(tempPath, content, 'utf-8');
@@ -128,4 +131,3 @@ export function readEnv(): Record<string, string> {
     }
     return env;
 }
-

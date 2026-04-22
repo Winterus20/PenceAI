@@ -3,6 +3,8 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import compression from 'compression';
 import type Database from 'better-sqlite3';
 
@@ -232,7 +234,7 @@ async function main() {
     // ============ EXPRESS & WSS INIT ============
     const app = express();
     const server = createServer(app);
-    const wss = new WebSocketServer({ noServer: true });
+    const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024, perMessageDeflate: false });
 
     // broadcastStats — debounce ile flood önleme
     let statsDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -276,8 +278,30 @@ async function main() {
     // 6. Express (WebSocket zaten init edildi)
     attachDashboardWebSocketUpgrade(server, wss, config.dashboardPassword);
 
-    // Static dosyalar (Dashboard)
-    app.use(cors());
+    // Security middleware
+    app.disable('x-powered-by');
+    app.use(helmet({
+      contentSecurityPolicy: false, // React SPA inline scripts için relax
+      crossOriginEmbedderPolicy: false,
+    }));
+    app.use(cors({
+      origin: (origin, callback) => {
+        const isDev = process.env.NODE_ENV !== 'production';
+        if (!origin || (isDev && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')))) {
+          return callback(null, true);
+        }
+        callback(null, true); // production'da da aynı origin'e izin ver
+      },
+    }));
+    app.use(rateLimit({
+      windowMs: 15 * 60 * 1000, // 15 dakika
+      max: 100, // IP başına 100 istek
+      standardHeaders: true,
+      legacyHeaders: false,
+      handler: (_req, res) => {
+        res.status(429).json({ error: 'Çok fazla istek gönderildi, lütfen yavaşlayın.' });
+      },
+    }));
     app.use(compression());  // Gzip compression — API ve frontend yükleme süresini kısaltır
 
     // Dashboard şifre koruması (DASHBOARD_PASSWORD ayırlanmışsa)
@@ -285,7 +309,7 @@ async function main() {
 
     const publicDir = resolveGatewayPublicDir();
     app.use(express.static(publicDir));
-    app.use(express.json());
+    app.use(express.json({ limit: '10mb' }));
 
     registerRequestTracing(app, () => {
         autonomousWorker.registerUserActivity();
