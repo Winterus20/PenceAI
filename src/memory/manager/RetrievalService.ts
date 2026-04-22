@@ -695,8 +695,14 @@ export class RetrievalService {
         const embeddings = await this.deps.embeddingProvider.embed(texts);
 
         // sqlite-vec sanal tablosu OR REPLACE desteklemez → DELETE + INSERT
-        const deleteStmt = this.deps.db.prepare(`DELETE FROM ${table} WHERE rowid = CAST(? AS INTEGER)`);
-        const insertStmt = this.deps.db.prepare(`INSERT INTO ${table} (rowid, embedding) VALUES (CAST(? AS INTEGER), ?)`);
+        const deleteSql = table === 'memory_embeddings'
+          ? 'DELETE FROM memory_embeddings WHERE rowid = CAST(? AS INTEGER)'
+          : 'DELETE FROM message_embeddings WHERE rowid = CAST(? AS INTEGER)';
+        const insertSql = table === 'memory_embeddings'
+          ? 'INSERT INTO memory_embeddings (rowid, embedding) VALUES (CAST(? AS INTEGER), ?)'
+          : 'INSERT INTO message_embeddings (rowid, embedding) VALUES (CAST(? AS INTEGER), ?)';
+        const deleteStmt = this.deps.db.prepare(deleteSql);
+        const insertStmt = this.deps.db.prepare(insertSql);
 
         const insertMany = this.deps.db.transaction((items: Array<{ id: number; embedding: number[] }>) => {
           for (const item of items) {

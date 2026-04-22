@@ -1,7 +1,9 @@
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
+import * as shellQuote from 'shell-quote';
 import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import TurndownService from 'turndown';
@@ -13,6 +15,64 @@ import { logger } from '../utils/logger.js';
 import { SmartSearchEngine } from './search/index.js';
 
 const execAsync = promisify(exec);
+
+/** Shell komutlar için güvenli allowlist */
+const SHELL_COMMAND_ALLOWLIST = new Set([
+  'ls', 'cat', 'grep', 'find', 'git', 'npm', 'node', 'python', 'python3',
+  'echo', 'pwd', 'head', 'tail', 'wc', 'diff', 'sort', 'uniq', 'awk', 'sed',
+]);
+
+/** Tehlikeli pattern'ler — kesin engel */
+const DANGEROUS_COMMAND_PATTERNS: { pattern: RegExp; desc: string }[] = [
+  { pattern: /\brm\s+-rf\s+\/(\s|$|--no-preserve-root)/i, desc: 'rm -rf /' },
+  { pattern: /\brm\s+-r\s+\/(\s|$|--no-preserve-root)/i, desc: 'rm -r /' },
+  { pattern: /\brm\s+-rf\s+\/\*/i, desc: 'rm -rf /*' },
+  { pattern: /\brm\s+-r\s+\/\*/i, desc: 'rm -r /*' },
+  { pattern: /\bformat\s+/i, desc: 'format' },
+  { pattern: /\bdel\s+\/f\s+\/s\s+\/q/i, desc: 'del /f /s /q' },
+  { pattern: /\bdel\s+\/s\s+\/q/i, desc: 'del /s /q' },
+  { pattern: /\bmkfs\b/i, desc: 'mkfs' },
+  { pattern: /:\s*\(\s*\)\s*\{/i, desc: 'fork bomb' },
+  { pattern: /\brd\s+\/s\s+\/q/i, desc: 'rd /s /q' },
+  { pattern: /\brmdir\s+\/s\s+\/q/i, desc: 'rmdir /s /q' },
+  { pattern: /remove-item\s+-recurse\s+-force\s+c:/i, desc: 'remove-item C:' },
+  { pattern: /remove-item\s+-recurse\s+-force\s+\//i, desc: 'remove-item /' },
+  { pattern: />\s*\/dev\/sd[a-z]/i, desc: 'disk overwrite' },
+  { pattern: /\bdd\s+if=\/dev\//i, desc: 'dd from /dev' },
+  { pattern: /\bchmod\s+-r\s+000\s+\//i, desc: 'chmod -r 000 /' },
+  { pattern: /\bchmod\s+-R\s+777\s+\//i, desc: 'chmod -R 777 /' },
+  { pattern: /\bchown\s+-r\s+/i, desc: 'chown -r' },
+  { pattern: /\bshutdown\b/i, desc: 'shutdown' },
+  { pattern: /\breboot\b/i, desc: 'reboot' },
+  { pattern: /\binit\s+0\b/i, desc: 'init 0' },
+  { pattern: /\binit\s+6\b/i, desc: 'init 6' },
+  { pattern: /\breg\s+delete\b/i, desc: 'reg delete' },
+  { pattern: /\breg\s+add\b/i, desc: 'reg add' },
+  { pattern: /\bcurl\s+.*\|\s*(sh|bash|cmd|powershell|pwsh|zsh)\b/i, desc: 'curl | shell' },
+  { pattern: /\bwget\s+.*\|\s*(sh|bash|cmd|powershell|pwsh|zsh)\b/i, desc: 'wget | shell' },
+  { pattern: /\bchattr\b/i, desc: 'chattr' },
+  { pattern: /\biptables\b/i, desc: 'iptables' },
+  { pattern: /\bfdisk\b/i, desc: 'fdisk' },
+  { pattern: /\bmount\b/i, desc: 'mount' },
+  { pattern: /\bumount\b/i, desc: 'umount' },
+];
+
+/** Bypass pattern'leri */
+const BYPASS_PATTERNS = [
+  /\|\s*(sh|bash|cmd|powershell|pwsh|zsh)\b/i,
+  /\$\(.*\)/,
+  /`[^`]+`/,
+  /;\s*(rm|del|rd|format|mkfs|shutdown|reboot|chmod|chown|dd|curl|wget)\b/i,
+  /&&\s*(rm|del|rd|format|mkfs|shutdown|reboot|chmod|chown|dd|curl|wget)\b/i,
+  /\|\|\s*(rm|del|rd|format|mkfs|shutdown|reboot|chmod|chown|dd|curl|wget)\b/i,
+  /\b(cmd|powershell|pwsh)\s+\/c\b/i,
+  /\beval\s+/i,
+  />\s*\/dev\/sd[a-z]/i,
+  /\bsudo\s+rm\b/i,
+  /\bsudo\s+chmod\b/i,
+  /\bsudo\s+chown\b/i,
+  /\bsudo\s+dd\b/i,
+];
 
 // ============================================================
 // Zod Runtime Validation Schemas
@@ -642,11 +702,15 @@ export function createBuiltinTools(
                             return `Hata: Bu URL bir HTML sayfası değil (${contentType}). PDF, resim veya raw data olabilir.`;
                         }
 
-                        const html = await response.text();
+                        let html = await response.text();
+
+                        // Event handler attribute'larını strip et (XSS önlemi)
+                        html = html.replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, ' ');
+                        html = html.replace(/\s+on\w+\s*=\s*[^\s>]+/gi, ' ');
 
                         // linkedom ile DOM ağacını kur (çok hafif ve hızlı)
                         const { document } = parseHTML(html);
-                        
+
                         // JS tabanlı gereksiz elementleri parse öncesi temizlemek performansı artırabilir
                         const scripts = document.querySelectorAll('script');
                         const styles = document.querySelectorAll('style');
@@ -690,114 +754,83 @@ export function createBuiltinTools(
           // Zod runtime validation
           const validation = validateArgs(ExecuteShellArgsSchema, args);
           if (!validation.success) return validation.error;
-          
+
           const { command, cwd } = validation.data;
-  
+
           // Hassas dizin onay kontrolü (cwd + komut içindeki yollar)
           // 1) cwd kontrolü
           const checkPath = cwd || process.cwd();
-                const cwdRejection = await requireConfirmation(
-                    confirmCallback, 'executeShell', checkPath, 'execute',
-                    `"${command}" komutu (dizin: ${checkPath})`, sensitivePaths,
-                );
-                if (cwdRejection) return cwdRejection;
+          const cwdRejection = await requireConfirmation(
+            confirmCallback, 'executeShell', checkPath, 'execute',
+            `"${command}" komutu (dizin: ${checkPath})`, sensitivePaths,
+          );
+          if (cwdRejection) return cwdRejection;
 
-                // 2) Komut içindeki yolları tara — tırnaklı ve tırnaksız yollar
-                const extractedPaths = extractPathsFromCommand(command);
-                for (const ep of extractedPaths) {
-                    const pathRejection = await requireConfirmation(
-                        confirmCallback, 'executeShell', ep, 'execute',
-                        `"${command}" komutu (hedef: ${ep})`, sensitivePaths,
-                    );
-                    if (pathRejection) return pathRejection;
-                }
+          // 2) Komut içindeki yolları tara — tırnaklı ve tırnaksız yollar
+          const extractedPaths = extractPathsFromCommand(command);
+          for (const ep of extractedPaths) {
+            const pathRejection = await requireConfirmation(
+              confirmCallback, 'executeShell', ep, 'execute',
+              `"${command}" komutu (hedef: ${ep})`, sensitivePaths,
+            );
+            if (pathRejection) return pathRejection;
+          }
 
-                // Güvenlik kontrolü — tehlikeli komutları engelle
-                const normalized = command.toLowerCase().replace(/\s+/g, ' ').trim();
-                const dangerousPatterns: { pattern: RegExp; desc: string }[] = [
-                    { pattern: /\brm\s+-rf\s+\/(\s|$|--no-preserve-root)/i, desc: 'rm -rf /' },
-                    { pattern: /\brm\s+-r\s+\/(\s|$|--no-preserve-root)/i, desc: 'rm -r /' },
-                    { pattern: /\brm\s+-rf\s+\/\*/i, desc: 'rm -rf /*' },
-                    { pattern: /\brm\s+-r\s+\/\*/i, desc: 'rm -r /*' },
-                    { pattern: /\bformat\s+/i, desc: 'format' },
-                    { pattern: /\bdel\s+\/f\s+\/s\s+\/q/i, desc: 'del /f /s /q' },
-                    { pattern: /\bdel\s+\/s\s+\/q/i, desc: 'del /s /q' },
-                    { pattern: /\bmkfs\b/i, desc: 'mkfs' },
-                    { pattern: /:\s*\(\s*\)\s*\{/i, desc: 'fork bomb' },
-                    { pattern: /\brd\s+\/s\s+\/q/i, desc: 'rd /s /q' },
-                    { pattern: /\brmdir\s+\/s\s+\/q/i, desc: 'rmdir /s /q' },
-                    { pattern: /remove-item\s+-recurse\s+-force\s+c:/i, desc: 'remove-item C:' },
-                    { pattern: /remove-item\s+-recurse\s+-force\s+\//i, desc: 'remove-item /' },
-                    { pattern: />\s*\/dev\/sd[a-z]/i, desc: 'disk overwrite' },
-                    { pattern: /\bdd\s+if=\/dev\//i, desc: 'dd from /dev' },
-                    { pattern: /\bchmod\s+-r\s+000\s+\//i, desc: 'chmod -r 000 /' },
-                    { pattern: /\bchown\s+-r\s+/i, desc: 'chown -r' },
-                    { pattern: /\bshutdown\b/i, desc: 'shutdown' },
-                    { pattern: /\breboot\b/i, desc: 'reboot' },
-                    { pattern: /\binit\s+0\b/i, desc: 'init 0' },
-                    { pattern: /\binit\s+6\b/i, desc: 'init 6' },
-                    { pattern: /\breg\s+delete\b/i, desc: 'reg delete' },
-                    { pattern: /\breg\s+add\b/i, desc: 'reg add' },
-                ];
-                for (const { pattern, desc } of dangerousPatterns) {
-                    if (pattern.test(normalized)) {
-                        return `⛔ Güvenlik: Bu komut tehlikeli olarak işaretlenmiş ve engellendi (${desc}): ${command}`;
-                    }
-                }
+          // Güvenlik kontrolü — tehlikeli komutları engelle
+          const normalized = command.toLowerCase().replace(/\s+/g, ' ').trim();
+          for (const { pattern, desc } of DANGEROUS_COMMAND_PATTERNS) {
+            if (pattern.test(normalized)) {
+              return `⛔ Güvenlik: Bu komut tehlikeli olarak işaretlenmiş ve engellendi (${desc}): ${command}`;
+            }
+          }
 
-                // Gelişmiş bypass kontrolleri
-                const bypassPatterns = [
-                    /\|\s*(sh|bash|cmd|powershell|pwsh|zsh)\b/i,    // pipe ile kabuk çağrısı
-                    /\$\(.*\)/,                                       // $(...) subshell
-                    /`[^`]+`/,                                        // backtick command substitution
-                    /;\s*(rm|del|rd|format|mkfs|shutdown|reboot)\b/i, // chain ile tehlikeli komut
-                    /&&\s*(rm|del|rd|format|mkfs|shutdown|reboot)\b/i,// && ile tehlikeli komut
-                    /\|\|\s*(rm|del|rd|format|mkfs|shutdown|reboot)\b/i,// || ile tehlikeli komut
-                    /\b(cmd|powershell|pwsh)\s+\/c\b/i,              // cmd /c bypass
-                    /\beval\s+/i,                                     // eval komutu
-                    />\s*\/dev\/sd[a-z]/i,                            // disk yazma
-                    /\bsudo\s+rm\b/i,                                 // sudo rm
-                ];
-                for (const pattern of bypassPatterns) {
-                    if (pattern.test(command)) {
-                        return `⛔ Güvenlik: Tehlikeli komut kalıbı tespit edildi ve engellendi: ${command}`;
-                    }
-                }
+          for (const pattern of BYPASS_PATTERNS) {
+            if (pattern.test(command)) {
+              return `⛔ Güvenlik: Tehlikeli komut kalıbı tespit edildi ve engellendi: ${command}`;
+            }
+          }
 
-                // cwd parametresi güvenlik kontrolü
-                if (cwd) {
-                    try {
-                        validatePath(cwd);
-                    } catch (e: unknown) {
-                    const error = e instanceof Error ? e : new Error(String(e));
-                    return `⛔ Güvenlik: cwd parametresi geçersiz — ${error.message}`;
-                    }
-                }
+          // Allowlist kontrolü — base komut listede olmalı
+          const baseCmd = normalized.split(/\s+/)[0];
+          if (!SHELL_COMMAND_ALLOWLIST.has(baseCmd)) {
+            return `⛔ Güvenlik: "${baseCmd}" komutu allowlist'te yok. İzin verilen komutlar: ${Array.from(SHELL_COMMAND_ALLOWLIST).join(', ')}`;
+          }
 
-                try {
-                    const shellTimeout = config.shellTimeout;
-                    const { stdout, stderr } = await execAsync(command, {
-                        cwd: cwd || process.cwd(),
-                        timeout: shellTimeout,
-                        maxBuffer: 1024 * 1024, // 1MB
-                    });
+          // cwd parametresi güvenlik kontrolü
+          if (cwd) {
+            try {
+              validatePath(cwd);
+            } catch (e: unknown) {
+              const error = e instanceof Error ? e : new Error(String(e));
+              return `⛔ Güvenlik: cwd parametresi geçersiz — ${error.message}`;
+            }
+          }
 
-                    let result = '';
-                    if (stdout) result += stdout;
-                    if (stderr) result += `\n[stderr]: ${stderr}`;
+          try {
+            const shellTimeout = Math.min(Math.max(config.shellTimeout, 5000), 300000);
+            const escapedCommand = shellQuote.quote([command]);
+            const { stdout, stderr } = await execAsync(escapedCommand, {
+              cwd: cwd || process.cwd(),
+              timeout: shellTimeout,
+              maxBuffer: 1024 * 1024, // 1MB
+            });
 
-                    // Çıktıyı kırp
-                    if (result.length > 128000) {
-                        result = result.substring(0, 128000) + '\n... [Çıktı kırpıldı]';
-                    }
+            let result = '';
+            if (stdout) result += stdout;
+            if (stderr) result += `\n[stderr]: ${stderr}`;
 
-                    return result || '(Komut çıktı üretmedi)';
-                } catch (err: unknown) {
-                const error = err instanceof Error ? err : new Error(String(err));
-                return `Hata: Komut çalıştırılamadı — ${error.message}`;
-                }
-            },
-        });
+            // Çıktıyı kırp
+            if (result.length > 128000) {
+              result = result.substring(0, 128000) + '\n... [Çıktı kırpıldı]';
+            }
+
+            return result || '(Komut çıktı üretmedi)';
+          } catch (err: unknown) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            return `Hata: Komut çalıştırılamadı — ${error.message}`;
+          }
+        },
+      });
     }
 
     // --- Web Arama (Smart Search: Brave + DuckDuckGo + Wikipedia + HN + Reddit) ---
@@ -888,16 +921,23 @@ function looksLikePath(s: string): boolean {
 
 /**
  * Dosya yolu güvenlik kontrolü.
+ * Symlink bypass'larını önlemek için fs.realpathSync kullanır.
  */
 function validatePath(filePath: string): void {
     const config = getConfig();
 
-    if (config.fsRootDir) {
-        const resolved = path.resolve(filePath);
-        const root = path.resolve(config.fsRootDir);
-        if (!resolved.startsWith(root)) {
-            throw new Error(`Erişim reddedildi: ${filePath} — İzin verilen kök dizin: ${config.fsRootDir}`);
-        }
+    // Symlink bypass önlemi: realpathSync ile hedefi çöz
+    let resolved: string;
+    try {
+        resolved = fsSync.realpathSync(path.resolve(filePath));
+    } catch {
+        // realpathSync başarısız olursa (dosya yok veya erişim yok) path.resolve'a düş
+        resolved = path.resolve(filePath);
+    }
+
+    const root = path.resolve(config.fsRootDir || process.cwd());
+    if (!resolved.toLowerCase().startsWith(root.toLowerCase())) {
+        throw new Error(`Erişim reddedildi: ${filePath} — İzin verilen kök dizin: ${root}`);
     }
 
     // Tehlikeli yolları engelle (segment-bazlı eşleşme #7)
@@ -909,14 +949,14 @@ function validatePath(filePath: string): void {
         '.env', '.ssh', 'id_rsa', 'id_ed25519', 'id_ecdsa',
         '.aws', '.npmrc', '.netrc', '.pgpass',
     ];
-    const resolvedPath = path.resolve(filePath).toLowerCase();
+    const resolvedPath = resolved.toLowerCase();
     for (const b of blockedAbsolute) {
         if (resolvedPath.startsWith(b.toLowerCase())) {
             throw new Error(`Erişim reddedildi: Sistem dosyası korumalıdır`);
         }
     }
     // Yol segmentlerini kontrol et — tam segment eşleşmesi (.env ≠ .environment)
-    const segments = filePath.replace(/\\/g, '/').split('/');
+    const segments = resolved.replace(/\\/g, '/').split('/');
     for (const seg of segments) {
         const segLower = seg.toLowerCase();
         for (const b of blockedSegments) {

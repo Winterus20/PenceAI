@@ -28,12 +28,26 @@ const TEXT_MIMES = new Set([
     'application/javascript', 'application/typescript',
 ]);
 
+/** Yüklenmesi engellenen tehlikeli dosya uzantıları */
+const BLOCKED_EXTENSIONS = new Set([
+    '.exe', '.bat', '.cmd', '.sh', '.php', '.ps1', '.vbs', '.jar',
+    '.com', '.scr', '.msi', '.dll', '.bin',
+]);
+
 function isTextFile(mimeType: string, fileName: string): boolean {
     return (
         TEXT_MIMES.has(mimeType) ||
         mimeType.startsWith('text/') ||
         /\.(txt|md|json|csv|xml|html|htm|css|js|ts|jsx|tsx|py|rb|java|c|cpp|h|hpp|cs|go|rs|sh|yaml|yml|toml|ini|cfg|conf|env|log|sql)$/i.test(fileName || '')
     );
+}
+
+function hasBlockedExtension(fileName: string): boolean {
+    const lower = fileName.toLowerCase();
+    for (const ext of BLOCKED_EXTENSIONS) {
+        if (lower.endsWith(ext)) return true;
+    }
+    return false;
 }
 
 /**
@@ -49,6 +63,13 @@ export function processAttachments(
     for (const att of attachments) {
         const mime = att.mimeType || 'application/octet-stream';
         const name = att.fileName || 'dosya';
+
+        // Tehlikeli dosya uzantısı kontrolü
+        if (hasBlockedExtension(name)) {
+            logger.warn(`[Attachment] ⛔ Tehlikeli dosya uzantısı engellendi: ${name}`);
+            enrichedContent += `\n\n[Dosya engellendi: ${name} — güvenlik nedeniyle işlenemedi]`;
+            continue;
+        }
 
         if (att.data && typeof att.data === 'string' && att.data.length > ATTACHMENT_CONFIG.maxAttachmentBase64Size) {
             logger.warn(`[Attachment] ⚠️ Dosya çok büyük, atlandı: ${name} (${(att.data.length / 1024 / 1024).toFixed(1)} MB base64)`);

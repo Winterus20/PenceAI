@@ -5,6 +5,17 @@ import * as sqliteVec from "sqlite-vec";
 import { logger, calculateCost } from '../utils/index.js';
 import { REVIEW_SCHEDULE_FACTOR } from './ebbinghaus.js';
 
+/**
+ * Validates embeddingDimensions for safe DDL interpolation.
+ * Must be a positive integer <= 10000.
+ */
+function safeEmbeddingDimensions(dim: number): number {
+  if (!Number.isInteger(dim) || dim <= 0 || dim > 10000) {
+    throw new Error(`Invalid embeddingDimensions: ${dim}. Must be a positive integer <= 10000.`);
+  }
+  return dim;
+}
+
 /** Token usage kayıt tipi */
 export interface TokenUsageRecord {
   provider: string;
@@ -178,12 +189,12 @@ export class PenceDatabase {
 
       -- Bellek embedding vektörleri (semantik benzerlik araması için sqlite-vec ile)
       CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
-        embedding float[${this.embeddingDimensions}]
+        embedding float[${safeEmbeddingDimensions(this.embeddingDimensions)}]
       );
 
       -- Mesaj embedding vektörleri (mesajlarda semantik arama için)
       CREATE VIRTUAL TABLE IF NOT EXISTS message_embeddings USING vec0(
-        embedding float[${this.embeddingDimensions}]
+        embedding float[${safeEmbeddingDimensions(this.embeddingDimensions)}]
       );
 
       -- Bellek entity'leri (kişi, teknoloji, proje, kavram vb.)
@@ -347,7 +358,8 @@ export class PenceDatabase {
     if (!msgEmbedTable) {
       logger.info('[Database] 🚀 Migrating: Creating message_embeddings table');
       try {
-        this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS message_embeddings USING vec0(embedding float[${this.embeddingDimensions}])`);
+        const dim = safeEmbeddingDimensions(this.embeddingDimensions);
+        this.db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS message_embeddings USING vec0(embedding float[${dim}])`);
       } catch (err) {
         logger.error({ err: err }, '[Database] ❌ Migration failed (message_embeddings):');
       }
@@ -1023,25 +1035,42 @@ export class PenceDatabase {
     }
 
     // Toplam istatistik
-    const whereClause = periodSeconds > 0 ? `WHERE created_at >= datetime(${now} - ${periodSeconds}, 'unixepoch')` : '';
-    
-    const totalRow = this.db.prepare(`
-      SELECT
-        COALESCE(SUM(total_tokens), 0) as totalTokens,
-        COALESCE(SUM(estimated_cost_usd), 0) as totalCost
-      FROM token_usage ${whereClause}
-    `).get() as { totalTokens: number; totalCost: number };
+    const totalRow = periodSeconds > 0
+      ? this.db.prepare(`
+          SELECT
+            COALESCE(SUM(total_tokens), 0) as totalTokens,
+            COALESCE(SUM(estimated_cost_usd), 0) as totalCost
+          FROM token_usage
+          WHERE created_at >= datetime(?, 'unixepoch')
+        `).get(now - periodSeconds) as { totalTokens: number; totalCost: number }
+      : this.db.prepare(`
+          SELECT
+            COALESCE(SUM(total_tokens), 0) as totalTokens,
+            COALESCE(SUM(estimated_cost_usd), 0) as totalCost
+          FROM token_usage
+        `).get() as { totalTokens: number; totalCost: number };
 
     // Provider bazlı breakdown
-    const providerRows = this.db.prepare(`
-      SELECT
-        provider,
-        SUM(total_tokens) as tokens,
-        SUM(estimated_cost_usd) as cost
-      FROM token_usage ${whereClause}
-      GROUP BY provider
-      ORDER BY tokens DESC
-    `).all() as Array<{ provider: string; tokens: number; cost: number }>;
+    const providerRows = periodSeconds > 0
+      ? this.db.prepare(`
+          SELECT
+            provider,
+            SUM(total_tokens) as tokens,
+            SUM(estimated_cost_usd) as cost
+          FROM token_usage
+          WHERE created_at >= datetime(?, 'unixepoch')
+          GROUP BY provider
+          ORDER BY tokens DESC
+        `).all(now - periodSeconds) as Array<{ provider: string; tokens: number; cost: number }>
+      : this.db.prepare(`
+          SELECT
+            provider,
+            SUM(total_tokens) as tokens,
+            SUM(estimated_cost_usd) as cost
+          FROM token_usage
+          GROUP BY provider
+          ORDER BY tokens DESC
+        `).all() as Array<{ provider: string; tokens: number; cost: number }>;
 
     const providerBreakdown: Record<string, { tokens: number; cost: number }> = {};
     for (const row of providerRows) {
@@ -1069,17 +1098,26 @@ export class PenceDatabase {
       default: periodSeconds = 0; // all
     }
 
-    const whereClause = periodSeconds > 0 ? `WHERE created_at >= datetime(${now} - ${periodSeconds}, 'unixepoch')` : '';
-
-    const rows = this.db.prepare(`
-      SELECT
-        DATE(created_at) as date,
-        SUM(total_tokens) as tokens,
-        SUM(estimated_cost_usd) as cost
-      FROM token_usage ${whereClause}
-      GROUP BY DATE(created_at)
-      ORDER BY date ASC
-    `).all() as Array<{ date: string; tokens: number; cost: number }>;
+    const rows = periodSeconds > 0
+      ? this.db.prepare(`
+          SELECT
+            DATE(created_at) as date,
+            SUM(total_tokens) as tokens,
+            SUM(estimated_cost_usd) as cost
+          FROM token_usage
+          WHERE created_at >= datetime(?, 'unixepoch')
+          GROUP BY DATE(created_at)
+          ORDER BY date ASC
+        `).all(now - periodSeconds) as Array<{ date: string; tokens: number; cost: number }>
+      : this.db.prepare(`
+          SELECT
+            DATE(created_at) as date,
+            SUM(total_tokens) as tokens,
+            SUM(estimated_cost_usd) as cost
+          FROM token_usage
+          GROUP BY DATE(created_at)
+          ORDER BY date ASC
+        `).all() as Array<{ date: string; tokens: number; cost: number }>;
 
     return rows.map(r => ({ date: r.date, tokens: r.tokens, cost: r.cost }));
   }
