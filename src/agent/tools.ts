@@ -6,7 +6,7 @@ import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import TurndownService from 'turndown';
 import { z } from 'zod';
-import glob from 'glob';
+import { glob } from 'glob';
 import { getConfig } from '../gateway/config.js';
 import { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/logger.js';
@@ -452,7 +452,7 @@ export function createBuiltinTools(
 
             // Sonuçları maxResults ile sınırla ve okunabilir formatta göster
             const files = allFiles.slice(0, maxResults);
-            const relativeFiles = files.map(f => {
+            const relativeFiles = files.map((f: string) => {
               try {
                 return path.relative(searchDir, f) || f;
               } catch {
@@ -460,7 +460,7 @@ export function createBuiltinTools(
               }
             });
 
-            const result = relativeFiles.map((f, i) => `${i + 1}. ${f}`).join('\n');
+            const result = relativeFiles.map((f: string, i: number) => `${i + 1}. ${f}`).join('\n');
 
             if (allFiles.length > maxResults) {
               return `🔍 ${allFiles.length} dosya bulundu (ilk ${maxResults} gösteriliyor):\n${result}\n\n... [${allFiles.length - maxResults} dosya daha, "maxResults" değerini artırın]`;

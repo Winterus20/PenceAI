@@ -366,7 +366,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     // GET /api/metrics/all — Tüm metrics'leri getir (limit ile)
     app.get('/api/metrics/all', validateQuery(MetricsLimitQuerySchema), (req, res) => {
       try {
-        const { limit } = req.query;
+        const limit = Number(req.query.limit) || 100;
         const metrics = metricsCollector.getAllMetrics(limit);
         res.json({ success: true, metrics });
       } catch (error: unknown) {
@@ -381,7 +381,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     // GET /api/metrics/summary — Aggrege metrics özeti
     app.get('/api/metrics/summary', validateQuery(MetricsDaysQuerySchema), (req, res) => {
       try {
-        const { days } = req.query;
+        const days = Number(req.query.days) || 1;
         const summary = metricsCollector.getAggregatedMetrics(days);
         res.json({ success: true, ...summary });
       } catch (error: unknown) {

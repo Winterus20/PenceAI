@@ -32,12 +32,13 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
   });
 
   expressRouter.get('/conversations/:id/messages', validateParams(ConversationIdParamSchema), (req, res) => {
-      const messages = memory.getConversationHistory(req.params.id, 100);
+      const id = req.params.id as string;
+      const messages = memory.getConversationHistory(id, 100);
       res.json(messages);
   });
 
   expressRouter.post('/conversations/:id/fork', validateParams(ConversationIdParamSchema), validateBody(ForkConversationSchema), (req, res) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { forkFromMessageId } = req.body;
 
     try {
@@ -54,7 +55,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
   });
 
   expressRouter.get('/conversations/:id/branches', validateParams(ConversationIdParamSchema), (req, res) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     try {
       const branches = memory.getChildBranches(id);
       return res.json(branches);
@@ -66,7 +67,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
   });
 
   expressRouter.get('/conversations/:id/branch-info', validateParams(ConversationIdParamSchema), (req, res) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     try {
       const info = memory.getConversationBranchInfo(id);
       return res.json(info);
@@ -81,7 +82,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
   });
 
   expressRouter.patch('/conversations/:id', validateParams(ConversationIdParamSchema), validateBody(UpdateConversationSchema), (req, res) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { title } = req.body;
 
     try {
@@ -94,7 +95,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
   });
 
   expressRouter.delete('/conversations/:id', validateParams(ConversationIdParamSchema), validateBody(DeleteConversationSchema), (req, res) => {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { deleteBranches } = req.body;
 
     try {
