@@ -4,7 +4,7 @@ export default {
     extensionsToTreatAsEsm: ['.ts'],
     moduleNameMapper: {
         '^(\\.{1,2}/.*)\\.js$': '$1',
-        '^@/(.*)$': '<rootDir>/src/web/react-app/src/$1',
+        '^@/(.*)$': '<rootDir>/src/$1',
     },
     setupFiles: ['<rootDir>/tests/setup.ts'],
     transform: {
@@ -16,21 +16,26 @@ export default {
             },
         ],
     },
-    testMatch: ['**/tests/**/*.test.ts'],
-    // Frontend testleri icin ayarlar
+    testMatch: ['**/tests/**/*.test.ts', '**/tests/**/*.spec.ts'],
     roots: [
         '<rootDir>/tests',
     ],
-    // Test path ignore patterns
     testPathIgnorePatterns: [
         '/node_modules/',
         '/dist/',
     ],
-    // Coverage ayarlari
     collectCoverageFrom: [
         'src/**/*.ts',
         'src/web/react-app/src/**/*.ts',
         'src/web/react-app/src/**/*.tsx',
         '!src/**/*.d.ts',
     ],
+    coverageThreshold: {
+        global: {
+            branches: 10,
+            functions: 10,
+            lines: 10,
+            statements: 10,
+        },
+    },
 };
