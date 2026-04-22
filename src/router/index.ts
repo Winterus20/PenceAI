@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger.js';
+import { NotFoundError } from '../errors/NotFoundError.js';
 import type { Channel, ChannelType, UnifiedMessage, MessageResponse, Attachment } from './types.js';
 
 type MessageHandler = (message: UnifiedMessage) => Promise<void>;
@@ -81,7 +82,7 @@ export class MessageRouter {
     async sendResponse(channelType: ChannelType, channelId: string, response: MessageResponse): Promise<void> {
         const channel = this.channels.get(channelType);
         if (!channel) {
-            throw new Error(`Kanal bulunamadı: ${channelType}`);
+            throw new NotFoundError(`Kanal bulunamadı: ${channelType}`);
         }
         if (!channel.isConnected) {
             throw new Error(`Kanal bağlı değil: ${channelType}`);
@@ -89,7 +90,7 @@ export class MessageRouter {
 
         try {
             await channel.sendMessage(channelId, response);
-        } catch (err: any) {
+        } catch (err: unknown) {
             logger.warn({ err }, `[Router] ⚠️ Mesaj gönderme hatası (${channelType}), yeniden bağlanma deneniyor...`);
             
             // Otomatik reconnect denemesi (1 kez)
@@ -97,10 +98,11 @@ export class MessageRouter {
                 await channel.connect();
                 logger.info(`[Router] 🔗 ${channelType} yeniden bağlandı`);
                 await channel.sendMessage(channelId, response);
-            } catch (reconnectErr: any) {
+            } catch (reconnectErr: unknown) {
                 logger.error({ err: reconnectErr }, `[Router] ❌ ${channelType} yeniden bağlanma başarısız`);
+                const reconnectMsg = reconnectErr instanceof Error ? reconnectErr.message : 'Bilinmeyen hata';
                 throw new Error(
-                    `Mesaj gönderilemedi (${channelType}): ${reconnectErr.message ?? 'Bilinmeyen hata'}`
+                    `Mesaj gönderilemedi (${channelType}): ${reconnectMsg}`
                 );
             }
         }

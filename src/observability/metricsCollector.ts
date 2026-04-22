@@ -7,6 +7,7 @@
 
 import type Database from 'better-sqlite3';
 import { logger } from '../utils/logger.js';
+import { DatabaseError } from '../errors/DatabaseError.js';
 
 export interface LLMCallMetric {
   key: string;
@@ -73,7 +74,7 @@ class MetricsCollector {
 
   private getDb(): Database.Database {
     if (!this.db) {
-      throw new Error('[MetricsCollector] Database not initialized. Call setDatabase() first.');
+      throw new DatabaseError('[MetricsCollector] Database not initialized. Call setDatabase() first.');
     }
     return this.db;
   }

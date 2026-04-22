@@ -1,5 +1,6 @@
 import { OpenAIProvider } from './openai.js';
 import { getConfig } from '../gateway/config.js';
+import { LLMError } from '../errors/LLMError.js';
 
 export class GitHubProvider extends OpenAIProvider {
     readonly name = 'github';
@@ -29,7 +30,7 @@ export class GitHubProvider extends OpenAIProvider {
     constructor() {
         const config = getConfig();
         if (!config.githubToken) {
-            throw new Error('GITHUB_TOKEN ortam değişkeni ayarlanmamış');
+            throw new LLMError('GITHUB_TOKEN ortam değişkeni ayarlanmamış');
         }
         // Use OpenAI SDK connected to GitHub Models Inference Endpoint
         super('https://models.github.ai/inference', config.githubToken);

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger.js';
+import { ValidationError } from '../errors/ValidationError.js';
 
 /**
  * Environment variable key format regex
@@ -21,11 +22,11 @@ const PROTECTED_KEYS = new Set([
  */
 function validateEnvKey(key: string): void {
   if (!ENV_KEY_REGEX.test(key)) {
-    throw new Error(`Geçersiz environment variable key formatu: ${key}`);
+    throw new ValidationError(`Geçersiz environment variable key formatu: ${key}`);
   }
   
   if (PROTECTED_KEYS.has(key)) {
-    throw new Error(`Protected environment variable değiştirilemez: ${key}`);
+    throw new ValidationError(`Protected environment variable değiştirilemez: ${key}`);
   }
 }
 
@@ -50,7 +51,7 @@ export async function secureUpdateEnv(updates: Record<string, string>): Promise<
   const envPath = getEnvPath();
   
   if (!fs.existsSync(envPath)) {
-    throw new Error(`.env file not found at ${envPath}`);
+    throw new ValidationError(`.env file not found at ${envPath}`);
   }
   
   let content = await fs.promises.readFile(envPath, 'utf-8');

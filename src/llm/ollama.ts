@@ -3,6 +3,7 @@ import type { LLMMessage, LLMResponse, ToolCall } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
 import { logger } from '../utils/logger.js';
 import { extractThinkingFromTags } from '../utils/thinkTags.js';
+import { LLMError } from '../errors/LLMError.js';
 import { randomUUID } from 'crypto';
 
 interface OllamaMessage {
@@ -113,7 +114,7 @@ export class OllamaProvider extends LLMProvider {
         });
 
         if (!res.ok) {
-            throw new Error(`Ollama hatası: ${res.status} ${res.statusText}`);
+            throw new LLMError(`Ollama hatası: ${res.status} ${res.statusText}`);
         }
 
         const data = (await res.json()) as OllamaResponse;
@@ -179,7 +180,7 @@ export class OllamaProvider extends LLMProvider {
         const res = await fetch(`${this.baseUrl}/api/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
         });
-        if (!res.ok) throw new Error(`Ollama hatası: ${res.status} ${res.statusText}`);
+        if (!res.ok) throw new LLMError(`Ollama hatası: ${res.status} ${res.statusText}`);
 
         let content = '';
         let hasToolCalls = false;

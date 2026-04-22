@@ -2,6 +2,7 @@ import { OpenAIProvider } from './openai.js';
 import { getConfig } from '../gateway/config.js';
 import type { ChatOptions } from './provider.js';
 import type { LLMMessage, LLMResponse } from '../router/types.js';
+import { LLMError } from '../errors/LLMError.js';
 
 /**
  * NVIDIA NIM API LLM Provider — OpenAI-uyumlu API kullanır.
@@ -60,7 +61,7 @@ export class NvidiaProvider extends OpenAIProvider {
     constructor() {
         const config = getConfig();
         if (!config.nvidiaApiKey) {
-            throw new Error('NVIDIA_API_KEY ortam değişkeni ayarlanmamış');
+            throw new LLMError('NVIDIA_API_KEY ortam değişkeni ayarlanmamış');
         }
         super('https://integrate.api.nvidia.com/v1', config.nvidiaApiKey);
     }

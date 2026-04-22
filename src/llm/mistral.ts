@@ -1,5 +1,6 @@
 import { OpenAIProvider } from './openai.js';
 import { getConfig } from '../gateway/config.js';
+import { LLMError } from '../errors/LLMError.js';
 
 /**
  * Mistral AI LLM Provider — OpenAI-uyumlu API kullanır.
@@ -27,7 +28,7 @@ export class MistralProvider extends OpenAIProvider {
     constructor() {
         const config = getConfig();
         if (!config.mistralApiKey) {
-            throw new Error('MISTRAL_API_KEY ortam değişkeni ayarlanmamış');
+            throw new LLMError('MISTRAL_API_KEY ortam değişkeni ayarlanmamış');
         }
         super('https://api.mistral.ai/v1', config.mistralApiKey);
     }

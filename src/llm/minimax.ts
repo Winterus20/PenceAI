@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { LLMProvider, type ChatOptions, TOOL_CALL_CLEAR_SIGNAL } from './provider.js';
 import type { LLMMessage, LLMResponse, ToolCall } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
+import { LLMError } from '../errors/LLMError.js';
 
 interface MiniMaxDelta {
     content?: string;
@@ -50,7 +51,7 @@ export class MiniMaxProvider extends LLMProvider {
         super();
         const config = getConfig();
         if (!config.minimaxApiKey) {
-            throw new Error('MINIMAX_API_KEY ortam değişkeni ayarlanmamış');
+            throw new LLMError('MINIMAX_API_KEY ortam değişkeni ayarlanmamış');
         }
         this.client = new OpenAI({
             apiKey: config.minimaxApiKey,

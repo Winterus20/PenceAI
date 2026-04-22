@@ -323,10 +323,10 @@ export class PenceDatabase {
 
     this.db.transaction(() => {
     // Tablo bilgilerini cache-le (N+1 pragma sorgularını azalt)
-    const memoriesTableInfo = this.db.prepare("PRAGMA table_info(memories)").all() as any[];
-    const convTableInfo = this.db.prepare("PRAGMA table_info(conversations)").all() as any[];
-    const msgTableInfo = this.db.prepare("PRAGMA table_info(messages)").all() as any[];
-    const relTableInfo = this.db.prepare("PRAGMA table_info(memory_relations)").all() as any[];
+    const memoriesTableInfo = this.db.prepare("PRAGMA table_info(memories)").all() as Array<{ name: string }>;
+    const convTableInfo = this.db.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>;
+    const msgTableInfo = this.db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+    const relTableInfo = this.db.prepare("PRAGMA table_info(memory_relations)").all() as Array<{ name: string }>;
 
     const hasArchived = memoriesTableInfo.some(col => col.name === 'is_archived');
 
@@ -362,7 +362,7 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ Migration failed (summary):');
       }
     }
-    if (!convTableInfo.some((col: any) => col.name === 'is_summarized')) {
+    if (!convTableInfo.some((col) => col.name === 'is_summarized')) {
       logger.info('[Database] 🚀 Migrating: Adding is_summarized column to conversations table');
       try {
         this.db.exec("ALTER TABLE conversations ADD COLUMN is_summarized INTEGER DEFAULT 0");
@@ -372,7 +372,7 @@ export class PenceDatabase {
     }
 
     // conversations tablosuna is_title_custom kolonu ekle (yoksa)
-    if (!convTableInfo.some((col: any) => col.name === 'is_title_custom')) {
+    if (!convTableInfo.some((col) => col.name === 'is_title_custom')) {
       logger.info('[Database] 🚀 Migrating: Adding is_title_custom column to conversations table');
       try {
         this.db.exec("ALTER TABLE conversations ADD COLUMN is_title_custom INTEGER DEFAULT 0");
@@ -455,7 +455,7 @@ export class PenceDatabase {
     }
 
     // Archival Re-learning: max_importance kolonu — memories tablosuna ekle (yoksa)
-    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'max_importance')) {
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col) => col.name === 'max_importance')) {
       logger.info('[Database] 🚀 Migrating: Adding max_importance column to memories table');
       try {
         this.db.exec("ALTER TABLE memories ADD COLUMN max_importance INTEGER");
@@ -468,7 +468,7 @@ export class PenceDatabase {
     }
 
     // Provenance + confidence + review profile kolonları — kontrollü orta vadeli genişletme
-    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'provenance_source')) {
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col) => col.name === 'provenance_source')) {
       logger.info('[Database] 🚀 Migrating: Adding provenance_source column to memories table');
       try {
         this.db.exec("ALTER TABLE memories ADD COLUMN provenance_source TEXT");
@@ -476,7 +476,7 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ Migration failed (provenance_source):');
       }
     }
-    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'provenance_conversation_id')) {
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col) => col.name === 'provenance_conversation_id')) {
       logger.info('[Database] 🚀 Migrating: Adding provenance_conversation_id column to memories table');
       try {
         this.db.exec("ALTER TABLE memories ADD COLUMN provenance_conversation_id TEXT");
@@ -484,7 +484,7 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ Migration failed (provenance_conversation_id):');
       }
     }
-    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'provenance_message_id')) {
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col) => col.name === 'provenance_message_id')) {
       logger.info('[Database] 🚀 Migrating: Adding provenance_message_id column to memories table');
       try {
         this.db.exec("ALTER TABLE memories ADD COLUMN provenance_message_id INTEGER");
@@ -492,7 +492,7 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ Migration failed (provenance_message_id):');
       }
     }
-    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'confidence')) {
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col) => col.name === 'confidence')) {
       logger.info('[Database] 🚀 Migrating: Adding confidence column to memories table');
       try {
         this.db.exec("ALTER TABLE memories ADD COLUMN confidence REAL DEFAULT 0.7");
@@ -501,7 +501,7 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ Migration failed (confidence):');
       }
     }
-    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'review_profile')) {
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col) => col.name === 'review_profile')) {
       logger.info('[Database] 🚀 Migrating: Adding review_profile column to memories table');
       try {
         this.db.exec("ALTER TABLE memories ADD COLUMN review_profile TEXT DEFAULT 'standard'");
@@ -510,7 +510,7 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ Migration failed (review_profile):');
       }
     }
-    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col: any) => col.name === 'memory_type')) {
+    if (memoriesTableInfo.length > 0 && !memoriesTableInfo.some((col) => col.name === 'memory_type')) {
       logger.info('[Database] 🚀 Migrating: Adding memory_type column to memories table');
       try {
         this.db.exec("ALTER TABLE memories ADD COLUMN memory_type TEXT DEFAULT 'semantic'");
@@ -529,7 +529,7 @@ export class PenceDatabase {
     }
 
     // İlişki Yaşam Döngüsü kolonları — memory_relations tablosuna ekle (yoksa)
-    if (relTableInfo.length > 0 && !relTableInfo.some((col: any) => col.name === 'last_accessed_at')) {
+    if (relTableInfo.length > 0 && !relTableInfo.some((col) => col.name === 'last_accessed_at')) {
       logger.info('[Database] 🚀 Migrating: Adding lifecycle columns to memory_relations table');
       try {
         this.db.exec("ALTER TABLE memory_relations ADD COLUMN last_accessed_at DATETIME");
@@ -607,7 +607,7 @@ export class PenceDatabase {
     }
 
     // messages tablosuna attachments kolonu ekle (yoksa)
-    if (msgTableInfo.length > 0 && !msgTableInfo.some((col: any) => col.name === 'attachments')) {
+    if (msgTableInfo.length > 0 && !msgTableInfo.some((col) => col.name === 'attachments')) {
       logger.info('[Database] 🚀 Migrating: Adding attachments column to messages table');
       try {
         this.db.exec("ALTER TABLE messages ADD COLUMN attachments TEXT");
@@ -618,7 +618,7 @@ export class PenceDatabase {
     }
 
     // OPT-4: conversations tablosuna message_count kolonu + trigger ekle (yoksa)
-    if (convTableInfo.length > 0 && !convTableInfo.some((col: any) => col.name === 'message_count')) {
+    if (convTableInfo.length > 0 && !convTableInfo.some((col) => col.name === 'message_count')) {
       logger.info('[Database] 🚀 Migrating: Adding message_count column and triggers');
       try {
         this.db.exec("ALTER TABLE conversations ADD COLUMN message_count INTEGER DEFAULT 0");
@@ -702,7 +702,7 @@ export class PenceDatabase {
     // ========== GraphRAG Faz 1 Migration ==========
 
     // GraphRAG: memory_relations tablosuna weight, is_directional, last_scored_at kolonları
-    if (relTableInfo.length > 0 && !relTableInfo.some((col: any) => col.name === 'weight')) {
+    if (relTableInfo.length > 0 && !relTableInfo.some((col) => col.name === 'weight')) {
       logger.info('[Database] 🚀 GraphRAG Migration: Adding weight column to memory_relations');
       try {
         this.db.exec("ALTER TABLE memory_relations ADD COLUMN weight REAL DEFAULT 1.0");
@@ -712,7 +712,7 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ GraphRAG migration failed (weight):');
       }
     }
-    if (relTableInfo.length > 0 && !relTableInfo.some((col: any) => col.name === 'is_directional')) {
+    if (relTableInfo.length > 0 && !relTableInfo.some((col) => col.name === 'is_directional')) {
       logger.info('[Database] 🚀 GraphRAG Migration: Adding is_directional column to memory_relations');
       try {
         this.db.exec("ALTER TABLE memory_relations ADD COLUMN is_directional INTEGER DEFAULT 0");
@@ -722,7 +722,7 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ GraphRAG migration failed (is_directional):');
       }
     }
-    if (relTableInfo.length > 0 && !relTableInfo.some((col: any) => col.name === 'last_scored_at')) {
+    if (relTableInfo.length > 0 && !relTableInfo.some((col) => col.name === 'last_scored_at')) {
       logger.info('[Database] 🚀 GraphRAG Migration: Adding last_scored_at column to memory_relations');
       try {
         this.db.exec("ALTER TABLE memory_relations ADD COLUMN last_scored_at DATETIME");
@@ -733,7 +733,7 @@ export class PenceDatabase {
     }
 
     // GraphRAG Faz 2: PageRank persistence kolonları
-    if (relTableInfo.length > 0 && !relTableInfo.some((col: any) => col.name === 'page_rank_score')) {
+    if (relTableInfo.length > 0 && !relTableInfo.some((col) => col.name === 'page_rank_score')) {
       logger.info('[Database] 🚀 GraphRAG Faz 2 Migration: Adding page_rank_score column to memory_relations');
       try {
         this.db.exec("ALTER TABLE memory_relations ADD COLUMN page_rank_score REAL DEFAULT 0");
@@ -858,8 +858,8 @@ export class PenceDatabase {
     // ========== GraphRAG Hierarchical Communities Migration ==========
 
     // graph_communities tablosuna level ve parent_id kolonları ekle (yoksa)
-    const commTableInfo = this.db.prepare("PRAGMA table_info(graph_communities)").all() as any[];
-    if (commTableInfo.length > 0 && !commTableInfo.some((col: any) => col.name === 'level')) {
+    const commTableInfo = this.db.prepare("PRAGMA table_info(graph_communities)").all() as Array<{ name: string }>;
+    if (commTableInfo.length > 0 && !commTableInfo.some((col) => col.name === 'level')) {
       logger.info('[Database] 🚀 GraphRAG Hierarchical Migration: Adding level and parent_id columns to graph_communities');
       try {
         this.db.exec("ALTER TABLE graph_communities ADD COLUMN level INTEGER DEFAULT 0");
@@ -935,7 +935,7 @@ export class PenceDatabase {
       }
     }
 
-    if (convTableInfo.length > 0 && !convTableInfo.some((col: any) => col.name === 'parent_conversation_id')) {
+    if (convTableInfo.length > 0 && !convTableInfo.some((col) => col.name === 'parent_conversation_id')) {
       logger.info('[Database] 🚀 Migrating: Adding conversation branching columns');
       try {
         this.db.exec("ALTER TABLE conversations ADD COLUMN parent_conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL");

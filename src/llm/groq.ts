@@ -1,5 +1,6 @@
 import { OpenAIProvider } from './openai.js';
 import { getConfig } from '../gateway/config.js';
+import { LLMError } from '../errors/LLMError.js';
 
 /**
  * Groq LLM Provider — OpenAI-uyumlu API kullanır.
@@ -25,7 +26,7 @@ export class GroqProvider extends OpenAIProvider {
     constructor() {
         const config = getConfig();
         if (!config.groqApiKey) {
-            throw new Error('GROQ_API_KEY ortam değişkeni ayarlanmamış');
+            throw new LLMError('GROQ_API_KEY ortam değişkeni ayarlanmamış');
         }
         super('https://api.groq.com/openai/v1', config.groqApiKey);
     }

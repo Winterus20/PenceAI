@@ -35,13 +35,17 @@ export default tseslint.config(
 
       // TypeScript strictness
       '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/await-thenable': 'error',
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/prefer-nullish-coalescing': 'warn',
       '@typescript-eslint/no-unused-vars': ['error', {
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_',
       }],
       '@typescript-eslint/consistent-type-imports': ['warn', {
         prefer: 'type-imports',
-        fixStyle: 'inline-imports',
+        fixStyle: 'separate-type-imports',
       }],
 
       // Best practices
@@ -57,6 +61,7 @@ export default tseslint.config(
     files: ['src/**/*.test.ts', 'tests/**/*.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-floating-promises': 'off',
       'no-empty': 'off',
     },
   },

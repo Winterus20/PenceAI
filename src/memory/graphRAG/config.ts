@@ -12,6 +12,7 @@
  */
 
 import { logger } from '../../utils/logger.js';
+import { ValidationError } from '../../errors/ValidationError.js';
 
 /** GraphRAG feature flag */
 export interface GraphRAGFeatureFlag {
@@ -162,7 +163,7 @@ export class GraphRAGConfigManager {
 
     // Validation
     if (!this.validateConfig(newConfig)) {
-      throw new Error('Invalid GraphRAG configuration');
+      throw new ValidationError('Invalid GraphRAG configuration');
     }
 
     const prevConfig = { ...this.currentConfig };
