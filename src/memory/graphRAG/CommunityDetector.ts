@@ -321,22 +321,28 @@ export class CommunityDetector {
 
   /**
    * Community'leri veritabanına kaydet.
+   *
+   * @param communities - Kaydedilecek community'ler
+   * @param clearExisting - true ise mevcut community'leri ve summary'leri temizler (default: true)
    */
-  private saveCommunities(communities: Community[]): void {
+  saveCommunities(communities: Community[], clearExisting: boolean = true): void {
     if (communities.length === 0) return;
 
     try {
-      // Önce eski community'leri temizle
-      this.db.exec('DELETE FROM graph_community_members');
-      this.db.exec('DELETE FROM graph_communities');
+      if (clearExisting) {
+        // FK constraint'leri önlemek için önce summary'leri, sonra members ve communities'i temizle
+        this.db.exec('DELETE FROM graph_community_summaries');
+        this.db.exec('DELETE FROM graph_community_members');
+        this.db.exec('DELETE FROM graph_communities');
+      }
 
       const insertCommunity = this.db.prepare(`
-        INSERT INTO graph_communities (id, modularity_score, dominant_relation_types, created_at, updated_at, level, parent_id)
+        INSERT OR REPLACE INTO graph_communities (id, modularity_score, dominant_relation_types, created_at, updated_at, level, parent_id)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
 
       const insertMember = this.db.prepare(`
-        INSERT INTO graph_community_members (community_id, node_id) VALUES (?, ?)
+        INSERT OR REPLACE INTO graph_community_members (community_id, node_id) VALUES (?, ?)
       `);
 
       const runSave = this.db.transaction(() => {

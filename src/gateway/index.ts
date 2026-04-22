@@ -2,8 +2,9 @@ import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import cors from 'cors';
+import compression from 'compression';
+import type Database from 'better-sqlite3';
 
 
 import { getConfig, loadConfig } from './config.js';
@@ -11,7 +12,7 @@ import { getConfig, loadConfig } from './config.js';
 import { PenceDatabase } from '../memory/database.js';
 import { MemoryManager } from '../memory/manager.js';
 import { MessageRouter } from '../router/index.js';
-import { registerAllProviders, LLMProviderFactory, LLMProvider } from '../llm/index.js';
+import { registerAllProviders, LLMProviderFactory, LLMProvider, LLMCacheService, CachedLLMProvider } from '../llm/index.js';
 import { AgentRuntime } from '../agent/runtime.js';
 import { createEmbeddingProvider } from '../memory/embeddings.js';
 import { initializeMCP, shutdownMCP } from '../agent/mcp/runtime.js';
@@ -48,8 +49,6 @@ import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
 import { GraphWorker } from '../memory/graphRAG/GraphWorker.js';
 import { GraphRAGConfigManager, DEFAULT_GRAPH_RAG_CONFIG } from '../memory/graphRAG/config.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 // ═══════════════════════════════════════════════════════════
 //  Bootstrap Helpers
 // ═══════════════════════════════════════════════════════════
@@ -66,21 +65,35 @@ async function bootstrapDatabase(): Promise<{ database: PenceDatabase; memory: M
     return { database, memory, embeddingProvider };
 }
 
-function bootstrapLLM(): LLMProvider {
+function bootstrapLLM(db: Database.Database): LLMProvider {
     registerAllProviders();
     const config = getConfig();
-    const llm = LLMProviderFactory.create(config.defaultLLMProvider);
-    logger.info(`[Gateway] 🤖 LLM Provider: ${llm.name}`);
+    const rawProvider = LLMProviderFactory.create(config.defaultLLMProvider);
+    logger.info(`[Gateway] 🤖 LLM Provider: ${rawProvider.name}`);
 
     const configModel = config.defaultLLMModel;
-    if (llm.supportedModels.length > 0 && !llm.supportedModels.includes(configModel)) {
-        logger.warn(`[Gateway] ⚠️  DEFAULT_LLM_MODEL="${configModel}" ${llm.name} provider'ı tarafından desteklenmiyor!`);
-        logger.warn(`[Gateway] 💡 Desteklenen bazı modeller: ${llm.supportedModels.slice(0, 8).join(', ')}`);
-        logger.warn(`[Gateway] ℹ️  Provider varsayılan modeli kullanılacak: ${llm.supportedModels[0]}`);
+    if (rawProvider.supportedModels.length > 0 && !rawProvider.supportedModels.includes(configModel)) {
+        logger.warn(`[Gateway] ⚠️  DEFAULT_LLM_MODEL="${configModel}" ${rawProvider.name} provider'ı tarafından desteklenmiyor!`);
+        logger.warn(`[Gateway] 💡 Desteklenen bazı modeller: ${rawProvider.supportedModels.slice(0, 8).join(', ')}`);
+        logger.warn(`[Gateway] ℹ️  Provider varsayılan modeli kullanılacak: ${rawProvider.supportedModels[0]}`);
     } else {
         logger.info(`[Gateway] ✅ Model doğrulandı: ${configModel}`);
     }
-    return llm;
+
+    // Wrap with LLM prompt cache (SQLite-backed MD5(Prompt+Model) → Response)
+    if (config.llmCacheEnabled) {
+        const cache = new LLMCacheService(db, {
+            enabled: true,
+            ttlHours: config.llmCacheTtlHours,
+            maxEntries: config.llmCacheMaxEntries,
+        });
+        const cachedProvider = new CachedLLMProvider(rawProvider, cache, config.defaultLLMProvider);
+        logger.info(`[Gateway] 💾 LLM Cache enabled (TTL=${config.llmCacheTtlHours}h, maxEntries=${config.llmCacheMaxEntries})`);
+        return cachedProvider;
+    }
+
+    logger.info(`[Gateway] 💾 LLM Cache disabled`);
+    return rawProvider;
 }
 
 async function main() {
@@ -101,7 +114,7 @@ async function main() {
     // 3. LLM Provider
     let llm: LLMProvider;
     try {
-        llm = bootstrapLLM();
+        llm = bootstrapLLM(database.getDb());
     } catch (err: any) {
         logger.error(`[Gateway] ❌ LLM Provider başlatılamadı: ${err.message}`);
         logger.error(`[Gateway] 💡 .env dosyanızda API anahtarını ayarlayın. Kopya: cp .env.example .env`);
@@ -263,11 +276,12 @@ async function main() {
 
     // Static dosyalar (Dashboard)
     app.use(cors());
+    app.use(compression());  // Gzip compression — API ve frontend yükleme süresini kısaltır
 
     // Dashboard şifre koruması (DASHBOARD_PASSWORD ayırlanmışsa)
     app.use(createDashboardAuthMiddleware(config.dashboardPassword));
 
-    const publicDir = resolveGatewayPublicDir(__dirname);
+    const publicDir = resolveGatewayPublicDir();
     app.use(express.static(publicDir));
     app.use(express.json());
 
@@ -349,6 +363,25 @@ async function main() {
         payload: {},
         addedAt: Date.now()
     });
+
+    // LLM Cache periodic purge — expired entries every 30 minutes
+    if (config.llmCacheEnabled) {
+        const LLM_CACHE_PURGE_INTERVAL_MS = 30 * 60 * 1000;
+        const llmCachePurgeTimer = setInterval(() => {
+            try {
+                // Create a lightweight cache service just for purge (shares the same DB)
+                const purgeCache = new LLMCacheService(database.getDb(), {
+                    enabled: true,
+                    ttlHours: config.llmCacheTtlHours,
+                    maxEntries: config.llmCacheMaxEntries,
+                });
+                purgeCache.purgeExpired();
+            } catch (err) {
+                logger.warn({ err }, '[Gateway] LLM Cache purge failed');
+            }
+        }, LLM_CACHE_PURGE_INTERVAL_MS);
+        llmCachePurgeTimer.unref();
+    }
 
     // ============ Sunucuyu Başlat ============
 

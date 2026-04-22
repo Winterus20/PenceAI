@@ -113,7 +113,9 @@ describe('GraphRAG Retrieval Integration', () => {
         modularity_score REAL,
         dominant_relation_types TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        level INTEGER,
+        parent_id TEXT
       );
 
       CREATE TABLE graph_community_members (

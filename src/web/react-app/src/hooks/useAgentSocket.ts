@@ -56,7 +56,12 @@ interface WsMetricsMessage {
 	data: MessageMetrics;
 }
 
-type WsMessage = WsTokenMessage | WsResponseMessage | WsAgentEventMessage | WsClearStreamMessage | WsReplaceStreamMessage | WsErrorMessage | WsStatsMessage | WsConfirmRequestMessage | WsMetricsMessage;
+interface WsSysLogMessage {
+	type: 'sys_log';
+	entry: Record<string, unknown>;
+}
+
+type WsMessage = WsTokenMessage | WsResponseMessage | WsAgentEventMessage | WsClearStreamMessage | WsReplaceStreamMessage | WsErrorMessage | WsStatsMessage | WsConfirmRequestMessage | WsMetricsMessage | WsSysLogMessage;
 
 // Agent event data tipleri
 interface ThinkingEventData {
@@ -298,6 +303,11 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
 
             case 'metrics':
                 onMetricsRef.current?.(data.data);
+                break;
+
+            case 'sys_log':
+                // Sistem loglarını global event olarak fırlat — SystemLogsView dinleyebilir
+                window.dispatchEvent(new CustomEvent('sys_log', { detail: data.entry }));
                 break;
         }
     };

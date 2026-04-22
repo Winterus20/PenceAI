@@ -19,14 +19,20 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('react-dom') || id.includes('react/')) return 'vendor-react';
+            if (id.includes('react-dom') || id.includes('react/') || id.includes('react-router') || id.includes('scheduler') || id.includes('use-sync-external-store')) return 'vendor-react';
             if (id.includes('@radix-ui')) return 'vendor-radix';
             if (id.includes('@tanstack/react-query')) return 'vendor-query';
             if (id.includes('framer-motion')) return 'vendor-animation';
-            if (id.includes('d3-selection') || id.includes('d3-zoom') || id.includes('d3-force') || id.includes('d3-drag')) return 'vendor-d3';
+            if (id.includes('d3')) return 'vendor-d3';
+            if (id.includes('prismjs/components/prism-') || id.includes('refractor/lang/')) {
+              const match = id.match(/(?:prismjs\/components\/prism-|refractor\/lang\/)([a-z])/);
+              if (match) {
+                return match[1] <= 'm' ? 'vendor-syntax-langs' : 'vendor-syntax-langs-rest';
+              }
+            }
             if (id.includes('react-syntax-highlighter') || id.includes('prismjs') || id.includes('refractor')) return 'vendor-syntax';
             if (id.includes('react-markdown') || id.includes('remark') || id.includes('rehype') || id.includes('unified') || id.includes('micromark') || id.includes('mdast') || id.includes('vfile')) return 'vendor-markdown';
-            if (id.includes('zustand') || id.includes('lucide-react') || id.includes('react-virtuoso') || id.includes('react-hot-toast') || id.includes('class-variance-authority') || id.includes('clsx') || id.includes('tailwind-merge')) return 'vendor-utils';
+            if (id.includes('zustand') || id.includes('lucide-react') || id.includes('react-virtuoso') || id.includes('react-hot-toast') || id.includes('class-variance-authority') || id.includes('clsx') || id.includes('tailwind-merge') || id.includes('lodash') || id.includes('date-fns')) return 'vendor-utils';
           }
         },
       },

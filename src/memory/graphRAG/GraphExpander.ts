@@ -95,29 +95,40 @@ export class GraphExpander {
         break;
       }
 
+      // ── Batch loading: N+1 önleme ──
+      // Önce ziyaret edilmemiş komşuları filtrele, ID'leri topla
+      const unvisitedNeighbors = neighbors.filter(n => !visited.has(n.neighborId));
+
+      // maxNodes limitine kadar al
+      const allowed = unvisitedNeighbors.slice(
+        0,
+        Math.max(0, opts.maxNodes - allNodes.size),
+      );
+      if (allowed.length < unvisitedNeighbors.length) {
+        maxHopReached = true;
+      }
+
+      // Tüm node ve edge ID'lerini tek seferde topla → batch sorgu
+      const nodeIds = allowed.map(n => n.neighborId);
+      const edgeIds = allowed.map(n => n.relationId);
+
+      const nodeBatch = this.loadNodesBatch(nodeIds);
+      const edgeBatch = this.loadEdgesBatch(edgeIds);
+
       const nextLayer: number[] = [];
 
-      for (const neighbor of neighbors) {
-        // Döngü dedeksiyonu: zaten ziyaret edilmiş node'ları atla
-        if (visited.has(neighbor.neighborId)) continue;
-
-        // maxNodes kontrolü
-        if (allNodes.size >= opts.maxNodes) {
-          maxHopReached = true;
-          break;
-        }
-
+      for (const neighbor of allowed) {
         visited.add(neighbor.neighborId);
         hopDistances.set(neighbor.neighborId, hop);
 
-        // Node bilgisini yükle
-        const node = this.loadNode(neighbor.neighborId);
+        // Batch'ten O(1) erişimle node'u al
+        const node = nodeBatch.get(neighbor.neighborId) ?? null;
         if (node) {
           allNodes.set(neighbor.neighborId, node);
         }
 
-        // Edge bilgisini yükle
-        const edge = this.loadEdge(neighbor.relationId);
+        // Batch'ten O(1) erişimle edge'i al
+        const edge = edgeBatch.get(neighbor.relationId) ?? null;
         if (edge) {
           allEdges.push(edge);
         }
@@ -271,31 +282,50 @@ export class GraphExpander {
   }
 
   /**
-   * Tek bir node'u veritabanından yükler.
+   * Birden fazla node'u tek bir batch sorgusuyla yükler (N+1 çözümü).
+   *
+   * Her ID için ayrı SELECT yerine, tüm ID'ler için tek WHERE id IN (?, ?, ...)
+   * sorgusu atar. Dönen Map ile O(1) erişim sağlar.
    */
-  private loadNode(id: number): MemoryRow | null {
+  private loadNodesBatch(ids: number[]): Map<number, MemoryRow> {
+    const result = new Map<number, MemoryRow>();
+    if (ids.length === 0) return result;
+
+    const placeholders = ids.map(() => '?').join(',');
     try {
-      return this.db.prepare(`
-        SELECT * FROM memories WHERE id = ? AND is_archived = 0
-      `).get(id) as MemoryRow | undefined ?? null;
+      const rows = this.db.prepare(`
+        SELECT * FROM memories WHERE id IN (${placeholders}) AND is_archived = 0
+      `).all(...ids) as MemoryRow[];
+
+      for (const row of rows) {
+        result.set(row.id, row);
+      }
     } catch (err) {
-      logger.warn({ err }, `[GraphExpander] loadNode(${id}) hatası:`);
-      return null;
+      logger.warn({ err }, '[GraphExpander] loadNodesBatch hatası:');
     }
+    return result;
   }
 
   /**
-   * Tek bir edge'i veritabanından yükler.
+   * Birden fazla edge'i tek bir batch sorgusuyla yükler (N+1 çözümü).
    */
-  private loadEdge(id: number): MemoryRelationRow | null {
+  private loadEdgesBatch(ids: number[]): Map<number, MemoryRelationRow> {
+    const result = new Map<number, MemoryRelationRow>();
+    if (ids.length === 0) return result;
+
+    const placeholders = ids.map(() => '?').join(',');
     try {
-      return this.db.prepare(`
-        SELECT * FROM memory_relations WHERE id = ?
-      `).get(id) as MemoryRelationRow | undefined ?? null;
+      const rows = this.db.prepare(`
+        SELECT * FROM memory_relations WHERE id IN (${placeholders})
+      `).all(...ids) as MemoryRelationRow[];
+
+      for (const row of rows) {
+        result.set(row.id, row);
+      }
     } catch (err) {
-      logger.warn({ err }, `[GraphExpander] loadEdge(${id}) hatası:`);
-      return null;
+      logger.warn({ err }, '[GraphExpander] loadEdgesBatch hatası:');
     }
+    return result;
   }
 
   /**
@@ -434,12 +464,17 @@ export class GraphExpander {
       const neighbors = this.getNeighbors(currentLayer, opts.minConfidence, opts.relationTypes);
       if (neighbors.length === 0) break;
 
+      // ── Batch loading: N+1 önleme ──
+      // Önce ziyaret edilmemiş komşuları filtrele, tüm node ID'lerini tek seferde yükle
+      const unvisited = neighbors.filter(n => !visited.has(n.neighborId));
+      const unvisitedNodeIds = unvisited.map(n => n.neighborId);
+      const nodeBatch = this.loadNodesBatch(unvisitedNodeIds);
+
       // 🔧 DRIFT: Her komşuyu query relevance'a göre skorla
       type ScoredNeighbor = typeof neighbors[number] & { relevanceScore: number };
-      const scoredNeighbors: ScoredNeighbor[] = neighbors
-        .filter(n => !visited.has(n.neighborId))
+      const scoredNeighbors: ScoredNeighbor[] = unvisited
         .map(n => {
-          const node = this.loadNode(n.neighborId);
+          const node = nodeBatch.get(n.neighborId);
           let relevanceScore = n.confidence * n.weight;
 
           // Keyword eşleşme bonusu
@@ -464,6 +499,10 @@ export class GraphExpander {
       // Sadece en alakalı komşuları seç (pruning)
       const topNeighbors = scoredNeighbors.slice(0, Math.max(3, Math.ceil(scoredNeighbors.length * 0.3)));
 
+      // Seçilen top neighbor'ların edge'lerini batch yükle
+      const topEdgeIds = topNeighbors.map(n => n.relationId);
+      const edgeBatch = this.loadEdgesBatch(topEdgeIds);
+
       const nextLayer: number[] = [];
       let highRelevanceCount = 0;
 
@@ -476,13 +515,15 @@ export class GraphExpander {
         visited.add(neighbor.neighborId);
         hopDistances.set(neighbor.neighborId, hop);
 
-        const node = this.loadNode(neighbor.neighborId);
+        // Batch'ten O(1) erişimle node'u al
+        const node = nodeBatch.get(neighbor.neighborId) ?? null;
         if (node) {
           allNodes.set(neighbor.neighborId, node);
           if (neighbor.relevanceScore > 0.5) highRelevanceCount++;
         }
 
-        const edge = this.loadEdge(neighbor.relationId);
+        // Batch'ten O(1) erişimle edge'i al
+        const edge = edgeBatch.get(neighbor.relationId) ?? null;
         if (edge) {
           allEdges.push(edge);
         }

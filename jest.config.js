@@ -6,6 +6,7 @@ export default {
         '^(\\.{1,2}/.*)\\.js$': '$1',
         '^@/(.*)$': '<rootDir>/src/web/react-app/src/$1',
     },
+    setupFiles: ['<rootDir>/tests/setup.ts'],
     transform: {
         '^.+\\.tsx?$': [
             'ts-jest',
@@ -32,11 +33,4 @@ export default {
         'src/web/react-app/src/**/*.tsx',
         '!src/**/*.d.ts',
     ],
-    // Frontend testleri icin globals
-    globals: {
-        'ts-jest': {
-            useESM: true,
-            isolatedModules: true,
-        },
-    },
 };

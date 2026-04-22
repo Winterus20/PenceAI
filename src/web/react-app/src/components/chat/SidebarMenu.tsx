@@ -1,5 +1,5 @@
 import { useState, lazy, Suspense } from 'react';
-import { Settings, BookOpen, Store, Radio, BarChart3, Menu, X } from 'lucide-react';
+import { Settings, BookOpen, Store, Radio, BarChart3, Menu, X, Terminal } from 'lucide-react';
 import { UsageStatsCard } from '@/components/settings/UsageStatsCard';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { ActiveView } from '../../store/agentStore';
@@ -17,6 +17,7 @@ const MENU_ITEMS = [
   { id: 'metrics', label: 'Metrics', icon: BarChart3, color: 'text-cyan-400', bg: 'bg-cyan-500/10 hover:bg-cyan-500/20' },
   { id: 'marketplace', label: 'Marketplace', icon: Store, color: 'text-green-400', bg: 'bg-green-500/10 hover:bg-green-500/20' },
   { id: 'channels', label: 'Kanallar', icon: Radio, color: 'text-orange-400', bg: 'bg-orange-500/10 hover:bg-orange-500/20' },
+  { id: 'logs', label: 'Loglar', icon: Terminal, color: 'text-gray-300', bg: 'bg-gray-500/10 hover:bg-gray-500/20' },
 ] as const;
 
 export function SidebarMenu({ setActiveView }: SidebarMenuProps) {
@@ -35,6 +36,10 @@ export function SidebarMenu({ setActiveView }: SidebarMenuProps) {
     }
     if (id === 'metrics') {
       setActiveView('metrics');
+      return;
+    }
+    if (id === 'logs') {
+      setActiveView('logs');
       return;
     }
     setActiveDialog(id);

@@ -12,6 +12,7 @@ import { readEnv, secureUpdateEnv } from './envUtils.js';
 import { reloadConfig } from './config.js';
 import { BASE_SYSTEM_PROMPT } from '../agent/prompt.js';
 import { logger } from '../utils/logger.js';
+import { logRingBuffer } from '../utils/logRingBuffer.js';
 import { AgentRuntime } from '../agent/runtime.js';
 import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../memory/graphRAG/config.js';
 import { BehaviorDiscoveryShadow } from '../memory/graphRAG/BehaviorDiscoveryShadow.js';
@@ -344,6 +345,20 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       const shadow = getBehaviorDiscoveryShadow();
       shadow.clear();
       res.json({ success: true });
+    });
+
+    // ============ Live Logs API ============
+
+    // GET /api/logs — Son log kayıtlarını getir (Ring Buffer)
+    app.get('/api/logs', (req, res) => {
+      try {
+        const limit = parseInt(req.query.limit as string) || 1000;
+        const logs = logRingBuffer.getLogs(Math.min(limit, 1000));
+        res.json({ success: true, logs });
+      } catch (error: unknown) {
+        const err = error as Error;
+        res.status(500).json({ success: false, error: err.message });
+      }
     });
 
     // ============ Metrics API ============

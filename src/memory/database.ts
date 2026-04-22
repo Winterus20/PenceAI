@@ -37,7 +37,7 @@ export class PenceDatabase {
   private embeddingDimensions: number;
 
   /** En son migration versiyonu. Her yeni migration'da artırın. */
-  private static readonly LATEST_SCHEMA_VERSION = 18;
+  private static readonly LATEST_SCHEMA_VERSION = 19;
 
   constructor(dbPath: string, embeddingDimensions: number = 1536) {
     // data dizinini oluştur
@@ -903,6 +903,35 @@ export class PenceDatabase {
         logger.info('[Database] ✅ memory_claims tablosu oluşturuldu');
       } catch (err) {
         logger.error({ err: err }, '[Database] ❌ GraphRAG Claims migration failed:');
+      }
+    }
+
+    // ========== LLM Prompt Cache Migration ==========
+
+    const llmCacheTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='llm_cache'"
+    ).get();
+    if (!llmCacheTable) {
+      logger.info('[Database] 🚀 Migrating: Creating llm_cache table for LLM prompt caching');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS llm_cache (
+            cache_key            TEXT PRIMARY KEY,
+            response_json        TEXT NOT NULL,
+            model                TEXT NOT NULL,
+            provider             TEXT NOT NULL DEFAULT '',
+            prompt_tokens        INTEGER,
+            completion_tokens    INTEGER,
+            created_at           DATETIME NOT NULL,
+            last_accessed_at     DATETIME NOT NULL,
+            access_count         INTEGER DEFAULT 1
+          );
+          CREATE INDEX IF NOT EXISTS idx_llm_cache_created    ON llm_cache(created_at);
+          CREATE INDEX IF NOT EXISTS idx_llm_cache_accessed   ON llm_cache(last_accessed_at);
+        `);
+        logger.info('[Database] ✅ llm_cache tablosu oluşturuldu');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (llm_cache):');
       }
     }
 

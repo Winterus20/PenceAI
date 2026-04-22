@@ -116,6 +116,17 @@ describe('RetrievalOrchestrator + GraphRAG Integration (Extended)', () => {
       prioritizeConversationMemories: jest.fn((memories) => memories),
       recordDebug: jest.fn(),
       graphRAGEngine: mockGraphRAGEngine,
+      agenticRAGLLMProvider: {
+        name: 'mock',
+        supportedModels: ['mock-model'],
+        defaultModel: 'mock-model',
+        chat: jest.fn().mockResolvedValue({
+          content: 'mock response',
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          finishReason: 'stop',
+        }),
+        healthCheck: jest.fn().mockResolvedValue(true),
+      } as any,
     };
   });
 

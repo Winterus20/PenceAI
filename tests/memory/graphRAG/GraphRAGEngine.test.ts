@@ -40,6 +40,7 @@ const mockPageRankScorer = {
 const mockCommunityDetector = {
   detectCommunities: jest.fn(),
   detectLocalCommunity: jest.fn(),
+  saveCommunities: jest.fn(),
 };
 
 const mockCommunitySummarizer = {
@@ -56,6 +57,12 @@ const mockGraphCache = {
 };
 
 const mockHybridSearch = jest.fn();
+const mockLLMProvider = {
+  name: 'mock',
+  supportedModels: ['mock-model'],
+  generate: jest.fn(),
+  generateStream: jest.fn(),
+} as any;
 
 describe('GraphRAGEngine', () => {
   beforeEach(() => {
@@ -104,6 +111,7 @@ describe('GraphRAGEngine', () => {
       mockCommunitySummarizer as any,
       mockGraphCache as any,
       mockHybridSearch,
+      mockLLMProvider,
       config,
     );
   }
@@ -360,6 +368,7 @@ describe('GraphRAGEngine', () => {
 
       const engine = createEngine({ useCommunities: true });
       const result = await engine.retrieve('test query');
+      console.log('DEBUG RESULT:', JSON.stringify(result, null, 2));
 
       expect(result.communitySummaries.length).toBe(1);
       expect(result.graphContext.communityCount).toBe(1);

@@ -1,14 +1,12 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import os from 'os';
-import { fileURLToPath } from 'url';
 import { logger } from '../utils/logger.js';
 import { z } from 'zod';
 
 dotenv.config();
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = path.resolve(__dirname, '../..');
+const PROJECT_ROOT = process.cwd();
 
 const validLLMProviders = ['openai', 'anthropic', 'ollama', 'minimax', 'github', 'groq', 'mistral', 'nvidia'] as const;
 const validEmbeddingProviders = ['minimax', 'openai', 'voyage', 'none'] as const;
@@ -102,6 +100,11 @@ const ConfigSchema = z.object({
   compactPreserveFileAttachments: z.coerce.boolean().default(true),
   compactMaxFileAttachmentBytes: z.coerce.number().min(1024).max(102400).catch(51200).default(51200),
 
+  // LLM Cache
+  llmCacheEnabled: z.coerce.boolean().default(true),
+  llmCacheTtlHours: z.coerce.number().min(1).max(720).catch(24).default(24),
+  llmCacheMaxEntries: z.coerce.number().min(10).max(100000).catch(1000).default(1000),
+
   // Agentic RAG
   agenticRAGEnabled: z.coerce.boolean().default(true),
   agenticRAGMaxHops: z.coerce.number().min(1).max(5).default(3),
@@ -175,6 +178,12 @@ export function loadConfig(): AppConfig {
         compactPreserveRecentMessages: process.env.COMPACT_PRESERVE_RECENT_MESSAGES,
         compactPreserveFileAttachments: process.env.COMPACT_PRESERVE_FILE_ATTACHMENTS,
         compactMaxFileAttachmentBytes: process.env.COMPACT_MAX_FILE_ATTACHMENT_BYTES,
+
+        // Agentic RAG
+        // LLM Cache
+        llmCacheEnabled: process.env.LLM_CACHE_ENABLED,
+        llmCacheTtlHours: process.env.LLM_CACHE_TTL_HOURS,
+        llmCacheMaxEntries: process.env.LLM_CACHE_MAX_ENTRIES,
 
         // Agentic RAG
         agenticRAGEnabled: process.env.AGENTIC_RAG_ENABLED,

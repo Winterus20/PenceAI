@@ -13,6 +13,7 @@ import { MessageRouter } from '../router/index.js';
 import type { SemanticRouter } from '../router/semantic.js';
 import type { BackgroundWorker } from '../autonomous/index.js';
 import { logger, runWithTraceId } from '../utils/logger.js';
+import { logRingBuffer } from '../utils/logRingBuffer.js';
 import { processAttachments, type WebSocketAttachment } from './attachmentProcessor.js';
 
 /**
@@ -66,6 +67,16 @@ export function resolveWebUserName(candidate: unknown): string {
 
 export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void {
     const { memory, agent, semanticRouter, autonomousWorker, broadcastStats } = deps;
+
+    // --- Live Log Broadcasting ---
+    logRingBuffer.on('log', (entry) => {
+      const payload = JSON.stringify({ type: 'sys_log', entry });
+      wss.clients.forEach((client) => {
+        if ((client as WebSocket).readyState === WebSocket.OPEN) {
+          client.send(payload);
+        }
+      });
+    });
 
     // --- Keep-Alive Ping/Pong ---
     const keepAliveInterval = setInterval(() => {

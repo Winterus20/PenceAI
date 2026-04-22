@@ -9,8 +9,7 @@ import { MCPServerCatalogEntry } from './marketplace-types.js';
 import { MCPServerConfig } from './types.js';
 import { logger } from '../../utils/logger.js';
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import { validateRegistryCommand, sanitizeRegistryUrl } from './command-validator.js';
 
 // ============================================================
@@ -48,9 +47,7 @@ interface RegistryResponse {
   servers?: RegistryServerResponse[];
 }
 
-// __dirname equivalent for ESM
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const PROJECT_ROOT = process.cwd();
 
 /**
  * Local catalog'dan server'ları yükle.
@@ -61,12 +58,12 @@ export function loadLocalCatalog(): MCPServerCatalogEntry[] {
   try {
     // __dirname compiled JS dosyasının dizinini gösterir (dist/agent/mcp veya src/agent/mcp)
     // JSON dosyası aynı dizinde olmalı
-    let catalogPath = join(__dirname, 'marketplace-catalog.json');
+    // Production build output (dist/agent/mcp)
+    let catalogPath = join(PROJECT_ROOT, 'dist', 'agent', 'mcp', 'marketplace-catalog.json');
     
-    // Dosya yoksa, project root'tan source dizininde dene (tsx development mode için)
+    // Development source directory
     if (!existsSync(catalogPath)) {
-      const projectRoot = join(__dirname, '..', '..', '..');
-      catalogPath = join(projectRoot, 'src', 'agent', 'mcp', 'marketplace-catalog.json');
+      catalogPath = join(PROJECT_ROOT, 'src', 'agent', 'mcp', 'marketplace-catalog.json');
     }
     
     if (!existsSync(catalogPath)) {

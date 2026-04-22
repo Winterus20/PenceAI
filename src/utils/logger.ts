@@ -6,6 +6,8 @@ import fs from 'fs';
 import os from 'os';
 import { platform } from 'os';
 import { execSync } from 'child_process';
+import { logRingBuffer } from './logRingBuffer.js';
+import type { LogEntry } from './logRingBuffer.js';
 
 // Jest CommonJS ve ESM uyumluluğu: process.cwd() kullan
 const PROJECT_ROOT = process.cwd();
@@ -112,6 +114,30 @@ export const logger = pino(
       const context = asyncLocalStorage.getStore();
       return context ? { traceId: context.traceId } : {};
     },
+    hooks: {
+      logMethod(inputArgs, method, level) {
+        let logObj: Record<string, unknown> = {};
+        let msg = '';
+
+        if (typeof inputArgs[0] === 'object' && inputArgs[0] !== null) {
+          logObj = inputArgs[0] as Record<string, unknown>;
+          msg = typeof inputArgs[1] === 'string' ? inputArgs[1] : String(inputArgs[1] || '');
+        } else if (typeof inputArgs[0] === 'string') {
+          msg = inputArgs[0];
+        }
+
+        logRingBuffer.addLog({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          timestamp: new Date().toISOString(),
+          level: (pino.levels.labels[level] as LogEntry['level']) || 'info',
+          msg,
+          traceId: logObj.traceId as string | undefined,
+          ...logObj,
+        });
+
+        return method.apply(this, inputArgs);
+      }
+    }
   },
   transport
 );

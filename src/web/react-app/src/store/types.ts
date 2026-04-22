@@ -80,7 +80,7 @@ export interface ConfirmRequest {
   description?: string;
 }
 
-export type ActiveView = 'chat' | 'channels' | 'memory' | 'settings' | 'mcp-marketplace' | 'metrics';
+export type ActiveView = 'chat' | 'channels' | 'memory' | 'settings' | 'mcp-marketplace' | 'metrics' | 'logs';
 export type Theme = 'light' | 'dark';
 
 export interface CanvasArtifact {

@@ -7,6 +7,8 @@ export { GitHubProvider } from './github.js';
 export { GroqProvider } from './groq.js';
 export { MistralProvider } from './mistral.js';
 export { NvidiaProvider } from './nvidia.js';
+export { CachedLLMProvider } from './cachedProvider.js';
+export { LLMCacheService, type LLMCacheConfig, type LLMCacheStats } from './llmCache.js';
 
 import { LLMProviderFactory } from './provider.js';
 import { OpenAIProvider } from './openai.js';

@@ -1,14 +1,20 @@
 import { useEffect, lazy, Suspense } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { ChatWindow } from './components/chat/ChatWindow';
-import { ChannelsView } from './components/chat/ChannelsView';
 import { useAgentStore } from './store/agentStore';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { QueryProvider } from './providers/QueryProvider';
 
-// Lazy load MCP Marketplace and Metrics Page
+// Lazy load views — sadece girildiğinde yüklenir, ilk açılış hızlanır
+// ChatWindow eager yüklenir (default view, her zaman ilk açılan sayfa)
+const ChannelsView = lazy(() => import('./components/chat/ChannelsView').then(m => ({ default: m.ChannelsView })));
 const MCPMarketplace = lazy(() => import('./components/mcp/MCPMarketplace'));
 const MetricsPage = lazy(() => import('./components/observability/MetricsPage'));
+const SystemLogsView = lazy(() => import('./components/SystemLogsView'));
+
+const SuspenseFallback = () => (
+  <div className="flex items-center justify-center h-full text-muted-foreground">Yükleniyor...</div>
+);
 
 function App() {
   const activeView = useAgentStore((state) => state.activeView);
@@ -18,23 +24,17 @@ function App() {
     root.classList.add('dark');
   }, []);
 
-  // View bazlı render
+  // View bazlı render — chat eager, diğerleri lazy
   const renderView = () => {
     switch (activeView) {
       case 'channels':
-        return <ChannelsView />;
+        return <Suspense fallback={<SuspenseFallback />}><ChannelsView /></Suspense>;
       case 'mcp-marketplace':
-        return (
-          <Suspense fallback={<div className="flex items-center justify-center h-full text-muted-foreground">Yükleniyor...</div>}>
-            <MCPMarketplace />
-          </Suspense>
-        );
+        return <Suspense fallback={<SuspenseFallback />}><MCPMarketplace /></Suspense>;
       case 'metrics':
-        return (
-          <Suspense fallback={<div className="flex items-center justify-center h-full text-muted-foreground">Yükleniyor...</div>}>
-            <MetricsPage />
-          </Suspense>
-        );
+        return <Suspense fallback={<SuspenseFallback />}><MetricsPage /></Suspense>;
+      case 'logs':
+        return <Suspense fallback={<SuspenseFallback />}><SystemLogsView /></Suspense>;
       case 'chat':
       default:
         return <ChatWindow />;

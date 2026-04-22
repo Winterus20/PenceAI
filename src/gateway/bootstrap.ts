@@ -61,15 +61,17 @@ export function createDashboardAuthMiddleware(dashboardPassword?: string): Reque
     };
 }
 
-export function resolveGatewayPublicDir(currentDir: string): string {
+export function resolveGatewayPublicDir(projectRoot?: string): string {
+  const root = projectRoot || process.cwd();
+
   // React build çıktısı (dist/web/public)
-  const reactBuildDir = path.join(currentDir, '../../dist/web/public');
+  const reactBuildDir = path.join(root, 'dist/web/public');
   if (fs.existsSync(reactBuildDir)) {
     return reactBuildDir;
   }
 
   // Fallback: Kaynak dizindeki React public klasörü (development mode)
-  const reactPublicDir = path.join(currentDir, '../web/react-app/public');
+  const reactPublicDir = path.join(root, 'src/web/react-app/public');
   if (fs.existsSync(reactPublicDir)) {
     return reactPublicDir;
   }

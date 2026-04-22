@@ -2,6 +2,7 @@ import type { MemoryRow } from '../memory/types.js';
 import type { PromptContextBundle } from '../memory/manager/types.js';
 import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
 import { GraphRAGConfigManager } from '../memory/graphRAG/config.js';
+import { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
 import { logger } from '../utils/index.js';
 
 export interface GraphRAGRetrieveResult {
@@ -12,13 +13,16 @@ export interface GraphRAGRetrieveResult {
     } | null;
     finalRelevantMemories: MemoryRow[];
     perfTimingGraphRAG: number | null;
+    perfTimingShadow: number | null;
 }
 
 export class GraphRAGManager {
     private engine?: GraphRAGEngine;
+    private shadowMode?: ShadowMode;
 
-    setEngine(engine: GraphRAGEngine): void {
+    setEngine(engine: GraphRAGEngine, shadow?: ShadowMode): void {
         this.engine = engine;
+        this.shadowMode = shadow;
         logger.info('[GraphRAGManager] Engine connected');
     }
 
@@ -38,11 +42,30 @@ export class GraphRAGManager {
                 graphRAGResult: null,
                 finalRelevantMemories: relevantMemories,
                 perfTimingGraphRAG: null,
+                perfTimingShadow: null,
             };
         }
 
         let graphRAGResult: GraphRAGRetrieveResult['graphRAGResult'] = null;
         let perfTimingGraphRAG: number | null = null;
+        let perfTimingShadow: number | null = null;
+
+        // Shadow mode: run shadow query instead of normal retrieval
+        if (config.shadowMode && this.shadowMode) {
+            const shadowStart = Date.now();
+            try {
+                await this.shadowMode.runShadowQuery(query, relevantMemories);
+            } catch (err) {
+                logger.warn({ err }, '[GraphRAGManager] Shadow query error');
+            }
+            perfTimingShadow = Date.now() - shadowStart;
+            return {
+                graphRAGResult: null,
+                finalRelevantMemories: relevantMemories,
+                perfTimingGraphRAG: null,
+                perfTimingShadow,
+            };
+        }
 
         if (contextBundle.graphRAG && contextBundle.graphRAG.memories.length > 0) {
             graphRAGResult = {
@@ -127,6 +150,7 @@ export class GraphRAGManager {
             graphRAGResult,
             finalRelevantMemories,
             perfTimingGraphRAG,
+            perfTimingShadow,
         };
     }
 

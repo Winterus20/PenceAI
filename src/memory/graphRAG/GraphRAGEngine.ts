@@ -578,7 +578,17 @@ export class GraphRAGEngine {
         return { success: true, result: { communities: [], cacheHit: false } };
       }
 
+      // Local community detection — summarization için DB'ye persist et
       const detectionResult = this.communityDetector.detectLocalCommunity(expandedNodeIds, config.maxHops);
+
+      // Yeterli node yoksa veya community oluşmadıysa graceful boş dön
+      if (detectionResult.length === 0) {
+        logger.debug('[GraphRAGEngine] No communities detected in local subgraph');
+        return { success: true, result: { communities: [], cacheHit: false } };
+      }
+
+      // Community'leri DB'ye kaydet (summarizer'ın loadCommunity/loadChildSummaries çalışması için)
+      this.communityDetector.saveCommunities(detectionResult, false);
 
       return {
         success: true,
@@ -618,10 +628,10 @@ export class GraphRAGEngine {
     try {
       await this.checkTimeout(startTime, config.timeoutMs, 'summary');
 
-      const summaries: CommunitySummary[] = [];
+      // İlk 3 community için summary getir/oluştur — paralel çalıştır
+      const communitiesToSummarize = community.communities.slice(0, 3);
 
-      // İlk 3 community için summary getir/oluştur
-      for (const comm of community.communities.slice(0, 3)) {
+      const summaryPromises = communitiesToSummarize.map(async (comm) => {
         let summary = this.communitySummarizer.getSummary(comm.id);
 
         // On-demand generation: Cache'de yoksa oluştur
@@ -632,10 +642,18 @@ export class GraphRAGEngine {
           summary = await this.communitySummarizer.summarizeCommunity(comm.id);
         }
 
-        if (summary) {
-          summaries.push(summary);
-        }
-      }
+        return summary;
+      });
+
+      // allSettled: tek bir community başarısız olsa bile diğerleri korunur
+      const settled = await Promise.allSettled(summaryPromises);
+
+      const summaries: CommunitySummary[] = settled
+        .filter(
+          (r): r is PromiseFulfilledResult<CommunitySummary> =>
+            r.status === 'fulfilled' && r.value != null,
+        )
+        .map(r => r.value);
 
       return {
         success: true,
