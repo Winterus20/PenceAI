@@ -3,6 +3,7 @@ import { LLMProvider, type ChatOptions, TOOL_CALL_CLEAR_SIGNAL } from './provide
 import type { LLMMessage, LLMResponse, ToolCall } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
 import { extractThinkingFromTags } from '../utils/thinkTags.js';
+import { LLMError } from '../errors/LLMError.js';
 
 export class AnthropicProvider extends LLMProvider {
     readonly name = 'anthropic';
@@ -16,7 +17,7 @@ export class AnthropicProvider extends LLMProvider {
         super();
         const config = getConfig();
         if (!config.anthropicApiKey) {
-            throw new Error('ANTHROPIC_API_KEY ortam değişkeni ayarlanmamış');
+            throw new LLMError('ANTHROPIC_API_KEY ortam değişkeni ayarlanmamış');
         }
         this.client = new Anthropic({ apiKey: config.anthropicApiKey });
     }

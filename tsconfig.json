@@ -16,7 +16,8 @@
         "declaration": true,
         "declarationMap": true,
         "sourceMap": true,
-        "ignoreDeprecations": "5.0",
+        "noUncheckedIndexedAccess": true,
+        "noImplicitReturns": true,
         "baseUrl": ".",
         "paths": {
             "@/*": [

@@ -4,6 +4,7 @@ import type { LLMMessage, LLMResponse, ToolCall, LLMToolDefinition, ImageBlock }
 import { getConfig } from '../gateway/config.js';
 import { extractThinkingFromTags } from '../utils/thinkTags.js';
 import { logger } from '../utils/logger.js';
+import { LLMError } from '../errors/LLMError.js';
 
 interface NormalizedMessage {
     role: 'user' | 'assistant';
@@ -285,7 +286,7 @@ export class OpenAIProvider extends LLMProvider {
         const config = getConfig();
         const apiKey = customApiKey || config.openaiApiKey;
         if (!apiKey) {
-            throw new Error(customApiKey ? 'API Key sağlanmadı (GitHub v.b)' : 'OPENAI_API_KEY ortam değişkeni ayarlanmamış');
+            throw new LLMError(customApiKey ? 'API Key sağlanmadı (GitHub v.b)' : 'OPENAI_API_KEY ortam değişkeni ayarlanmamış');
         }
         const baseClient = new OpenAI({
             apiKey,
@@ -405,7 +406,7 @@ export class OpenAIProvider extends LLMProvider {
 
         const toolCalls = hasToolCalls ? Array.from(toolCallsAccum.entries())
             .sort(([a], [b]) => a - b)
-            .map(([, tc]: [number, any]) => ({ id: tc.id, name: tc.name, arguments: (() => { try { return JSON.parse(tc.argsStr || '{}'); } catch { return {}; } })() })) : undefined;
+            .map(([, tc]: [number, { id: string; name: string; argsStr: string }]) => ({ id: tc.id, name: tc.name, arguments: (() => { try { return JSON.parse(tc.argsStr || '{}'); } catch { return {}; } })() })) : undefined;
 
         let thinkingContent: string | undefined;
         if (options?.thinking) {

@@ -25,6 +25,7 @@ import { SubAgentManager } from '../autonomous/curiosityEngine.js';
 import { SemanticRouter } from '../router/semantic.js';
 import { logger, runWithTraceId } from '../utils/index.js';
 import { registerRoutes } from './routes.js';
+import { errorHandler } from './errorHandler.js';
 import { setupWebSocket } from './websocket.js';
 import { registerLocalIntents } from './intents.js';
 import { registerSystemJobs } from './jobs/systemTasks.js';
@@ -115,8 +116,9 @@ async function main() {
     let llm: LLMProvider;
     try {
         llm = bootstrapLLM(database.getDb());
-    } catch (err: any) {
-        logger.error(`[Gateway] ❌ LLM Provider başlatılamadı: ${err.message}`);
+    } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.error(`[Gateway] ❌ LLM Provider başlatılamadı: ${errMsg}`);
         logger.error(`[Gateway] 💡 .env dosyanızda API anahtarını ayarlayın. Kopya: cp .env.example .env`);
         process.exit(1);
     }
@@ -293,6 +295,8 @@ async function main() {
 
     registerRoutes(app, { memory, llm, router, agent, broadcastStats });
 
+    app.use(errorHandler);
+
     app.get('*', (_req, res) => {
         res.sendFile(path.join(publicDir, 'index.html'));
     });
@@ -314,10 +318,11 @@ async function main() {
                     });
                 }
             });
-        } catch (err: any) {
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
             logger.error({ err }, `[Gateway] Mesaj işleme hatası`);
             await router.sendResponse(message.channelType, message.channelId, {
-                content: `⚠️ Hata: ${err.message}`,
+                content: `⚠️ Hata: ${errMsg}`,
             });
         }
     });

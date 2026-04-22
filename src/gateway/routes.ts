@@ -10,6 +10,7 @@ import { LLMProviderFactory } from '../llm/index.js';
 import type { LLMProvider } from '../llm/provider.js';
 import { readEnv, secureUpdateEnv } from './envUtils.js';
 import { reloadConfig } from './config.js';
+import { AppError } from '../errors/AppError.js';
 import { BASE_SYSTEM_PROMPT } from '../agent/prompt.js';
 import { logger } from '../utils/logger.js';
 import { logRingBuffer } from '../utils/logRingBuffer.js';
@@ -127,7 +128,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       });
     });
 
-    app.post('/api/settings', async (req, res) => {
+    app.post('/api/settings', async (req, res, next) => {
     const body = req.body;
     const updates: Record<string, string> = {};
   
@@ -185,30 +186,27 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       } else {
         res.json({ success: true, requiresRestart: false });
       }
-    } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      logger.error({ err }, '[Gateway] .env güncellemesi başarısız oldu');
-      res.status(500).json({ error: '.env dosyası güncellenemedi.' });
+    } catch (error) {
+      next(error instanceof Error ? error : new AppError(String(error), 500));
     }
   });
 
     // ============ Onboarding Bio İşleme API ============
 
-    app.post('/api/onboarding/process', validateBody(OnboardingSchema), async (req, res) => {
+    app.post('/api/onboarding/process', validateBody(OnboardingSchema), async (req, res, next) => {
         const { bio, userName } = req.body;
         try {
             const jobId = `onboard_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
             // Arka planda derin analiz başlat (non-blocking)
-            agent.processRawTextForMemories(bio, userName || 'Kullanıcı').then(() => {
+            void agent.processRawTextForMemories(bio, userName || 'Kullanıcı').then(() => {
                 broadcastStats();
             }).catch(err => {
                 logger.error({ err }, '[API] Onboarding bio extraction failed in background');
             });
 
             res.json({ success: true, jobId, message: 'Bellek çıkarımı arka planda başlatıldı' });
-        } catch (error: unknown) {
-            const err = error instanceof Error ? error : new Error(String(error));
-            res.status(500).json({ error: err.message });
+        } catch (error) {
+            next(error instanceof Error ? error : new AppError(String(error), 500));
         }
     });
 
@@ -235,7 +233,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
 
     // ============ Feedback API ============
   
-    app.post('/api/feedback', validateBody(FeedbackSchema), (req, res) => {
+    app.post('/api/feedback', validateBody(FeedbackSchema), (req, res, next) => {
       const { messageId, conversationId, type, comment } = req.body;
 
       try {
@@ -250,22 +248,19 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         
         logger.info({ messageId, conversationId, type }, '[API] Feedback kaydedildi');
         res.json({ success: true, feedback });
-      } catch (error: unknown) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        logger.error({ err }, '[API] Feedback kaydetme hatası');
-        res.status(500).json({ error: err.message });
+      } catch (error) {
+        next(error instanceof Error ? error : new AppError(String(error), 500));
       }
     });
   
-    app.get('/api/feedback/:conversationId', (req, res) => {
+    app.get('/api/feedback/:conversationId', (req, res, next) => {
       const { conversationId } = req.params;
       
       try {
         const feedbacks = memory.getFeedbacks(conversationId);
         res.json(feedbacks);
-      } catch (error: unknown) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        res.status(500).json({ error: err.message });
+      } catch (error) {
+        next(error instanceof Error ? error : new AppError(String(error), 500));
       }
     });
 
@@ -286,7 +281,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     });
 
     // POST /api/graphrag/advance-phase — Phase'i ilerlet
-    app.post('/api/graphrag/advance-phase', (_req, res) => {
+    app.post('/api/graphrag/advance-phase', (_req, res, next) => {
       try {
         const newPhase = GraphRAGConfigManager.advancePhase();
         res.json({
@@ -294,14 +289,13 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
           phaseName: GraphRAGRolloutPhase[newPhase],
           message: `GraphRAG rollout phase advanced to ${GraphRAGRolloutPhase[newPhase]}`
         });
-      } catch (error: unknown) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        res.status(500).json({ error: err.message });
+      } catch (error) {
+        next(error instanceof Error ? error : new AppError(String(error), 500));
       }
     });
 
     // POST /api/graphrag/set-phase — Belirli bir phase'e set et
-    app.post('/api/graphrag/set-phase', validateBody(GraphRAGSetPhaseSchema), (req, res) => {
+    app.post('/api/graphrag/set-phase', validateBody(GraphRAGSetPhaseSchema), (req, res, next) => {
       const { phase: phaseNum } = req.body;
 
       try {
@@ -311,9 +305,8 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
           phaseName: GraphRAGRolloutPhase[phaseNum],
           message: `GraphRAG rollout phase set to ${GraphRAGRolloutPhase[phaseNum]}`
         });
-      } catch (error: unknown) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        res.status(500).json({ error: err.message });
+      } catch (error) {
+        next(error instanceof Error ? error : new AppError(String(error), 500));
       }
     });
 
@@ -350,28 +343,26 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     // ============ Live Logs API ============
 
     // GET /api/logs — Son log kayıtlarını getir (Ring Buffer)
-    app.get('/api/logs', (req, res) => {
+    app.get('/api/logs', (req, res, next) => {
       try {
         const limit = parseInt(req.query.limit as string) || 1000;
         const logs = logRingBuffer.getLogs(Math.min(limit, 1000));
         res.json({ success: true, logs });
-      } catch (error: unknown) {
-        const err = error as Error;
-        res.status(500).json({ success: false, error: err.message });
+      } catch (error) {
+        next(error instanceof Error ? error : new AppError(String(error), 500));
       }
     });
 
     // ============ Metrics API ============
   
     // GET /api/metrics/all — Tüm metrics'leri getir (limit ile)
-    app.get('/api/metrics/all', validateQuery(MetricsLimitQuerySchema), (req, res) => {
+    app.get('/api/metrics/all', validateQuery(MetricsLimitQuerySchema), (req, res, next) => {
       try {
         const limit = Number(req.query.limit) || 100;
         const metrics = metricsCollector.getAllMetrics(limit);
         res.json({ success: true, metrics });
-      } catch (error: unknown) {
-        const err = error as Error;
-        res.status(500).json({ success: false, error: err.message });
+      } catch (error) {
+        next(error instanceof Error ? error : new AppError(String(error), 500));
       }
     });
   
@@ -379,48 +370,44 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     // otherwise Express matches /metrics/summary as :conversationId="summary" etc.
   
     // GET /api/metrics/summary — Aggrege metrics özeti
-    app.get('/api/metrics/summary', validateQuery(MetricsDaysQuerySchema), (req, res) => {
+    app.get('/api/metrics/summary', validateQuery(MetricsDaysQuerySchema), (req, res, next) => {
       try {
         const days = Number(req.query.days) || 1;
         const summary = metricsCollector.getAggregatedMetrics(days);
         res.json({ success: true, ...summary });
-      } catch (error: unknown) {
-        const err = error as Error;
-        res.status(500).json({ success: false, error: err.message });
+      } catch (error) {
+        next(error instanceof Error ? error : new AppError(String(error), 500));
       }
     });
   
     // GET /api/metrics/provider-stats — Provider bazlı istatistikler
-    app.get('/api/metrics/provider-stats', validateQuery(MetricsDaysQuerySchema), (req, res) => {
+    app.get('/api/metrics/provider-stats', validateQuery(MetricsDaysQuerySchema), (req, res, next) => {
       try {
         const days = Number(req.query.days) || 7;
         const stats = metricsCollector.getProviderStats(days);
         res.json({ success: true, providerStats: stats });
-      } catch (error: unknown) {
-        const err = error as Error;
-        res.status(500).json({ success: false, error: err.message });
+      } catch (error) {
+        next(error instanceof Error ? error : new AppError(String(error), 500));
       }
     });
   
     // GET /api/metrics/error-stats — Hata istatistikleri
-    app.get('/api/metrics/error-stats', (req, res) => {
+    app.get('/api/metrics/error-stats', (req, res, next) => {
       try {
         const stats = metricsCollector.getErrorStats();
         res.json({ success: true, ...stats });
-      } catch (error: unknown) {
-        const err = error as Error;
-        res.status(500).json({ success: false, error: err.message });
+      } catch (error) {
+        next(error instanceof Error ? error : new AppError(String(error), 500));
       }
     });
   
     // GET /api/metrics/:conversationId — Belirli conversation'ın metrics'leri
-    app.get('/api/metrics/:conversationId', (req, res) => {
+    app.get('/api/metrics/:conversationId', (req, res, next) => {
       try {
         const metrics = metricsCollector.getConversationMetrics(req.params.conversationId);
         res.json({ success: true, metrics });
-      } catch (error: unknown) {
-        const err = error as Error;
-        res.status(500).json({ success: false, error: err.message });
+      } catch (error) {
+        next(error instanceof Error ? error : new AppError(String(error), 500));
       }
     });
 

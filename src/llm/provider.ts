@@ -1,6 +1,7 @@
 import type { LLMMessage, LLMToolDefinition, LLMResponse } from '../router/types.js';
 import { getConfig } from '../gateway/config.js';
 import { logger } from '../utils/logger.js';
+import { LLMError } from '../errors/LLMError.js';
 
 /**
  * Streaming sırasında tool call tespit edildiğinde onToken ile gönderilen özel sinyal.
@@ -109,7 +110,7 @@ export class LLMProviderFactory {
     static create(name: string): LLMProvider {
         const factory = this.providers.get(name);
         if (!factory) {
-            throw new Error(`Bilinmeyen LLM provider: ${name}. Mevcut: ${Array.from(this.providers.keys()).join(', ')}`);
+            throw new LLMError(`Bilinmeyen LLM provider: ${name}. Mevcut: ${Array.from(this.providers.keys()).join(', ')}`);
         }
         return factory();
     }
