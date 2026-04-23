@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import os from 'os';
-import { logger } from '../utils/logger.js';
+import { logger, updateLogLevel } from '../utils/logger.js';
 import { z } from 'zod';
 
 dotenv.config();
@@ -226,4 +226,6 @@ export function getConfig(): AppConfig {
 
 export function reloadConfig(): void {
     _config = loadConfig();
+    // Hot-reload log level when config changes
+    updateLogLevel(_config.logLevel);
 }

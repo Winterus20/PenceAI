@@ -235,6 +235,11 @@ export class PenceDatabase {
       CREATE INDEX IF NOT EXISTS idx_messages_conv_role_id ON messages(conversation_id, role, id);
       CREATE INDEX IF NOT EXISTS idx_memories_user ON memories(user_id);
       CREATE INDEX IF NOT EXISTS idx_memories_archived ON memories(is_archived);
+      CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
+      CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
+      CREATE INDEX IF NOT EXISTS idx_memories_conversation ON memories(provenance_conversation_id);
+      CREATE INDEX IF NOT EXISTS idx_memories_review ON memories(is_archived, next_review_at);
+      CREATE INDEX IF NOT EXISTS idx_memories_composite ON memories(is_archived, category, memory_type);
       CREATE INDEX IF NOT EXISTS idx_conversations_channel ON conversations(channel_type, channel_id);
       CREATE INDEX IF NOT EXISTS idx_memory_relations_source ON memory_relations(source_memory_id);
       CREATE INDEX IF NOT EXISTS idx_memory_relations_target ON memory_relations(target_memory_id);

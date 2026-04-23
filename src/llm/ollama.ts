@@ -29,6 +29,11 @@ interface OllamaResponse {
     eval_count?: number;
 }
 
+/** Default request timeout (ms) for Ollama API calls */
+const OLLAMA_TIMEOUT_MS = 30_000;
+/** Streaming timeout (ms) — longer because streams are long-lived */
+const OLLAMA_STREAM_TIMEOUT_MS = 120_000;
+
 export class OllamaProvider extends LLMProvider {
     readonly name = 'ollama';
     readonly supportedModels = ['llama3.3', 'llama3.1', 'mistral', 'codellama', 'deepseek-r1', 'qwen2.5'];
@@ -111,6 +116,7 @@ export class OllamaProvider extends LLMProvider {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
+            signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
         });
 
         if (!res.ok) {
@@ -179,6 +185,7 @@ export class OllamaProvider extends LLMProvider {
 
         const res = await fetch(`${this.baseUrl}/api/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            signal: AbortSignal.timeout(OLLAMA_STREAM_TIMEOUT_MS),
         });
         if (!res.ok) throw new LLMError(`Ollama hatası: ${res.status} ${res.statusText}`);
 

@@ -39,6 +39,15 @@ export interface ReActLoopResult {
     iterations: number;
 }
 
+/** Artımlı token tahmini — karakter bazlı, reduce() yerine incremental */
+function estimateMessageTokensChar(msg: LLMMessage): number {
+    let t = 0;
+    if (msg.content) t += msg.content.length;
+    if (msg.toolCalls) for (const tc of msg.toolCalls) { t += tc.name.length + JSON.stringify(tc.arguments).length; }
+    if (msg.toolResults) for (const tr of msg.toolResults) { t += tr.name.length + tr.result.length; }
+    return t + 4;
+}
+
 export class ReActLoop {
     async execute(input: ReActLoopInput): Promise<ReActLoopResult> {
         const {
@@ -63,6 +72,9 @@ export class ReActLoop {
         let lastDbContent = '';
         let iterations = 0;
 
+        // Artımlı token takibi — her reduce() yerine sadece delta ekle
+        let incrementalCharCount = llmMessages.reduce((sum, msg) => sum + estimateMessageTokensChar(msg), 0);
+
         while (iterations < maxIterations) {
             iterations++;
 
@@ -71,7 +83,7 @@ export class ReActLoop {
                 logger.info(`[Agent] 📊 Context: geçmiş ${contextTokenInfo.pastHistoryTokens} token, kullanıcı mesajı ${contextTokenInfo.userMsgTokens} token, sistem promptu ${contextTokenInfo.systemPromptTokens} token`);
             }
 
-            logger.info(`[Agent] 🧠 LLM çağrılıyor (iterasyon ${iterations})...`);
+            logger.debug(`[Agent] 🧠 LLM çağrılıyor (iterasyon ${iterations})...`);
             onEvent?.({ type: 'iteration', data: { iteration: iterations } });
 
             // Tool definitions'ı her iterasyonda güncelle (MCP araçları dinamik olarak değişebilir)
@@ -188,7 +200,7 @@ export class ReActLoop {
                     onEvent?.({ type: 'thinking', data: { content: thinkingContent } });
                 }
 
-                logger.info(`[Agent] 🔧 ${llmResponse.toolCalls.length} araç çağrılıyor...`);
+                logger.debug(`[Agent] 🔧 ${llmResponse.toolCalls.length} araç çağrılıyor...`);
 
                 // Asistan mesajını ekle — düşünme içeriği LLM geçmişi için <think> ile saklanır
                 const historyContent = thinkingContent
@@ -229,16 +241,13 @@ export class ReActLoop {
                     toolResults,
                 });
 
+                // Artımlı token güncellemesi — sadece yeni eklenen mesajların katkısını hesapla
+                incrementalCharCount += estimateMessageTokensChar(assistantMessage);
+                incrementalCharCount += estimateMessageTokensChar(toolMessage);
+
                 // Context Compaction — tool call'lar token bütçesini aşıyorsa sıkıştır
                 if (compactEngine && compactThreshold > 0) {
-                    const currentTokens = llmMessages.reduce((sum, msg) => {
-                        let t = 0;
-                        if (msg.content) t += msg.content.length;
-                        if (msg.toolCalls) for (const tc of msg.toolCalls) { t += tc.name.length + JSON.stringify(tc.arguments).length; }
-                        if (msg.toolResults) for (const tr of msg.toolResults) { t += tr.name.length + String(tr.result || '').length; }
-                        return sum + t + 4;
-                    }, 0);
-                    const approxTokens = Math.ceil(currentTokens / 4);
+                    const approxTokens = Math.ceil(incrementalCharCount / 4);
 
                     if (approxTokens > compactThreshold) {
                         const config = getConfig();
@@ -265,6 +274,8 @@ export class ReActLoop {
                         if (compactResult.wasCompacted) {
                             llmMessages.length = 0;
                             llmMessages.push(...compactResult.messages);
+                            // Compact sonrası artımlı sayacı yeniden hesapla
+                            incrementalCharCount = llmMessages.reduce((sum, msg) => sum + estimateMessageTokensChar(msg), 0);
                             metricsTracker.recordCompaction({
                                 originalTokens: compactResult.originalTokens,
                                 compactedTokens: compactResult.compactedTokens,

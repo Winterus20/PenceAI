@@ -66,31 +66,59 @@ export interface FeedbackState {
 //  Sabitler
 // ═══════════════════════════════════════════════════════════
 
+/** UrgeFilter yapılandırma seçenekleri — runtime'da değiştirilebilir */
+export interface UrgeFilterConfig {
+    quietHoursStart: number;
+    quietHoursEnd: number;
+    baseThreshold: number;
+    digestThreshold: number;
+    weightRelevance: number;
+    weightTimeSensitivity: number;
+    maxReluctancePenalty: number;
+    maxThresholdAdjustment: number;
+    signalHistorySize: number;
+    signalMaxAgeMs: number;
+}
+
+/** Varsayılan urge filter yapılandırması */
+export const DEFAULT_URGE_CONFIG: Readonly<UrgeFilterConfig> = {
+    quietHoursStart: 2,       // 02:00
+    quietHoursEnd: 8,         // 08:00
+    baseThreshold: 0.45,
+    digestThreshold: 0.25,
+    weightRelevance: 0.6,
+    weightTimeSensitivity: 0.4,
+    maxReluctancePenalty: 0.5,
+    maxThresholdAdjustment: 0.3,
+    signalHistorySize: 20,
+    signalMaxAgeMs: 7 * 24 * 60 * 60 * 1000,
+};
+
 /** Sessiz saatler (gece) — bu aralıkta mesaj atılmaz */
-export const QUIET_HOURS_START = 2;   // 02:00
-export const QUIET_HOURS_END = 8;     // 08:00
+export const QUIET_HOURS_START = DEFAULT_URGE_CONFIG.quietHoursStart;
+export const QUIET_HOURS_END = DEFAULT_URGE_CONFIG.quietHoursEnd;
 
 /** Baz dürtü eşiği — bu skor geçilirse aksiyon al */
-export const BASE_THRESHOLD = 0.45;
+export const BASE_THRESHOLD = DEFAULT_URGE_CONFIG.baseThreshold;
 
 /** Digest eşiği — bu skor ile ana eşik arasındaysa günlük özete ekle */
-export const DIGEST_THRESHOLD = 0.25;
+export const DIGEST_THRESHOLD = DEFAULT_URGE_CONFIG.digestThreshold;
 
 /** Skor ağırlıkları */
-export const WEIGHT_RELEVANCE = 0.6;
-export const WEIGHT_TIME_SENSITIVITY = 0.4;
+export const WEIGHT_RELEVANCE = DEFAULT_URGE_CONFIG.weightRelevance;
+export const WEIGHT_TIME_SENSITIVITY = DEFAULT_URGE_CONFIG.weightTimeSensitivity;
 
 /** Maksimum isteksizlik cezası */
-export const MAX_RELUCTANCE_PENALTY = 0.5;
+export const MAX_RELUCTANCE_PENALTY = DEFAULT_URGE_CONFIG.maxReluctancePenalty;
 
 /** Maksimum eşik ayarı (feedback loop sınırı) */
-export const MAX_THRESHOLD_ADJUSTMENT = 0.3;
+export const MAX_THRESHOLD_ADJUSTMENT = DEFAULT_URGE_CONFIG.maxThresholdAdjustment;
 
 /** Sinyal geçmişi pencere boyutu */
-export const SIGNAL_HISTORY_SIZE = 20;
+export const SIGNAL_HISTORY_SIZE = DEFAULT_URGE_CONFIG.signalHistorySize;
 
 /** Maksimum yaş için feedback sinyalleri (7 gün ms cinsinden) */
-export const SIGNAL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export const SIGNAL_MAX_AGE_MS = DEFAULT_URGE_CONFIG.signalMaxAgeMs;
 
 // ═══════════════════════════════════════════════════════════
 //  Saf Fonksiyonlar — Hard Logic (Mutlak Kurallar)

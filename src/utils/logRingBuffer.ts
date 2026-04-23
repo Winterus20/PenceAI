@@ -9,7 +9,8 @@ export interface LogEntry {
   [key: string]: unknown;
 }
 
-const MAX_SIZE = 1000;
+/** Ring buffer max size — configurable via LOG_RING_BUFFER_SIZE env, default 1000 */
+const MAX_SIZE = parseInt(process.env.LOG_RING_BUFFER_SIZE || '1000', 10) || 1000;
 
 /**
  * In-memory ring buffer for recent logs.

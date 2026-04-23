@@ -28,8 +28,22 @@ export interface PreparedContext {
 export class ContextPreparer {
     private memory: MemoryManager;
 
+    /** System prompt encoding cache — aynı prompt tekrar encode edilmesin */
+    private _cachedSystemPromptHash: string = '';
+    private _cachedSystemPromptTokens: number = 0;
+
     constructor(memory: MemoryManager) {
         this.memory = memory;
+    }
+
+    /** Basit hash fonksiyonu — string'ten hızlı fingerprint */
+    private simpleHash(str: string): string {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = ((hash << 5) - hash) + str.charCodeAt(i);
+            hash |= 0;
+        }
+        return hash.toString(36);
     }
 
     getMemoryRelationsForPrompt(memories: Array<{ id: number; content: string }>): Array<{ source: string; target: string; relation: string; description: string }> {
@@ -173,7 +187,17 @@ export class ContextPreparer {
             }
         }
 
-        const systemPromptTokens = encode(finalSystemPrompt).length;
+        // System prompt token cache — prompt değişmediyse encode() çağrısını atla
+        const promptHash = this.simpleHash(finalSystemPrompt);
+        let systemPromptTokens: number;
+        if (promptHash === this._cachedSystemPromptHash) {
+            systemPromptTokens = this._cachedSystemPromptTokens;
+        } else {
+            systemPromptTokens = encode(finalSystemPrompt).length;
+            this._cachedSystemPromptHash = promptHash;
+            this._cachedSystemPromptTokens = systemPromptTokens;
+        }
+
         const userMsgContent = typeof params.messageContent.content === 'string' ? params.messageContent.content : '';
         const userMsgTokens = encode(userMsgContent).length;
         const historyText = llmMessages

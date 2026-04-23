@@ -15,7 +15,7 @@ import { PenceDatabase } from '../memory/database.js';
 import { MemoryManager } from '../memory/manager.js';
 import { MessageRouter } from '../router/index.js';
 import type { LLMProvider} from '../llm/index.js';
-import { registerAllProviders, LLMProviderFactory, LLMCacheService, CachedLLMProvider } from '../llm/index.js';
+import { registerAllProviders, LLMProviderFactory, LLMCacheService, CachedLLMProvider, ResilientLLMProvider, buildDefaultFallbackChain } from '../llm/index.js';
 import { AgentRuntime } from '../agent/runtime.js';
 import { createEmbeddingProvider } from '../memory/embeddings.js';
 import { initializeMCP, shutdownMCP } from '../agent/mcp/runtime.js';
@@ -85,19 +85,26 @@ function bootstrapLLM(db: Database.Database): LLMProvider {
     }
 
     // Wrap with LLM prompt cache (SQLite-backed MD5(Prompt+Model) → Response)
+    let cachedProvider: LLMProvider = rawProvider;
     if (config.llmCacheEnabled) {
         const cache = new LLMCacheService(db, {
             enabled: true,
             ttlHours: config.llmCacheTtlHours,
             maxEntries: config.llmCacheMaxEntries,
         });
-        const cachedProvider = new CachedLLMProvider(rawProvider, cache, config.defaultLLMProvider);
+        cachedProvider = new CachedLLMProvider(rawProvider, cache, config.defaultLLMProvider);
         logger.info(`[Gateway] 💾 LLM Cache enabled (TTL=${config.llmCacheTtlHours}h, maxEntries=${config.llmCacheMaxEntries})`);
-        return cachedProvider;
+    } else {
+        logger.info(`[Gateway] 💾 LLM Cache disabled`);
     }
 
-    logger.info(`[Gateway] 💾 LLM Cache disabled`);
-    return rawProvider;
+    // Wrap with Circuit Breaker + Fallback Chain
+    const fallbackChain = buildDefaultFallbackChain(cachedProvider);
+    const resilientProvider = new ResilientLLMProvider(fallbackChain);
+    const circuitNames = fallbackChain.map(e => `${e.provider.name}(P${e.priority})`).join(' → ');
+    logger.info(`[Gateway] 🛡️ Resilient LLM chain: ${circuitNames}`);
+
+    return resilientProvider;
 }
 
 async function main() {

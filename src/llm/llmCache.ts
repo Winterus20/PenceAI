@@ -211,9 +211,18 @@ export class LLMCacheService {
      * The prompt is serialized as JSON of the messages array + optional
      * system prompt so that identical logical inputs produce the same key.
      */
+    /** Normalize whitespace in plain text: collapse runs of whitespace into a single space, trim edges.
+     *  Only safe for plain text (e.g. systemPrompt). NOT for JSON strings — would corrupt structure.
+     */
+    private static normalizePlainText(str: string): string {
+        return str.replace(/\s+/g, ' ').trim();
+    }
+
     private computeKey(messagesJson: string, model: string, systemPrompt?: string): string {
-        // Normalize: trim whitespace, sort-ish stable serialization
-        const normalized = (systemPrompt ? systemPrompt + '\n' : '') + messagesJson;
+        // Normalize whitespace only in systemPrompt (plain text).
+        // messagesJson is structured JSON — whitespace-normalizing it would cause false cache hits.
+        const normalizedSystem = systemPrompt ? LLMCacheService.normalizePlainText(systemPrompt) : '';
+        const normalized = (normalizedSystem ? normalizedSystem + '\n' : '') + messagesJson;
         return createHash('md5').update(normalized + '|' + model).digest('hex');
     }
 

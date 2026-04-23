@@ -24,6 +24,12 @@ export default {
         '/node_modules/',
         '/dist/',
     ],
+    // Paralellik ve performans ayarları
+    maxWorkers: process.env.CI ? 2 : '50%',
+    testTimeout: 10000,
+    slowTestThreshold: 5,
+    cacheDirectory: '<rootDir>/.jest-cache',
+
     collectCoverageFrom: [
         'src/**/*.ts',
         'src/web/react-app/src/**/*.ts',

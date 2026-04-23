@@ -32,8 +32,9 @@ export class MemoryExtractor {
 
     /** Embedding cache — bellek ID'ye göre LRU cache (TTL: 5 dk, max: 1000) */
     private embeddingCache = new LRUCache<string, number[]>({ maxSize: 1000, ttlMs: 300_000 });
-    /** Query embedding cache — aynı query embedding'i tekrar hesaplanmasın (TTL: 1 saat) */
-    private queryEmbeddingCache = new LRUCache<string, number[]>({ maxSize: 500, ttlMs: 3_600_000 });
+    // NOTE: Query embedding cache kaldırıldı — embedding hesaplama MemoryManager.semanticSearch()
+    // içinde yapılıyor, bu katmanda intercept edilemiyor. MemoryManager API'si embedding callback'i
+    // kabul edecek şekilde genişletildiğinde queryEmbeddingCache buraya eklenebilir.
 
     /** Dedup eşiği — MemoryStore'daki 0.80 eşiğiyle uyumlu */
     static readonly DEDUP_SIMILARITY_THRESHOLD = 0.80;
@@ -62,8 +63,10 @@ export class MemoryExtractor {
     }
 
     /**
-     * Query embedding cache'lenmiş getirici.
-     * Aynı query string için embedding'i 1 saat boyunca tekrar hesaplamaz.
+     * NOTE: queryEmbeddingCache şu anda kullanılmıyor çünkü embedding hesaplama
+     * MemoryManager.semanticSearch() içinde yapılıyor ve bu katmanda intercept
+     * edilemiyor. MemoryManager API'si embedding callback'i kabul edecek şekilde
+     * genişletildiğinde bu cache devreye alınabilir.
      */
 
     createMergeFn(userName: string = 'Kullanıcı'): (oldContent: string, newContent: string) => Promise<string> {

@@ -17,6 +17,9 @@ interface MiniMaxDelta {
  * Modeller: MiniMax-M2.5, MiniMax-M2.1, MiniMax-M2, vb.
  * Docs: https://platform.minimax.io/docs/api-reference/text-openai-api
  */
+/** Default request timeout (ms) for MiniMax API calls */
+const MINIMAX_TIMEOUT_MS = 30_000;
+
 export class MiniMaxProvider extends LLMProvider {
     readonly name = 'minimax';
     readonly supportedModels = [
@@ -56,6 +59,8 @@ export class MiniMaxProvider extends LLMProvider {
         this.client = new OpenAI({
             apiKey: config.minimaxApiKey,
             baseURL: 'https://api.minimax.io/v1',
+            timeout: MINIMAX_TIMEOUT_MS,
+            maxRetries: 1,
         });
     }
 

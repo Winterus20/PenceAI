@@ -163,6 +163,17 @@ export function flush(): void {
 }
 
 /**
+ * Runtime log level hot-reload — LOG_LEVEL env değiştiğinde pino level'ını günceller.
+ * reloadConfig() tarafından çağrılır.
+ */
+export function updateLogLevel(newLevel: string): void {
+  const validLevels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
+  const level = validLevels.includes(newLevel) ? newLevel : 'info';
+  logger.level = level;
+  logger.info({ newLevel: level }, '[Logger] Log level hot-reloaded');
+}
+
+/**
  * Belirli bir traceID (veya uuid ile rastgele üretilecek) içerecek şekilde context çalıştırır.
  *
  * @param action — Çalıştırılacak fonksiyon

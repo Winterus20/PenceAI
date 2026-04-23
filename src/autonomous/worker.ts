@@ -49,6 +49,21 @@ export class BackgroundWorker {
         logger.info('[Worker] Autonomous background worker stopped.');
     }
 
+    /**
+     * Worker'ı tamamen yok eder — tüm kaynakları serbest bırakır.
+     * stop()'tan farklı olarak queue'yu da temizler ve
+     * referansları sıfırlar (memory leak önleme).
+     */
+    public dispose(): void {
+        this.stop();
+        this.queue.clear();
+        this.activeTaskId = null;
+        this.lastActivityAt = 0;
+        this.isRunning = false;
+        this.abortController = null;
+        logger.info('[Worker] Autonomous background worker disposed — all resources released.');
+    }
+
     /** Update idle threshold at runtime (e.g. based on user activity feedback). */
     public updateIdleThreshold(ms: number): void {
         if (ms > 0) {

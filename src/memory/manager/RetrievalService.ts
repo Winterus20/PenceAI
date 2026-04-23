@@ -103,6 +103,40 @@ export class RetrievalService {
   }
 
   /**
+   * Query embedding'i cache'li şekilde getirir.
+   * Aynı query 1 saat boyunca tekrar embed edilmez (embedding_cache tablosu).
+   */
+  private async getQueryEmbedding(query: string): Promise<number[]> {
+    if (!this.deps.embeddingProvider) throw new Error('No embedding provider');
+
+    const queryHash = crypto.createHash('md5').update(query).digest('hex');
+
+    // Cache hit kontrolü
+    const cached = this.deps.db.prepare(
+      'SELECT embedding FROM embedding_cache WHERE query_hash = ? AND created_at > datetime(\'now\', \'-1 hour\')'
+    ).get(queryHash) as { embedding: Buffer } | undefined;
+
+    if (cached) {
+      return Array.from(new Float32Array(cached.embedding.buffer.slice(cached.embedding.byteOffset, cached.embedding.byteOffset + cached.embedding.byteLength)));
+    }
+
+    // Cache miss — embed hesapla
+    const [queryEmbedding] = await this.deps.embeddingProvider.embed([query]);
+    if (!queryEmbedding) throw new Error('Embedding failed');
+
+    // Cache'e kaydet
+    try {
+      this.deps.db.prepare(
+        'INSERT OR REPLACE INTO embedding_cache (query_hash, embedding) VALUES (?, ?)'
+      ).run(queryHash, Buffer.from(new Float32Array(queryEmbedding).buffer));
+    } catch (err) {
+      logger.warn({ msg: '[EmbeddingCache] Failed to save to cache', err });
+    }
+
+    return queryEmbedding;
+  }
+
+  /**
    * Semantik benzerlik araması — sorgu metnini embed eder,
    * sqlite-vec ile cosine similarity hesaplar.
    */
@@ -110,35 +144,8 @@ export class RetrievalService {
     if (!this.deps.embeddingProvider) return [];
 
     try {
-      // Embedding cache kontrolü
-      const queryHash = crypto.createHash('md5').update(query).digest('hex');
-      let queryEmbedding: number[] | null = null;
-      
-      const cached = this.deps.db.prepare(
-        'SELECT embedding FROM embedding_cache WHERE query_hash = ? AND created_at > datetime(\'now\', \'-1 hour\')'
-      ).get(queryHash) as { embedding: Buffer } | undefined;
-      
-      if (cached) {
-        // Cache hit - embedding'i cache'den al
-        queryEmbedding = Array.from(new Float32Array(cached.embedding.buffer.slice(cached.embedding.byteOffset, cached.embedding.byteOffset + cached.embedding.byteLength)));
-      } else {
-        // Cache miss - embed et
-        const _embedResult1 = await this.deps.embeddingProvider.embed([query]);
-        queryEmbedding = _embedResult1[0] ?? null;
-        if (!queryEmbedding) throw new Error('Embedding failed');
-        
-        // Cache'e kaydet
-        try {
-          this.deps.db.prepare(
-            'INSERT OR REPLACE INTO embedding_cache (query_hash, embedding) VALUES (?, ?)'
-          ).run(queryHash, Buffer.from(new Float32Array(queryEmbedding).buffer));
-        } catch (err) {
-          // Cache hatası logla ama devam et
-          logger.warn({ msg: '[EmbeddingCache] Failed to save to cache', err });
-        }
-      }
-      
-      const queryArrayBuffer = Buffer.from(new Float32Array(queryEmbedding!).buffer);
+      const queryEmbedding = await this.getQueryEmbedding(query);
+      const queryArrayBuffer = Buffer.from(new Float32Array(queryEmbedding).buffer);
 
       const threshold = getConfig().semanticSearchThreshold;
       const results = this.deps.db.prepare(`
@@ -242,9 +249,8 @@ export class RetrievalService {
     if (!this.deps.embeddingProvider) return [];
 
     try {
-      const _embedResult1 = await this.deps.embeddingProvider.embed([query]);
-      const queryEmbedding = _embedResult1[0] ?? null;
-      const queryBuf = Buffer.from(new Float32Array(queryEmbedding!).buffer);
+      const queryEmbedding = await this.getQueryEmbedding(query);
+      const queryBuf = Buffer.from(new Float32Array(queryEmbedding).buffer);
 
       const results = this.deps.db.prepare(`
         WITH matched AS (
@@ -436,9 +442,8 @@ export class RetrievalService {
     if (!this.deps.embeddingProvider) return [];
 
     try {
-      const _embedResult1 = await this.deps.embeddingProvider.embed([query]);
-      const queryEmbedding = _embedResult1[0] ?? null;
-      const queryArrayBuffer = Buffer.from(new Float32Array(queryEmbedding!).buffer);
+      const queryEmbedding = await this.getQueryEmbedding(query);
+      const queryArrayBuffer = Buffer.from(new Float32Array(queryEmbedding).buffer);
 
       return this.deps.db.prepare(`
         WITH matched AS (

@@ -46,6 +46,14 @@ function getBehaviorDiscoveryShadow(): BehaviorDiscoveryShadow {
     return behaviorDiscoveryShadow;
 }
 
+/** Async route handler wrapper — catches promise rejections and forwards to Express error handler.
+ *  Prevents unhandled rejections from crashing the Express app.
+ */
+const asyncHandler = (fn: (req: any, res: any, next: any) => Promise<any>) =>
+    (req: any, res: any, next: any) => {
+        Promise.resolve(fn(req, res, next)).catch(next);
+    };
+
 export function registerRoutes(app: Express, deps: RouteDeps): void {
     const { memory, llm, router, agent, broadcastStats } = deps;
 
@@ -60,7 +68,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     app.use('/api', createMemoryController(memory, router, broadcastStats));
     app.use('/api/mcp', createMCPController());
 
-    app.get('/api/health', async (_req, res) => {
+    app.get('/api/health', asyncHandler(async (_req, res) => {
         const llmHealthy = await llm.healthCheck();
         res.json({
             status: 'ok',
@@ -68,7 +76,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
             channels: router.getChannelStatus(),
             stats: memory.getStats(),
         });
-    });
+    }));
 
     // ============ Hassas Dizin API ============
 
@@ -193,24 +201,20 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
 
     // ============ Onboarding Bio İşleme API ============
 
-    app.post('/api/onboarding/process', validateBody(OnboardingSchema), async (req, res, next) => {
+    app.post('/api/onboarding/process', validateBody(OnboardingSchema), asyncHandler(async (req, res) => {
         const { bio, userName } = req.body;
-        try {
-            const jobId = `onboard_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-            // Arka planda derin analiz başlat (non-blocking)
-            void agent.processRawTextForMemories(bio, userName || 'Kullanıcı').then(() => {
-                broadcastStats();
-            }).catch(err => {
-                logger.error({ err }, '[API] Onboarding bio extraction failed in background');
-            });
+        const jobId = `onboard_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        // Arka planda derin analiz başlat (non-blocking)
+        void agent.processRawTextForMemories(bio, userName || 'Kullanıcı').then(() => {
+            broadcastStats();
+        }).catch(err => {
+            logger.error({ err }, '[API] Onboarding bio extraction failed in background');
+        });
 
-            res.json({ success: true, jobId, message: 'Bellek çıkarımı arka planda başlatıldı' });
-        } catch (error) {
-            next(error instanceof Error ? error : new AppError(String(error), 500));
-        }
-    });
+        res.json({ success: true, jobId, message: 'Bellek çıkarımı arka planda başlatıldı' });
+    }));
 
-    app.get('/api/llm/providers', async (_req, res) => {
+    app.get('/api/llm/providers', asyncHandler(async (_req, res) => {
         const available = LLMProviderFactory.getAvailable();
         const providers = [];
 
@@ -229,7 +233,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
             }
         }
         res.json(providers);
-    });
+    }));
 
     // ============ Feedback API ============
   

@@ -8,8 +8,7 @@
   "scripts": {
     "dev": "concurrently -k --raw -n backend,frontend \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:frontend": "wait-on --timeout 120000 --interval 2000 http://localhost:3001/api/health && cd src/web/react-app && npm run dev",
-    "dev:backend": "chcp 65001 >nul 2>&1 & tsx watch src/gateway/index.ts",
-    "dev:backend-only": "chcp 65001 >nul 2>&1 & tsx watch src/gateway/index.ts",
+    "dev:backend": "tsx watch src/gateway/index.ts",
     "build": "tsc && npx shx cp src/agent/mcp/marketplace-catalog.json dist/agent/mcp/ && cd src/web/react-app && npm run build",
     "start": "node dist/gateway/index.js",
     "cli": "tsx src/cli/index.ts",

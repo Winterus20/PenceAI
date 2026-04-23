@@ -214,6 +214,9 @@ constructor(llm: LLMProvider, memory: MemoryManager) {
         const startTimeMs = Date.now();
         this.metricsTracker.reset(startTimeMs);
 
+        // Top-level error boundary — bir tool çökerse tüm runtime durmasın
+        try {
+
         // 1. Geri Bildirim Döngüsü — Etkileşim geldiğinde cezaları sıfırla
         if (this.feedbackManager) {
             this.feedbackManager.applySignal({ type: 'active_chat', timestamp: startTimeMs });
@@ -499,6 +502,15 @@ history: finalHistory,
         }
 
         return { response, conversationId };
+        } catch (criticalError: unknown) {
+            // Top-level error boundary — graceful degradation
+            const errMsg = criticalError instanceof Error ? criticalError.message : String(criticalError);
+            logger.error({ err: criticalError }, '[Agent] ❌ Critical error in processMessage — graceful degradation');
+            return {
+                response: `⚠️ Bir hata oluştu: ${errMsg}. Lütfen tekrar deneyin.`,
+                conversationId: '',
+            };
+        }
     }
 
     /**

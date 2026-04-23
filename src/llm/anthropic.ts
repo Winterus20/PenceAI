@@ -5,6 +5,9 @@ import { getConfig } from '../gateway/config.js';
 import { extractThinkingFromTags } from '../utils/thinkTags.js';
 import { LLMError } from '../errors/LLMError.js';
 
+/** Default request timeout (ms) for Anthropic API calls */
+const ANTHROPIC_TIMEOUT_MS = 30_000;
+
 export class AnthropicProvider extends LLMProvider {
     readonly name = 'anthropic';
     readonly supportedModels = ['claude-sonnet-4-20250514', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229'];
@@ -19,7 +22,7 @@ export class AnthropicProvider extends LLMProvider {
         if (!config.anthropicApiKey) {
             throw new LLMError('ANTHROPIC_API_KEY ortam değişkeni ayarlanmamış');
         }
-        this.client = new Anthropic({ apiKey: config.anthropicApiKey });
+        this.client = new Anthropic({ apiKey: config.anthropicApiKey, timeout: ANTHROPIC_TIMEOUT_MS });
     }
 
     async chat(messages: LLMMessage[], options?: ChatOptions): Promise<LLMResponse> {

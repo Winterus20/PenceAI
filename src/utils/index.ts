@@ -17,7 +17,7 @@ export {
 } from './costCalculator.js';
 
 // Logger and async context
-export { logger, asyncLocalStorage, runWithTraceId, flush } from './logger.js';
+export { logger, asyncLocalStorage, runWithTraceId, flush, updateLogLevel } from './logger.js';
 export type { TraceContext } from './logger.js';
 
 // Log ring buffer (live log streaming)

@@ -11,6 +11,11 @@ interface WsTokenMessage {
 	content: string;
 }
 
+interface WsTokenBatchMessage {
+	type: 'token_batch';
+	tokens: string[];
+}
+
 interface WsResponseMessage {
 	type: 'response';
 	content: string;
@@ -61,7 +66,7 @@ interface WsSysLogMessage {
 	entry: Record<string, unknown>;
 }
 
-type WsMessage = WsTokenMessage | WsResponseMessage | WsAgentEventMessage | WsClearStreamMessage | WsReplaceStreamMessage | WsErrorMessage | WsStatsMessage | WsConfirmRequestMessage | WsMetricsMessage | WsSysLogMessage;
+type WsMessage = WsTokenMessage | WsTokenBatchMessage | WsResponseMessage | WsAgentEventMessage | WsClearStreamMessage | WsReplaceStreamMessage | WsErrorMessage | WsStatsMessage | WsConfirmRequestMessage | WsMetricsMessage | WsSysLogMessage;
 
 // Agent event data tipleri
 interface ThinkingEventData {
@@ -213,6 +218,15 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
                 }
                 if (currentAssistantMessageId.current) {
                     tokenBuffer.current += data.content || '';
+                }
+                break;
+
+            case 'token_batch':
+                if (!currentAssistantMessageId.current) {
+                    createAssistantPlaceholder();
+                }
+                if (currentAssistantMessageId.current && data.tokens) {
+                    tokenBuffer.current += data.tokens.join('');
                 }
                 break;
 

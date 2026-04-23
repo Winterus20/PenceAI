@@ -69,6 +69,10 @@ export const WS_CONFIG = {
 /** Maksimum mesaj işlem süresi (ms) — aşılırsa timeout */
 const MESSAGE_PROCESSING_TIMEOUT_MS = 5 * 60 * 1000; // 5 dakika
 
+/** Outbound token batching — birden fazla token'ı tek frame'de gönder */
+const TOKEN_BATCH_INTERVAL_MS = 50; // 50ms debounce (client'ki flush ile uyumlu)
+const TOKEN_BATCH_MAX_SIZE = 32; // Maksimum token sayısı per batch
+
 // WebSocket mesaj tipleri (runtime validation Zod ile yapılır)
 interface WebSocketChatMessage {
   type: 'chat';
@@ -145,7 +149,7 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
             wsWithAlive.isAlive = false;
             client.ping();
         });
-    }, 30000);
+    }, 60000);  // 60s keep-alive interval (production-ready)
 
     wss.on('close', () => {
         clearInterval(keepAliveInterval);
@@ -164,6 +168,32 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
         // --- Per-connection mesaj kuyruğu (race condition önleme) ---
         const messageQueue: Array<{ data: WebSocketMessage }> = [];
         let isProcessing = false;
+
+        // --- Per-connection outbound token batcher ---
+        let tokenBatch: string[] = [];
+        let tokenBatchTimer: ReturnType<typeof setTimeout> | null = null;
+
+        function flushTokenBatch(): void {
+            if (tokenBatch.length === 0) return;
+            const batch = tokenBatch;
+            tokenBatch = [];
+            tokenBatchTimer = null;
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'token_batch', tokens: batch }));
+            }
+        }
+
+        function queueToken(token: string): void {
+            tokenBatch.push(token);
+            if (tokenBatch.length >= TOKEN_BATCH_MAX_SIZE) {
+                // Max boyutuna ulaştı — hemen flush
+                if (tokenBatchTimer) { clearTimeout(tokenBatchTimer); tokenBatchTimer = null; }
+                flushTokenBatch();
+            } else if (!tokenBatchTimer) {
+                // İlk token — timer başlat
+                tokenBatchTimer = setTimeout(flushTokenBatch, TOKEN_BATCH_INTERVAL_MS);
+            }
+        }
 
         // --- Per-connection düşünme modu ---
         let thinkingEnabled = false;
@@ -280,14 +310,17 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                 }
 
                 // 2. Default LLM Pipeline
+                // Response gelmeden önce kalan token'ları flush et
                 const { response, conversationId: convId } = await agent.processMessage(message, (event) => {
                     if (ws.readyState === WebSocket.OPEN) {
                         if (event.type === 'token') {
-                            ws.send(JSON.stringify({ type: 'token', content: event.data.content }));
+                            queueToken(String(event.data.content ?? ''));
                         } else if (event.type === 'clear_stream') {
+                            flushTokenBatch();
                             ws.send(JSON.stringify({ type: 'clear_stream' }));
                         } else if (event.type === 'replace_stream') {
-                            ws.send(JSON.stringify({ type: 'replace_stream', content: event.data.content }));
+                            flushTokenBatch();
+                            ws.send(JSON.stringify({ type: 'replace_stream', content: String(event.data.content ?? '') }));
                         } else if (event.type === 'metrics') {
                             ws.send(JSON.stringify({ type: 'metrics', data: event.data }));
                         } else {
@@ -299,6 +332,9 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                         }
                     }
                 }, confirmCallback, { thinking: thinkingEnabled });
+
+                // Response öncesi kalan batch'i flush et
+                flushTokenBatch();
 
                 if (ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({
@@ -388,6 +424,9 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
         });
 
         ws.on('close', () => {
+            // Token batcher'ı temizle
+            if (tokenBatchTimer) { clearTimeout(tokenBatchTimer); tokenBatchTimer = null; }
+            tokenBatch = [];
             messageQueue.length = 0;
             wsRateLimiter.delete(connId);
             for (const [id, pending] of pendingConfirmations) {
