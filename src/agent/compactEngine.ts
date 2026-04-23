@@ -384,17 +384,17 @@ export class CompactEngine {
       let category: TimeSpan;
 
       // Tool result → bir önceki kategoriyi miras al
-      if (msg.role === 'tool') {
+      if (msg?.role === 'tool') {
         category = lastKnownCategory;
-      } else {
+      } else if (msg) {
         const content = typeof msg.content === 'string' ? msg.content : '';
         const lookupKey = `${msg.role}:${content}`;
         const idList = idsByContentRole.get(lookupKey);
         const idx = consumeIndex.get(lookupKey) ?? 0;
 
         let ts: number | undefined;
-        if (idList && idx < idList.length) {
-          ts = timestampById.get(idList[idx]);
+        if (idList && idx < idList.length && idList[idx] !== undefined) {
+          ts = timestampById.get(idList[idx] as number);
           consumeIndex.set(lookupKey, idx + 1);
         }
 
@@ -421,7 +421,12 @@ export class CompactEngine {
         lastKnownCategory = category;
       }
 
-      result.get(category)!.push(msg);
+      if (category! && msg) {
+        const catList = result.get(category);
+        if (catList) {
+          catList.push(msg);
+        }
+      }
     }
 
     return result;
@@ -562,11 +567,11 @@ export class CompactEngine {
       summary += `Araç çağrısı sayısı: ${toolMentions.length}\n`;
     }
     // İlk ve son kullanıcı mesajlarını tut
-    const userLines = transcript.split('\n').filter(l => l.startsWith('[Kullanıcı]:'));
-    if (userLines.length > 0) {
+    const userLines = transcript.split('\n').filter(l => l && l.startsWith('[Kullanıcı]:'));
+    if (userLines.length > 0 && userLines[0]) {
       summary += `İlk konu: ${userLines[0].replace('[Kullanıcı]: ', '').substring(0, 100)}\n`;
-      if (userLines.length > 1) {
-        summary += `Son konu: ${userLines[userLines.length - 1].replace('[Kullanıcı]: ', '').substring(0, 100)}\n`;
+      if (userLines.length > 1 && userLines[userLines.length - 1]) {
+        summary += `Son konu: ${(userLines[userLines.length - 1] as string).replace('[Kullanıcı]: ', '').substring(0, 100)}\n`;
       }
     }
 
@@ -579,27 +584,34 @@ export class CompactEngine {
 
     while (i < messages.length) {
       if (
-        messages[i].role === 'assistant' &&
-        messages[i].toolCalls &&
-        (messages[i].toolCalls?.length ?? 0) > 0 &&
+        messages[i] &&
+        messages[i]?.role === 'assistant' &&
+        messages[i]?.toolCalls &&
+        (messages[i]?.toolCalls?.length ?? 0) > 0 &&
         i + 1 < messages.length &&
-        messages[i + 1].role === 'tool'
+        messages[i + 1] &&
+        messages[i + 1]?.role === 'tool'
       ) {
+        const msgA = messages[i] as LLMMessage;
+        const msgB = messages[i + 1] as LLMMessage;
         const combinedTokens =
-          this.countMessageTokens(messages[i]) +
-          this.countMessageTokens(messages[i + 1]);
+          this.countMessageTokens(msgA) +
+          this.countMessageTokens(msgB);
         chunks.push({
-          messages: [messages[i], messages[i + 1]],
+          messages: [msgA, msgB],
           tokens: combinedTokens,
         });
         i += 2;
         continue;
       }
 
-      chunks.push({
-        messages: [messages[i]],
-        tokens: this.countMessageTokens(messages[i]),
-      });
+      if (messages[i]) {
+        const msgSingle = messages[i] as LLMMessage;
+        chunks.push({
+          messages: [msgSingle],
+          tokens: this.countMessageTokens(msgSingle),
+        });
+      }
       i++;
     }
 
@@ -617,7 +629,7 @@ export class CompactEngine {
 
     for (let i = conversationHistory.length - 1; i >= 0 && attachments.length < 5; i--) {
       const msg = conversationHistory[i];
-      if (msg.attachments && msg.attachments.length > 0) {
+      if (msg && msg.attachments && msg.attachments.length > 0) {
         for (const att of msg.attachments) {
           if (att.fileName && att.size && att.size < 10240 && totalSize + att.size <= maxBytes) {
             attachments.push({

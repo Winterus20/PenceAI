@@ -19,7 +19,7 @@ export function extractThinkingFromTags(content: string): ExtractResult {
 
     THINK_FULL.lastIndex = 0;
     while ((match = THINK_FULL.exec(content)) !== null) {
-        const trimmed = match[1].trim();
+        const trimmed = match[1]?.trim();
         if (trimmed) matches.push(trimmed);
     }
 

@@ -113,7 +113,7 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
         let parseValid = false;
         try {
             const codeFenceMatch = llmThoughtOutput.match(/```json\s*([\s\S]*?)```/i);
-            const jsonStr = codeFenceMatch ? codeFenceMatch[1] : llmThoughtOutput;
+            const jsonStr = codeFenceMatch?.[1] ?? llmThoughtOutput;
             const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
                 const parsed = ThoughtSchema.safeParse(JSON.parse(jsonMatch[0]));

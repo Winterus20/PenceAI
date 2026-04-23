@@ -68,7 +68,7 @@ export class BackgroundWorker {
         // os.loadavg()[0] gives 1-minute load average on Unix-like systems.
         // On Windows it always returns [0, 0, 0], so we skip CPU check on Windows.
         const isWindows = os.platform() === 'win32';
-        const load = isWindows ? 0 : os.loadavg()[0];
+        const load = isWindows ? 0 : os.loadavg()[0]!;
         const freeMemRatio = os.freemem() / os.totalmem();
 
         if (!isWindows && load > this.config.cpuLoadThreshold) {

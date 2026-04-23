@@ -79,7 +79,7 @@ export function routeQuery(query: string, availableSources: SearchSource[]): Cla
   if (sources.length === 0) {
     return {
       intent: 'general',
-      sources: availableSources.length > 0 ? [availableSources[0]] : ['duckduckgo'],
+      sources: availableSources.length > 0 ? [availableSources[0] as SearchSource] : ['duckduckgo'],
       confidence: 0.3,
     };
   }

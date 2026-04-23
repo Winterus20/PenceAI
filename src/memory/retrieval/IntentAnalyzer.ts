@@ -164,10 +164,10 @@ export class IntentAnalyzer {
         // GraphRAG engine varsa ve analitik/kesif sinyalleri gucluyse GraphRAG recipe sec
         if (this.deps.graphRAGEngine) {
             if (signals.hasAnalyticalCue && signals.hasExploratoryCue) {
-                return GRAPH_RAG_RECIPES.graph_rag_deep;
+                return GRAPH_RAG_RECIPES.graph_rag_deep!;
             }
             if (signals.hasExploratoryCue || signals.hasAnalyticalCue) {
-                return GRAPH_RAG_RECIPES.graph_rag_exploration;
+                return GRAPH_RAG_RECIPES.graph_rag_exploration!;
             }
         }
 

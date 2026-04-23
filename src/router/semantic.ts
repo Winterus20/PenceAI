@@ -284,9 +284,9 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
         let norm1 = 0;
         let norm2 = 0;
         for (let i = 0; i < vec1.length; i++) {
-            dotProduct += vec1[i] * vec2[i];
-            norm1 += vec1[i] * vec1[i];
-            norm2 += vec2[i] * vec2[i];
+            dotProduct += vec1[i]! * vec2[i]!;
+            norm1 += vec1[i]! * vec1[i]!;
+            norm2 += vec2[i]! * vec2[i]!;
         }
         if (norm1 === 0 || norm2 === 0) return 0;
         return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
@@ -343,7 +343,7 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
 
         // Tek eleman → tekil çağrı (batch overhead'inden kaçın)
         if (texts.length === 1) {
-            return [await this.getEmbedding(texts[0], customTimeout)];
+            return [await this.getEmbedding(texts[0]!, customTimeout)];
         }
 
         const id = ++this._requestId;
@@ -394,7 +394,7 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
             const exampleEmbeddings: (number[] | null)[][] = []; // [intentIdx][exampleIdx]
 
             for (let iIdx = 0; iIdx < this.intents.length; iIdx++) {
-                const intent = this.intents[iIdx];
+                const intent = this.intents[iIdx]!;
                 if (!intent._cachedEmbeddings) {
                     intent._cachedEmbeddings = new Map<string, CachedEmbedding>();
                 }
@@ -402,14 +402,14 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
 
                 exampleEmbeddings[iIdx] = [];
                 for (let eIdx = 0; eIdx < intent.examples.length; eIdx++) {
-                    const example = intent.examples[eIdx];
+                    const example = intent.examples[eIdx]!;
                     const cached = intent._cachedEmbeddings.get(example);
 
                     if (cached) {
                         const age = new Date().getTime() - cached.lastAccessed.getTime();
                         const ttlMs = this.cacheConfig.ttlMinutes * 60 * 1000;
                         if (age < ttlMs) {
-                            exampleEmbeddings[iIdx][eIdx] = cached.vector;
+                            exampleEmbeddings[iIdx]![eIdx] = cached.vector;
                             cached.lastAccessed = new Date();
                             continue;
                         } else {
@@ -419,7 +419,7 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
                     }
 
                     // Cache'de yok → batch listesine ekle
-                    exampleEmbeddings[iIdx][eIdx] = null;
+                    exampleEmbeddings[iIdx]![eIdx] = null;
                     uncachedItems.push({ intentIdx: iIdx, exampleIdx: eIdx, text: example });
                 }
             }
@@ -446,15 +446,15 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
 
                 // Sonuçları yerleştir ve cache'e al
                 for (let i = 0; i < uncachedItems.length; i++) {
-                    const { intentIdx, exampleIdx } = uncachedItems[i];
+                    const { intentIdx, exampleIdx } = uncachedItems[i]!;
                     const embedding = batchResults[i];
 
                     if (embedding && embedding.length > 0) {
-                        exampleEmbeddings[intentIdx][exampleIdx] = embedding;
+                        exampleEmbeddings[intentIdx]![exampleIdx] = embedding;
 
                         // Cache'e kaydet
-                        const intent = this.intents[intentIdx];
-                        const example = intent.examples[exampleIdx];
+                        const intent = this.intents[intentIdx]!;
+                        const example = intent.examples[exampleIdx]!;
                         const embeddingSize = embedding.length * 4;
                         this.totalCacheSize += embeddingSize;
 
@@ -484,7 +484,7 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
             };
 
             for (let iIdx = 0; iIdx < this.intents.length; iIdx++) {
-                const intent = this.intents[iIdx];
+                const intent = this.intents[iIdx]!;
                 for (let eIdx = 0; eIdx < intent.examples.length; eIdx++) {
                     const exampleEmbedding = exampleEmbeddings[iIdx]?.[eIdx];
                     if (!exampleEmbedding) continue;
@@ -493,7 +493,7 @@ export class SemanticRouter<TContext = Record<string, unknown>> {
                     if (score > bestMatch.score) {
                         bestMatch = {
                             intent,
-                            exampleKey: intent.examples[eIdx],
+                            exampleKey: intent.examples[eIdx]!,
                             score,
                         };
                     }

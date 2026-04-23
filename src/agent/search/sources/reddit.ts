@@ -57,7 +57,7 @@ export class RedditSearchAdapter implements SearchSourceAdapter {
 
     const count = query.count ?? DEFAULT_SOURCE_CONFIG.defaultCount;
     const params = new URLSearchParams({
-      q: query.query,
+      q: query.query || '',
       sort: 'relevance',
       limit: String(count),
       restrict_sr: 'off',
@@ -65,8 +65,9 @@ export class RedditSearchAdapter implements SearchSourceAdapter {
 
     if (query.freshness) {
       const timeMap: Record<string, string> = { pd: 'day', pw: 'week', pm: 'month', py: 'year' };
-      if (timeMap[query.freshness]) {
-        params.set('t', timeMap[query.freshness]);
+      const timeValue = timeMap[query.freshness];
+      if (timeValue) {
+        params.set('t', timeValue);
       }
     }
 
@@ -99,7 +100,7 @@ export class RedditSearchAdapter implements SearchSourceAdapter {
       }
 
       this.consecutiveFailures = 0;
-      const data: RedditResponse = await response.json();
+      const data = await response.json() as RedditResponse;
       const children = data?.data?.children ?? [];
 
       return children

@@ -29,7 +29,9 @@ export function mergeAndRankResults(
   for (const [source, results] of resultsBySource) {
     const weight = SOURCE_WEIGHTS[source] ?? 1.0;
     for (let i = 0; i < results.length; i++) {
-      const result = { ...results[i] };
+      const orig = results[i];
+      if (!orig) continue;
+      const result: SearchResult = { ...orig };
       result.score = weight / (rrfK + i + 1);
 
       if (dedupByUrl) {

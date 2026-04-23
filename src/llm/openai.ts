@@ -73,11 +73,13 @@ function normalizeOpenAIMessages(
         }
 
         // Ilk mesaj assistant ise user'a cevir
-        if (normalized.length > 0 && normalized[0].role === 'assistant') {
-            normalized[0].role = 'user';
-            normalized[0].content = `[Önceki Asistan Durumu]:\n${normalized[0].content}`;
-            if (normalized.length > 1 && normalized[1].role === 'user') {
-                normalized[1].content = normalized[0].content + '\n\n' + normalized[1].content;
+        const first = normalized[0];
+        if (first && first.role === 'assistant') {
+            first.role = 'user';
+            first.content = `[Önceki Asistan Durumu]:\n${first.content}`;
+            const second = normalized[1];
+            if (second && second.role === 'user') {
+                second.content = first.content + '\n\n' + second.content;
                 normalized.shift();
             }
         }
@@ -90,7 +92,7 @@ function normalizeOpenAIMessages(
             const systemEnvelope = `[Sistem Talimatlari - MUTLAK UY]\n${trimmedSystemPrompt}\n[/Sistem Talimatlari]`;
             if (normalized.length === 0) {
                 normalized.push({ role: 'user', content: systemEnvelope });
-            } else if (normalized[0].role === 'user') {
+            } else if (normalized[0]?.role === 'user') {
                 normalized[0].content = `${systemEnvelope}\n\n${normalized[0].content}`;
             } else {
                 normalized.unshift({ role: 'user', content: systemEnvelope });
@@ -321,6 +323,9 @@ export class OpenAIProvider extends LLMProvider {
         const response = await this.createChatCompletionWithToolFallback(reqOpts);
 
         const choice = response.choices[0];
+        if (!choice) {
+            throw new LLMError('OpenAI yanıtında seçenek (choice) bulunamadı');
+        }
         const toolCalls: ToolCall[] | undefined = choice.message.tool_calls?.map((tc: OpenAI.Chat.ChatCompletionMessageToolCall) => ({
             id: tc.id,
             name: tc.function.name,

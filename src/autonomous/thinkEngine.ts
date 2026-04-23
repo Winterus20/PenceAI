@@ -365,6 +365,7 @@ class ThoughtLog {
     updateLastFeedback(relevanceScore: number, timeSensitivity: number): void {
         if (this.entries.length === 0) return;
         const last = this.entries[this.entries.length - 1];
+        if (!last) return;
         last.relevanceScore = relevanceScore;
         last.timeSensitivity = timeSensitivity;
     }
@@ -406,7 +407,9 @@ export function cleanupStaleThoughtLogs(maxAgeMs: number = 24 * 60 * 60 * 1000):
             .sort((a, b) => a[1] - b[1]); // En eski erişimliler önce
         const toRemove = thoughtLogPool.size - 50; // 50'ye kadar düşür
         for (let i = 0; i < toRemove && i < sorted.length; i++) {
-            const key = sorted[i][0];
+            const entry = sorted[i];
+            if (!entry) continue;
+            const key = entry[0];
             thoughtLogPool.delete(key);
             thoughtLogLastAccess.delete(key);
             cleaned++;
@@ -820,6 +823,7 @@ export function synthesizeThoughtPrompt(
         ? questionTemplateIndex % REFLECTION_QUESTION_TEMPLATES.length
         : Math.floor(Math.random() * REFLECTION_QUESTION_TEMPLATES.length);
     const questions = REFLECTION_QUESTION_TEMPLATES[templateIdx];
+    if (!questions) return prompt;
 
     prompt += `---\n`;
     prompt += `Bu iç ses notunu kullanarak:\n`;

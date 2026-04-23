@@ -103,8 +103,8 @@ export async function fetchFromRegistry(): Promise<MCPServerCatalogEntry[]> {
       logger.warn(`[MCP:marketplace] Registry API returned ${response.status}`);
       return [];
     }
-    const data = await response.json();
-    
+    const data = await response.json() as { servers?: RegistryServerResponse[] };
+
     // Registry verilerini MCPServerCatalogEntry formatına dönüştür
     const registryServers = (data.servers ?? []).map((s: RegistryServerResponse) => {
       const server = s.server;

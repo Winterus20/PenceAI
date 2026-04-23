@@ -256,7 +256,7 @@ export class TokenPruner {
     let idx = 0;
 
     while (remainingTokens > budget && idx < itemsWithTokens.length) {
-      const current = itemsWithTokens[idx];
+      const current = itemsWithTokens[idx]!;
       removed.push(current.item);
       remainingTokens -= current.tokens;
       idx++;

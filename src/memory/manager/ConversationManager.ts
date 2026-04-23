@@ -403,7 +403,7 @@ export class ConversationManager {
       let childNum: number;
       if (lastChild) {
         const segments = lastChild.display_order.split('.');
-        const lastSegment = parseInt(segments[segments.length - 1], 10);
+        const lastSegment = parseInt(segments[segments.length - 1] ?? '0', 10);
         childNum = lastSegment + 1;
       } else {
         childNum = 1;
@@ -431,12 +431,12 @@ export class ConversationManager {
           `INSERT INTO message_embeddings (rowid, embedding) VALUES (CAST(? AS INTEGER), ?)`
         );
         for (let i = 0; i < messages.length; i++) {
-          const originalId = BigInt(messages[i].id);
+          const originalId = BigInt(messages[i]?.id ?? 0);
           const row = this.db.prepare(
             `SELECT embedding FROM message_embeddings WHERE rowid = CAST(? AS INTEGER)`
           ).get(originalId) as { embedding: Buffer } | undefined;
           if (row) {
-            insertEmb.run(BigInt(insertedIds[i]), row.embedding);
+            insertEmb.run(BigInt(insertedIds[i] ?? 0), row.embedding);
           }
         }
       } catch (err) {

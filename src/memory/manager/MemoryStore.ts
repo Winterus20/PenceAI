@@ -182,7 +182,7 @@ export class MemoryStore {
         // Kategoriden bağımsız vektör araması; sqlite-vec KNN, lower distance is closer
         // vec_distance_cosine calculates cosine distance (1 - cosine similarity).
         // Sim > 0.85 -> distance < 0.15
-        const queryArrayBuffer = Buffer.from(new Float32Array(newEmbedding).buffer);
+        const queryArrayBuffer = Buffer.from(new Float32Array(newEmbedding ?? []).buffer);
 
         let bestMatch: { id: number; similarity: number; content: string } | null = null;
 
@@ -775,7 +775,7 @@ export class MemoryStore {
     try {
       const [embedding] = await this.embeddingProvider.embed([content]);
       const idBig = BigInt(memoryId);
-      const buf = Buffer.from(new Float32Array(embedding).buffer);
+      const buf = Buffer.from(new Float32Array(embedding ?? []).buffer);
 
       this.db.transaction(() => {
         this.db.prepare(`DELETE FROM memory_embeddings WHERE rowid = CAST(? AS INTEGER)`).run(idBig);

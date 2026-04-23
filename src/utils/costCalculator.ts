@@ -151,7 +151,7 @@ export function normalizeModelName(model: string): string {
   const versionedPattern = /^(.+?)(?:-\d{4}-\d{2}-\d{2}|-latest|-turbo|-mini|-\d{3,4})$/;
   const match = lower.match(versionedPattern);
   if (match) {
-    return match[1];
+    return match[1] ?? model;
   }
 
   // Eşleşme bulunamadı, orijinal ismi döndür

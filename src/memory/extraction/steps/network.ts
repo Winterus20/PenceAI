@@ -13,6 +13,7 @@ export class NetworkStep implements ExtractorStep {
 
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
+            if (!token) continue;
 
             // Daha robust token temizleme: baştaki ve sondaki non-alphanumeric karakterleri temizle
             // Bu, tırnak, parantez, noktalama gibi karakterleri de kapsar

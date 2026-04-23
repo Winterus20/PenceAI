@@ -56,7 +56,7 @@ export class WikipediaSearchAdapter implements SearchSourceAdapter {
 
       if (!response.ok) return [];
 
-      const data: WikiApiResponse = await response.json();
+      const data = await response.json() as WikiApiResponse;
       const searchResults = data?.query?.search;
       if (!searchResults || searchResults.length === 0) return [];
 

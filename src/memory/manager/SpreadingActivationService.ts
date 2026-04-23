@@ -146,7 +146,7 @@ export class SpreadingActivationService {
 
         // Toplam ağırlık hesapla
         const totalWeight = sourceNeighbors.reduce((sum, n) => {
-          const relWeight = cfg.relationTypeWeights[n.relation_type] ?? cfg.relationTypeWeights['default'];
+          const relWeight = (cfg.relationTypeWeights[n.relation_type] ?? cfg.relationTypeWeights['default']) ?? 1;
           return sum + ((n.confidence ?? 0.7) * relWeight);
         }, 0);
 
@@ -154,7 +154,7 @@ export class SpreadingActivationService {
 
         // Komşulara activation dağıt
         for (const neighbor of sourceNeighbors) {
-          const relWeight = cfg.relationTypeWeights[neighbor.relation_type] ?? cfg.relationTypeWeights['default'];
+          const relWeight = (cfg.relationTypeWeights[neighbor.relation_type] ?? cfg.relationTypeWeights['default']) ?? 1;
           const neighborConfidence = neighbor.confidence ?? 0.7;
 
           const propagatedActivation = (

@@ -29,7 +29,7 @@ function recordRequest(): void {
 }
 
 function getRandomUserAgent(): string {
-  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)] ?? USER_AGENTS[0] ?? '';
 }
 
 function decodeUddg(uddg: string): string {
@@ -50,11 +50,11 @@ function parseDDGResults(html: string): SearchResult[] {
       const urlMatch = block.match(/uddg=([^&"]+)/);
       const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
 
-      if (!titleMatch || !urlMatch) continue;
+      if (!titleMatch || !urlMatch || !titleMatch[1] || !urlMatch[1]) continue;
 
       const title = titleMatch[1].replace(/<[^>]+>/g, '').trim();
       const url = decodeUddg(urlMatch[1]);
-      const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+      const snippet = snippetMatch && snippetMatch[1] ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
       if (!title || !url) continue;
 
@@ -87,7 +87,7 @@ export class DuckDuckGoSearchAdapter implements SearchSourceAdapter {
 
     const params = new URLSearchParams({ q: query.query });
     if (query.freshness && FRESHNESS_MAP[query.freshness]) {
-      params.set('df', FRESHNESS_MAP[query.freshness]);
+      params.set('df', FRESHNESS_MAP[query.freshness]!);
     }
 
     try {

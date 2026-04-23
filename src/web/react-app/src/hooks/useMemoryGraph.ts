@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { select, type Selection } from 'd3-selection';
+import 'd3-transition';
 import { zoom as d3Zoom, zoomIdentity } from 'd3-zoom';
 import type { ZoomBehavior } from 'd3-zoom';
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force';

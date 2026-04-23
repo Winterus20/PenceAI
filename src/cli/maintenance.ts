@@ -239,7 +239,7 @@ if (command) {
             await graphRAGAdvance();
             break;
         case 'graphrag-set-phase':
-            await graphRAGSetPhase(parseInt(process.argv[3], 10));
+            await graphRAGSetPhase(parseInt(process.argv[3] ?? '', 10));
             break;
         case 'graphrag-readiness':
             await graphRAGReadiness();

@@ -354,23 +354,23 @@ export class SubAgentManager {
     public parseReport(rawResponse: string, relevanceScore: number = 0.5): ResearchReport {
         // Özet çıkar
         const summaryMatch = rawResponse.match(/##\s*Özet\s*\n([\s\S]*?)(?=\n##|$)/i);
-        const summary = summaryMatch ? summaryMatch[1].trim() : rawResponse.substring(0, 500);
+        const summary = summaryMatch?.[1]?.trim() ?? rawResponse.substring(0, 500);
 
         // Anahtar bulgular çıkar
         const findingsMatch = rawResponse.match(/##\s*Anahtar Bulgular?\s*\n([\s\S]*?)(?=\n##|$)/i);
-        const keyFindings = findingsMatch
+        const keyFindings = findingsMatch?.[1]
             ? findingsMatch[1].split(/\n-\s*/).map(s => s.trim()).filter(s => s.length > 0)
             : [];
 
         // Kaynaklar çıkar
         const sourcesMatch = rawResponse.match(/##\s*Kaynaklar?\s*\n([\s\S]*?)(?=\n##|$)/i);
-        const sources = sourcesMatch
+        const sources = sourcesMatch?.[1]
             ? sourcesMatch[1].split(/\n-\s*/).map(s => s.trim()).filter(s => s.length > 0)
             : [];
 
         // Zaman hassasiyeti çıkar
         const timeMatch = rawResponse.match(/##\s*Zaman Hassasiyeti\s*\n([\s\S]*?)(?=\n##|$)/i);
-        const isTimeSensitive = timeMatch
+        const isTimeSensitive = timeMatch?.[1]
             ? /evet/i.test(timeMatch[1])
             : false;
 

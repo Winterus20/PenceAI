@@ -292,7 +292,7 @@ export function deriveMemoryWriteMetadata(
     & Pick<MemoryWriteMetadata, 'conversationId' | 'messageId' | 'rolloutState' | 'writeTraceId'> {
     const normalizedCategory = normalizeCategory(category);
     const reviewProfile = normalizeProfile(metadata?.reviewProfile ?? REVIEW_PROFILE_BY_CATEGORY[normalizedCategory]);
-    const policy = REVIEW_POLICIES[reviewProfile];
+    const policy = (REVIEW_POLICIES[reviewProfile] ?? REVIEW_POLICIES.standard)!;
     const defaultSource = metadata?.conversationId ? 'conversation' : 'system';
 
     return {
@@ -309,7 +309,7 @@ export function deriveMemoryWriteMetadata(
 export function getReviewPolicy(category: string, reviewProfile?: string | null): MemoryReviewPolicy {
     const categoryProfile = REVIEW_PROFILE_BY_CATEGORY[normalizeCategory(category)];
     const resolvedProfile = normalizeProfile(reviewProfile ?? categoryProfile);
-    return REVIEW_POLICIES[resolvedProfile];
+    return (REVIEW_POLICIES[resolvedProfile] ?? REVIEW_POLICIES.standard)!;
 }
 
 export function computeInitialReviewSchedule(

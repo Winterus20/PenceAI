@@ -123,7 +123,9 @@ export class RetrievalService {
         queryEmbedding = Array.from(new Float32Array(cached.embedding.buffer.slice(cached.embedding.byteOffset, cached.embedding.byteOffset + cached.embedding.byteLength)));
       } else {
         // Cache miss - embed et
-        [queryEmbedding] = await this.deps.embeddingProvider.embed([query]);
+        const _embedResult1 = await this.deps.embeddingProvider.embed([query]);
+        queryEmbedding = _embedResult1[0] ?? null;
+        if (!queryEmbedding) throw new Error('Embedding failed');
         
         // Cache'e kaydet
         try {
@@ -240,8 +242,9 @@ export class RetrievalService {
     if (!this.deps.embeddingProvider) return [];
 
     try {
-      const [queryEmbedding] = await this.deps.embeddingProvider.embed([query]);
-      const queryBuf = Buffer.from(new Float32Array(queryEmbedding).buffer);
+      const _embedResult1 = await this.deps.embeddingProvider.embed([query]);
+      const queryEmbedding = _embedResult1[0] ?? null;
+      const queryBuf = Buffer.from(new Float32Array(queryEmbedding!).buffer);
 
       const results = this.deps.db.prepare(`
         WITH matched AS (
@@ -433,8 +436,9 @@ export class RetrievalService {
     if (!this.deps.embeddingProvider) return [];
 
     try {
-      const [queryEmbedding] = await this.deps.embeddingProvider.embed([query]);
-      const queryArrayBuffer = Buffer.from(new Float32Array(queryEmbedding).buffer);
+      const _embedResult1 = await this.deps.embeddingProvider.embed([query]);
+      const queryEmbedding = _embedResult1[0] ?? null;
+      const queryArrayBuffer = Buffer.from(new Float32Array(queryEmbedding!).buffer);
 
       return this.deps.db.prepare(`
         WITH matched AS (
@@ -712,7 +716,7 @@ export class RetrievalService {
           }
         });
 
-        insertMany(batch.map((m, idx) => ({ id: Number(m.id), embedding: embeddings[idx] })));
+        insertMany(batch.map((m, idx) => ({ id: Number(m.id), embedding: embeddings[idx] ?? [] })));
         processed += batch.length;
         logger.info(`[Memory] → ${processed}/${missing.length} ${label} embedding hesaplandı`);
       } catch (err) {

@@ -78,13 +78,13 @@ export function createMCPController(): Router {
         timeout,
       });
       if (result.success) {
-        res.status(201).json(result);
+        return res.status(201).json(result);
       } else {
-        res.status(409).json(result);
+        return res.status(409).json(result);
       }
     } catch (error) {
       logger.error({ error }, '[MCP:routes] Failed to install server');
-      res.status(500).json({ success: false, error: 'Failed to install server' });
+      return res.status(500).json({ success: false, error: 'Failed to install server' });
     }
   });
 

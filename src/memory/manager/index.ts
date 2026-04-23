@@ -500,7 +500,7 @@ export class MemoryManager {
     try {
       const [embedding] = await this.embeddingProvider.embed([content]);
       const idBig = BigInt(messageId);
-      const buf = Buffer.from(new Float32Array(embedding).buffer);
+      const buf = Buffer.from(new Float32Array(embedding ?? []).buffer);
 
       this.db.transaction(() => {
         this.db.prepare(`DELETE FROM message_embeddings WHERE rowid = CAST(? AS INTEGER)`).run(idBig);

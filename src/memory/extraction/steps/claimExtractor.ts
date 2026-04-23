@@ -101,7 +101,7 @@ JSON formatında döndür:
     } catch {
       // 2. Markdown JSON block
       const jsonMatch = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-      if (jsonMatch) {
+      if (jsonMatch?.[1]) {
         try {
           parsed = JSON.parse(jsonMatch[1]);
         } catch { /* devam et */ }

@@ -258,7 +258,7 @@ export class SpreadingActivationEngine {
         const totalBonusApplied = Number(
             Array.from(rankingBonuses.values()).reduce((sum, bonus) => sum + bonus, 0).toFixed(3),
         );
-        const strongestBonus = activatedCandidates.length > 0 ? activatedCandidates[0].bonus : 0;
+        const strongestBonus = activatedCandidates.length > 0 ? (activatedCandidates[0]?.bonus ?? 0) : 0;
         const appliedToRanking = config.rolloutState === 'soft';
 
         return {

@@ -12,17 +12,25 @@ export function extractFallbackToolCalls(content: string, knownToolNames: Set<st
 
     const toolCodeBlockRegex = /```tool_code\s*([\s\S]*?)```/gi;
     for (const m of content.matchAll(toolCodeBlockRegex)) {
-        const innerCalls = parseFunctionCallsFromText(m[1], knownToolNames);
-        results.push(...innerCalls.calls);
-        rawMatches.push(m[0]);
+        if (m[1]) {
+            const innerCalls = parseFunctionCallsFromText(m[1], knownToolNames);
+            results.push(...innerCalls.calls);
+        }
+        if (m[0]) {
+            rawMatches.push(m[0]);
+        }
     }
 
     const toolCodeInlineRegex = /tool_code\s*\[?\s*([\s\S]*?)\s*\]?\s*(?:\n|$)/gi;
     if (results.length === 0) {
         for (const m of content.matchAll(toolCodeInlineRegex)) {
-            const innerCalls = parseFunctionCallsFromText(m[1], knownToolNames);
-            results.push(...innerCalls.calls);
-            rawMatches.push(m[0]);
+            if (m[1]) {
+                const innerCalls = parseFunctionCallsFromText(m[1], knownToolNames);
+                results.push(...innerCalls.calls);
+            }
+            if (m[0]) {
+                rawMatches.push(m[0]);
+            }
         }
     }
 
@@ -91,6 +99,7 @@ export function parseFunctionCallsFromText(text: string, knownToolNames: Set<str
     let startMatch: RegExpExecArray | null;
     while ((startMatch = callStartRegex.exec(text)) !== null) {
         const toolName = startMatch[1];
+        if (!toolName) continue;
         const argsStartIdx = startMatch.index + startMatch[0].length;
         let depth = 1;
         let idx = argsStartIdx;
@@ -103,12 +112,15 @@ export function parseFunctionCallsFromText(text: string, knownToolNames: Set<str
 
         const rawMatchString = text.substring(startMatch.index, idx);
         const argsString = text.substring(argsStartIdx, idx - 1).trim();
-        const parsedArgs = parseFallbackArgs(toolName, argsString);
-        results.push({
-            id: `call_${Date.now()}_func_${Math.random().toString(36).substring(2, 6)}`,
-            name: toolName,
-            arguments: parsedArgs,
-        });
+        if (argsString) {
+            const parsedArgs = parseFallbackArgs(toolName, argsString);
+
+            results.push({
+                id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                name: toolName,
+                arguments: parsedArgs
+            });
+        }
         rawMatches.push(rawMatchString);
     }
     return { calls: results, rawMatches };
@@ -135,13 +147,17 @@ export function parseFallbackArgs(toolName: string, argsString: string): Record<
     const kvRegex = /([a-zA-Z0-9_]+)\s*=\s*(?:"([^"]*?)"|'([^']*?)')/g;
     let kvMatch: RegExpExecArray | null;
     while ((kvMatch = kvRegex.exec(argsString)) !== null) {
-        kvPairs[kvMatch[1]] = kvMatch[2] ?? kvMatch[3];
+        if (kvMatch[1]) {
+            kvPairs[kvMatch[1]] = kvMatch[2] ?? kvMatch[3] ?? '';
+        }
     }
     if (Object.keys(kvPairs).length > 0) return kvPairs;
 
     const simpleKvMatch = argsString.match(/^([a-zA-Z0-9_]+)\s*=\s*(.+)$/s);
     if (simpleKvMatch) {
-        return { [simpleKvMatch[1]]: simpleKvMatch[2].replace(/^["']|["']$/g, '').trim() };
+        if (simpleKvMatch[1] && simpleKvMatch[2]) {
+            return { [simpleKvMatch[1]]: simpleKvMatch[2].replace(/^["']|["']$/g, '').trim() };
+        }
     }
 
     const primaryParam = getPrimaryParam(toolName);

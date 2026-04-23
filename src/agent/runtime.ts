@@ -458,8 +458,8 @@ history: finalHistory,
             // History sondan başa sondaki eleman kullanıcının mesajı DEĞİLDİR (çünkü processMessage metodunun başında eklenir, ama history argümanına gelmez)
             // history listesini sondan tarayarak en son asistan mesajını bulalım
             for (let i = history.length - 1; i >= 0; i--) {
-                if (history[i].role === 'assistant') {
-                    previousAssistantMessage = history[i].content;
+                if (history[i] && history[i]?.role === 'assistant') {
+                    previousAssistantMessage = history[i]?.content || '';
                     break;
                 }
             }

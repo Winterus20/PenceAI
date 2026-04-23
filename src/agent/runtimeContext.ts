@@ -28,21 +28,27 @@ export function pruneConversationHistory(
     let cursor = 0;
 
     while (cursor < history.length) {
+        const current = history[cursor];
+        if (!current) break;
+
         if (
-            history[cursor].role === 'assistant' && history[cursor].toolCalls?.length &&
-            cursor + 1 < history.length && history[cursor + 1].role === 'tool'
+            current.role === 'assistant' && current.toolCalls?.length &&
+            cursor + 1 < history.length
         ) {
-            chunks.push({
-                messages: [history[cursor], history[cursor + 1]],
-                tokens: estimateMessageTokens(history[cursor]) + estimateMessageTokens(history[cursor + 1]),
-            });
-            cursor += 2;
-            continue;
+            const next = history[cursor + 1];
+            if (next && next.role === 'tool') {
+                chunks.push({
+                    messages: [current, next],
+                    tokens: estimateMessageTokens(current) + estimateMessageTokens(next),
+                });
+                cursor += 2;
+                continue;
+            }
         }
 
         chunks.push({
-            messages: [history[cursor]],
-            tokens: estimateMessageTokens(history[cursor]),
+            messages: [current],
+            tokens: estimateMessageTokens(current),
         });
         cursor++;
     }
@@ -52,12 +58,14 @@ export function pruneConversationHistory(
     let prunedChunkCount = 0;
 
     for (let index = chunks.length - 1; index >= 0; index--) {
-        if (currentTokens + chunks[index].tokens > maxHistoryTokens) {
+        const chunk = chunks[index];
+        if (!chunk) continue;
+        if (currentTokens + chunk.tokens > maxHistoryTokens) {
             prunedChunkCount = index + 1;
             break;
         }
-        currentTokens += chunks[index].tokens;
-        keptChunks.unshift(chunks[index]);
+        currentTokens += chunk.tokens;
+        keptChunks.unshift(chunk);
     }
 
     const pruned = keptChunks.flatMap(chunk => chunk.messages);
@@ -67,8 +75,11 @@ export function pruneConversationHistory(
 
     for (let index = 0; index < pruned.length; index++) {
         const message = pruned[index];
+        if (!message) continue;
+
         if (message.role === 'assistant' && message.toolCalls?.length) {
-            if (index + 1 < pruned.length && pruned[index + 1].role === 'tool') {
+            const nextMessage = pruned[index + 1];
+            if (nextMessage && nextMessage.role === 'tool') {
                 validated.push(message);
             } else if (message.content && message.content.trim()) {
                 validated.push({ ...message, toolCalls: undefined });

@@ -3,6 +3,7 @@ import type { MemoryManager } from '../memory/manager.js';
 import type { MemoryRow } from '../memory/types.js';
 import { buildLightExtractionPrompt, buildDeepExtractionPrompt, buildSummarizationPrompt, buildEntityExtractionPrompt } from './prompt.js';
 import { logger } from '../utils/index.js';
+import { LRUCache } from '../utils/lruCache.js';
 
 export interface ExtractionContext {
     user: string;
@@ -29,6 +30,11 @@ export class MemoryExtractor {
     private deadLetterQueue: Array<{ description: string; error: string; failedAt: Date }> = [];
     private consecutiveRichExtractions: number = 0;
 
+    /** Embedding cache — bellek ID'ye göre LRU cache (TTL: 5 dk, max: 1000) */
+    private embeddingCache = new LRUCache<string, number[]>({ maxSize: 1000, ttlMs: 300_000 });
+    /** Query embedding cache — aynı query embedding'i tekrar hesaplanmasın (TTL: 1 saat) */
+    private queryEmbeddingCache = new LRUCache<string, number[]>({ maxSize: 500, ttlMs: 3_600_000 });
+
     /** Dedup eşiği — MemoryStore'daki 0.80 eşiğiyle uyumlu */
     static readonly DEDUP_SIMILARITY_THRESHOLD = 0.80;
     /** Dinamik extraction interval aralığı */
@@ -41,6 +47,24 @@ export class MemoryExtractor {
         this.llm = llm;
         this.memory = memory;
     }
+
+    /**
+     * Cache'lenmiş embedding getirici.
+     * Aynı key için compute fonksiyonunu sadece cache miss'te çalıştırır.
+     */
+    private async getCachedEmbedding(key: string, compute: () => Promise<number[]>): Promise<number[]> {
+        const cached = this.embeddingCache.get(key);
+        if (cached) return cached;
+
+        const value = await compute();
+        this.embeddingCache.set(key, value);
+        return value;
+    }
+
+    /**
+     * Query embedding cache'lenmiş getirici.
+     * Aynı query string için embedding'i 1 saat boyunca tekrar hesaplamaz.
+     */
 
     createMergeFn(userName: string = 'Kullanıcı'): (oldContent: string, newContent: string) => Promise<string> {
         return async (oldContent: string, newContent: string) => {
@@ -380,8 +404,8 @@ export class MemoryExtractor {
 
     private async getSimilarMemoriesForDedup(query: string, limit: number = 10): Promise<Array<{ id: number; content: string; similarity: number }>> {
         try {
-            const similarMemories = await this.memory.semanticSearch(query, limit);
-            return similarMemories
+            const results = await this.memory.semanticSearch(query, limit);
+            return results
                 .filter(m => m.similarity >= MemoryExtractor.DEDUP_SIMILARITY_THRESHOLD)
                 .map(m => ({
                     id: m.id,

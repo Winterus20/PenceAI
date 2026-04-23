@@ -130,9 +130,10 @@ export class TaskQueue {
         let hi = this.queue.length;
         while (lo < hi) {
             const mid = (lo + hi) >>> 1;
-            const cmp = this.queue[mid].priority !== task.priority
-                ? this.queue[mid].priority - task.priority
-                : this.queue[mid].addedAt - task.addedAt;
+            const qElement = this.queue[mid]!;
+            const cmp = qElement.priority !== task.priority
+                ? qElement.priority - task.priority
+                : qElement.addedAt - task.addedAt;
             if (cmp <= 0) lo = mid + 1;
             else hi = mid;
         }
@@ -146,7 +147,7 @@ export class TaskQueue {
         // Queue is already sorted by priority and addedAt, check first element only
         const now = Date.now();
         if (this.queue.length === 0) return undefined;
-        const task = this.queue[0];
+        const task = this.queue[0]!;
         if (task.addedAt > now) return undefined; // Not yet ready
 
         this.queue.shift(); // Remove first element

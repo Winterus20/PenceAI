@@ -161,8 +161,9 @@ export class ContextPreparer {
         const imageAttachments = params.messageContent.attachments.filter(a => a.type === 'image' && a.data && a.data.length > 0);
         if (imageAttachments.length > 0) {
             for (let i = llmMessages.length - 1; i >= 0; i--) {
-                if (llmMessages[i].role === 'user') {
-                    llmMessages[i].imageBlocks = imageAttachments.map(a => ({
+                if (llmMessages[i]?.role === 'user') {
+                    const msgUser = llmMessages[i] as LLMMessage;
+                    msgUser.imageBlocks = imageAttachments.map(a => ({
                         mimeType: a.mimeType,
                         data: params.getBase64(a.data as Buffer)!,
                         fileName: a.fileName,

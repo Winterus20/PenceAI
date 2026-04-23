@@ -215,11 +215,12 @@ export class ToolManager {
         });
 
         const settled = await Promise.allSettled(promises);
-        return settled.map((s, i) => {
+        return settled.map((s, idx) => {
             if (s.status === 'fulfilled') return s.value;
+            const failedTc = toolCalls[idx];
             return {
-                toolCallId: toolCalls[i].id,
-                name: toolCalls[i].name,
+                toolCallId: failedTc?.id ?? '',
+                name: failedTc?.name ?? '',
                 result: `Hata: ${(s.reason as Error)?.message || 'Bilinmeyen hata'}`,
                 isError: true,
             };
@@ -240,6 +241,7 @@ export class ToolManager {
         for (const tool of mcpTools) {
             const parts = tool.name.split(':');
             const serverName = parts[1];
+            if (!serverName) continue;
             if (!serverMap.has(serverName)) serverMap.set(serverName, []);
             serverMap.get(serverName)!.push(tool.name);
         }

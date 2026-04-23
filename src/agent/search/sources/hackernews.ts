@@ -78,7 +78,7 @@ export class HackerNewsSearchAdapter implements SearchSourceAdapter {
       }
 
       this.consecutiveFailures = 0;
-      const data: HNResponse = await response.json();
+      const data = await response.json() as HNResponse;
       const hits = data.hits ?? [];
 
       return hits

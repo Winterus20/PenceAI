@@ -734,7 +734,7 @@ export class GraphRAGEngine {
 
     // Initial results için RRF score
     for (let rank = 0; rank < initialResults.length; rank++) {
-      const node = initialResults[rank];
+      const node = initialResults[rank]!;
       const rrfScore = 1 / (K + rank + 1);
       const phraseScore = this.calculatePhraseBonus(query, node.content);
       allNodes.set(node.id, { node, rrfScore: rrfScore + phraseScore });
@@ -748,7 +748,7 @@ export class GraphRAGEngine {
     });
 
     for (let rank = 0; rank < sortedExpanded.length; rank++) {
-      const node = sortedExpanded[rank];
+      const node = sortedExpanded[rank]!;
       const pageRankScore = scores.get(node.id) ?? 0;
       const rrfScore = 1 / (K + rank + 1);
       let weightedScore = rrfScore * (0.5 + pageRankScore * 0.5);
