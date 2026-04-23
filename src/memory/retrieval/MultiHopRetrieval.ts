@@ -10,7 +10,8 @@
 
 import type { MemoryRow } from '../types.js';
 import type { LLMProvider } from '../../llm/provider.js';
-import { PassageCritique, type CritiqueResult } from './PassageCritique.js';
+import type { PassageCritique} from './PassageCritique.js';
+import { type CritiqueResult } from './PassageCritique.js';
 import { logger } from '../../utils/logger.js';
 
 export interface HopEntry {

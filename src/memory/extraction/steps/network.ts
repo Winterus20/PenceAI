@@ -1,18 +1,18 @@
 import validator from 'validator';
-import { ExtractorStep, ExtractionContext, ExtractedEntity } from '../types.js';
+import type { ExtractorStep, ExtractionContext, ExtractedEntity } from '../types.js';
 
 export class NetworkStep implements ExtractorStep {
     name = 'NetworkStep';
 
     async extract(context: ExtractionContext): Promise<ExtractionContext> {
-        let newUnprocessedText = context.unprocessedText;
+        const newUnprocessedText = context.unprocessedText;
         const newEntities: ExtractedEntity[] = [];
 
         // Basic tokenization by space to test with validator
         const tokens = newUnprocessedText.split(/\s+/);
 
         for (let i = 0; i < tokens.length; i++) {
-            let token = tokens[i];
+            const token = tokens[i];
 
             // Daha robust token temizleme: baştaki ve sondaki non-alphanumeric karakterleri temizle
             // Bu, tırnak, parantez, noktalama gibi karakterleri de kapsar

@@ -310,7 +310,7 @@ export function escapeFtsQuery(text: string, useOr: boolean = false): string {
     // Parantezleri kaldır
     escaped = escaped.replace(/[()]/g, '');
     // Yıldız ve diğer özel karakterleri kaldır
-    escaped = escaped.replace(/[*^~{}\[\]]/g, '');
+    escaped = escaped.replace(/[*^~{}[\]]/g, '');
     // Kelimelere ayır ve FTS operatörlerini filtrele
     const words = escaped.split(/\s+/).filter(w => {
         const upper = w.toUpperCase();

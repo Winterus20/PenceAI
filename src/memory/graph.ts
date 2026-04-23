@@ -597,7 +597,7 @@ export class MemoryGraphManager {
                     const baseRate = rel.decay_rate ?? DEFAULT_BASE_RATE;
                     const effectiveRate = baseRate / (1 + 0.1 * accessCount);
 
-                    let dSince = daysSince(rel.last_accessed_at);
+                    const dSince = daysSince(rel.last_accessed_at);
 
                     const effectiveConfidence = rel.confidence * Math.exp(-effectiveRate * dSince);
 

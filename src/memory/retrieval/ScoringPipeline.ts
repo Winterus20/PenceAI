@@ -1,6 +1,6 @@
 import type { RetrievalRankedEntry, BundleSelectionContext, RetrievalMemoryExplanation, RetrievalMemoryBreakdown } from './types.js';
 import type { MemoryRow } from '../types.js';
-import { RetrievalPrimer } from './RetrievalPrimer.js';
+import type { RetrievalPrimer } from './RetrievalPrimer.js';
 import type { RetrievalSpreadingActivationState } from './types.js';
 
 function localNormalizePrimerText(text: string): string {

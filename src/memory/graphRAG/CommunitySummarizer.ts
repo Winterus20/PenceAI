@@ -335,8 +335,12 @@ export class CommunitySummarizer {
       // 2. Markdown JSON block dene (```json veya ```)
       const jsonMatch = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
       if (jsonMatch) {
+        const jsonBlock = jsonMatch[1];
+        if (!jsonBlock) {
+          return this.generateFallbackSummary(community, members);
+        }
         try {
-          parsed = JSON.parse(jsonMatch[1]);
+          parsed = JSON.parse(jsonBlock);
           parseSuccess = true;
         } catch { /* devam et */ }
       }
@@ -361,17 +365,17 @@ export class CommunitySummarizer {
     // Safe extraction
     const summary = parsed.summary || content.substring(0, 500);
     const keyEntities = Array.isArray(parsed.keyEntities)
-      ? parsed.keyEntities.slice(0, 10).map((e: any) => ({
-          name: e?.name || '',
-          type: e?.type || 'unknown',
-          importance: typeof e?.importance === 'number' ? e.importance : 0.5,
+      ? parsed.keyEntities.slice(0, 10).map((e: Record<string, unknown> | null | undefined) => ({
+          name: typeof e?.name === 'string' ? (e.name as string) : '',
+          type: typeof e?.type === 'string' ? (e.type as string) : 'unknown',
+          importance: typeof e?.importance === 'number' ? (e.importance as number) : 0.5,
         }))
       : [];
     const keyRelations = Array.isArray(parsed.keyRelations)
-      ? parsed.keyRelations.slice(0, 5).map((r: any) => ({
-          source: r?.source || '',
-          target: r?.target || '',
-          type: r?.type || 'related_to',
+      ? parsed.keyRelations.slice(0, 5).map((r: Record<string, unknown> | null | undefined) => ({
+          source: typeof r?.source === 'string' ? (r.source as string) : '',
+          target: typeof r?.target === 'string' ? (r.target as string) : '',
+          type: typeof r?.type === 'string' ? (r.type as string) : 'related_to',
         }))
       : [];
     const topics = Array.isArray(parsed.topics) ? parsed.topics : [];

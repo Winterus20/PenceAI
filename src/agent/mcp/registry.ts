@@ -10,7 +10,7 @@
  * - Tek bir executeTool() interface'i sağlar
  */
 
-import { MCPClientManager } from './client.js';
+import type { MCPClientManager } from './client.js';
 import { createBuiltinTools, type ToolExecutor } from '../tools.js';
 import { getBuiltinToolDefinitions } from '../prompt.js';
 import type { MemoryManager } from '../../memory/manager.js';

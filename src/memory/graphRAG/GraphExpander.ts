@@ -14,7 +14,8 @@ import type {
   MemoryRelationRow,
   NeighborResult,
 } from '../types.js';
-import { GraphCache, computeQueryHash, evaluateBeforePromote } from './GraphCache.js';
+import type { GraphCache} from './GraphCache.js';
+import { computeQueryHash, evaluateBeforePromote } from './GraphCache.js';
 import { logger } from '../../utils/logger.js';
 
 /** Default ayarlar */

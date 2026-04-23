@@ -21,7 +21,7 @@
  * LLM entegrasyonu üst katmanda (agent/runtime) yapılacaktır.
  */
 
-import { MemoryManager } from '../memory/manager.js';
+import type { MemoryManager } from '../memory/manager.js';
 import type { MemoryRow } from '../memory/types.js';
 import { computeRetention, daysSinceAccess } from '../memory/ebbinghaus.js';
 import { logger } from '../utils/logger.js';

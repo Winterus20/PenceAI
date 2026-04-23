@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import { MCPServerConfigSchema } from '../../agent/mcp/types.js';
-import { MCPServerRecord, MCPServerLifecycleStatus } from '../../agent/mcp/marketplace-types.js';
+import type { MCPServerRecord, MCPServerLifecycleStatus } from '../../agent/mcp/marketplace-types.js';
 import { getMarketplaceCatalog, searchCatalog, catalogToConfig } from '../../agent/mcp/marketplace-service.js';
 import { MCPClientManager } from '../../agent/mcp/client.js';
 import { getUnifiedToolRegistry } from '../../agent/mcp/registry.js';

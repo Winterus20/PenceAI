@@ -6,7 +6,7 @@ import { buildSystemPrompt } from './prompt.js';
 import { injectFallbackToolDirectives } from './toolPromptBuilder.js';
 import { formatRecentContextMessages } from './runtimeContext.js';
 import { GraphRAGConfigManager } from '../memory/graphRAG/config.js';
-import { MemoryManager } from '../memory/manager.js';
+import type { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/index.js';
 
 export interface PreparedContext {

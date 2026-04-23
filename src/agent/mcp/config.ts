@@ -6,7 +6,8 @@
  */
 
 import { z } from 'zod';
-import { MCPServerConfigSchema, MCPServerConfig, MCPRuntimeOptions, DEFAULT_MCP_RUNTIME_OPTIONS } from './types.js';
+import type { MCPServerConfig, MCPRuntimeOptions} from './types.js';
+import { MCPServerConfigSchema, DEFAULT_MCP_RUNTIME_OPTIONS } from './types.js';
 import { isCommandSafe } from './command-validator.js';
 import { logger } from '../../utils/logger.js';
 

@@ -1,4 +1,4 @@
-import { ExtractorStep, ExtractionContext, ExtractedEntity } from '../types.js';
+import type { ExtractorStep, ExtractionContext, ExtractedEntity } from '../types.js';
 
 export class KnownEntitiesStep implements ExtractorStep {
     name = 'KnownEntitiesStep';

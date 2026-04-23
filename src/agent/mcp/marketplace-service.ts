@@ -5,8 +5,8 @@
  * server'ları çekme ve catalog-to-config dönüşüm işlemleri.
  */
 
-import { MCPServerCatalogEntry } from './marketplace-types.js';
-import { MCPServerConfig } from './types.js';
+import type { MCPServerCatalogEntry } from './marketplace-types.js';
+import type { MCPServerConfig } from './types.js';
 import { logger } from '../../utils/logger.js';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';

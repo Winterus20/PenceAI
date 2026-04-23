@@ -3,7 +3,7 @@ import type { MemoryManager } from '../../memory/manager.js';
 import type { LLMProvider } from '../../llm/provider.js';
 import type { FeedbackManager } from '../../autonomous/urgeFilter.js';
 import type { SubAgentManager } from '../../autonomous/curiosityEngine.js';
-import { BackgroundWorker } from '../../autonomous/index.js';
+import type { BackgroundWorker } from '../../autonomous/index.js';
 import { filterThought } from '../../autonomous/urgeFilter.js';
 import { think } from '../../autonomous/thinkEngine.js';
 import { TaskPriority } from '../../autonomous/index.js';

@@ -1,4 +1,5 @@
-import { Client, GatewayIntentBits, Message, Partials, AttachmentBuilder } from 'discord.js';
+import type { Message} from 'discord.js';
+import { Client, GatewayIntentBits, Partials, AttachmentBuilder } from 'discord.js';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../../utils/logger.js';
 import type { Channel, UnifiedMessage, MessageResponse, Attachment } from '../../router/types.js';

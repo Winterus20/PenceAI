@@ -1,6 +1,6 @@
 import type { LLMProvider } from '../llm/provider.js';
 import type { UnifiedMessage, ConversationMessage } from '../router/types.js';
-import { MemoryManager } from '../memory/manager.js';
+import type { MemoryManager } from '../memory/manager.js';
 import type { PromptContextBundle } from '../memory/manager/types.js';
 
 import type { ConfirmCallback } from './tools.js';
@@ -12,9 +12,9 @@ import type { TaskQueue } from '../autonomous/queue.js';
 import { TaskPriority } from '../autonomous/queue.js';
 import { pruneConversationHistory } from './runtimeContext.js';
 import { getConfig } from '../gateway/config.js';
-import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
+import type { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
 import { GraphRAGManager } from './graphRAGManager.js';
-import { ResponseVerifier } from '../memory/retrieval/ResponseVerifier.js';
+import type { ResponseVerifier } from '../memory/retrieval/ResponseVerifier.js';
 import { MetricsTracker } from './metricsTracker.js';
 import { ContextPreparer } from './contextPreparer.js';
 import { MemoryExtractor } from './memoryExtractor.js';
@@ -231,7 +231,7 @@ constructor(llm: LLMProvider, memory: MemoryManager) {
         };
 
         const userMessage = this.createUserConversationMessage(message, getBase64);
-        let { conversationId, previousConversationId, history } = this.beginConversationTurn(message, userMessage);
+        const { conversationId, previousConversationId, history } = this.beginConversationTurn(message, userMessage);
 
         this.handleClosedConversation(previousConversationId);
 
@@ -396,7 +396,7 @@ history: finalHistory,
             compactThreshold: getConfig().compactTokenThreshold,
         });
 
-        let response = loopResult.uiContent;
+        const response = loopResult.uiContent;
         const totalDuration = Date.now() - startTimeMs;
         logger.info(`[Agent] ✅ Yanıt oluşturuldu (${response.length} karakter, ${loopResult.iterations} iterasyon, toplam: ${totalDuration}ms)`);
 

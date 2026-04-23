@@ -1,4 +1,4 @@
-import { ExtractorStep, ExtractionContext, ExtractedEntity, ExtractedRelation } from '../types.js';
+import type { ExtractorStep, ExtractionContext, ExtractedEntity, ExtractedRelation } from '../types.js';
 
 export class LLMFallbackStep implements ExtractorStep {
     name = 'LLMFallbackStep';

@@ -3,7 +3,8 @@
  * index.ts'den çıkarıldı.
  */
 
-import { WebSocketServer, WebSocket } from 'ws';
+import type { WebSocketServer} from 'ws';
+import { WebSocket } from 'ws';
 import { z } from 'zod';
 import type { ConfirmCallback } from '../agent/tools.js';
 import type { MemoryManager } from '../memory/manager.js';

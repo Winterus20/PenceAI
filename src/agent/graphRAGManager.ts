@@ -1,8 +1,8 @@
 import type { MemoryRow } from '../memory/types.js';
 import type { PromptContextBundle } from '../memory/manager/types.js';
-import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
+import type { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
 import { GraphRAGConfigManager } from '../memory/graphRAG/config.js';
-import { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
+import type { ShadowMode } from '../memory/graphRAG/ShadowMode.js';
 import { logger } from '../utils/index.js';
 
 export interface GraphRAGRetrieveResult {

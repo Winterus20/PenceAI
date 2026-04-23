@@ -1,4 +1,5 @@
-import express, { Router } from 'express';
+import type { Router } from 'express';
+import express from 'express';
 import { logger } from '../../utils/logger.js';
 import { MCPServerConfigSchema } from '../../agent/mcp/types.js';
 import {

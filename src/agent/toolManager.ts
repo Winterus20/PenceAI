@@ -8,7 +8,7 @@ import { isMCPEnabled } from './mcp/config.js';
 import { getHookRegistry } from './mcp/hooks.js';
 import { getConfig } from '../gateway/config.js';
 import type { HookContext } from './mcp/hookTypes.js';
-import { MemoryManager } from '../memory/manager.js';
+import type { MemoryManager } from '../memory/manager.js';
 import type { MetricsTracker } from './metricsTracker.js';
 import { logger } from '../utils/index.js';
 

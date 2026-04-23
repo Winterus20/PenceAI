@@ -259,7 +259,11 @@ export class GraphWorker {
     // Minimum 1 saniye, maksimum 1 dakika bekle
     const checkDelay = Math.max(1000, Math.min(minDelay, 60 * 1000));
 
-    this.timer = setTimeout(() => this.checkAndRun(), checkDelay);
+    this.timer = setTimeout(() => {
+      this.checkAndRun().catch(err => {
+        logger.error({ err }, '[GraphWorker] Unexpected error in checkAndRun loop');
+      });
+    }, checkDelay);
   }
 
   /**
@@ -374,7 +378,7 @@ export class GraphWorker {
    */
   private isHardwareOverloaded(): boolean {
     const isWindows = os.platform() === 'win32';
-    const load = isWindows ? 0 : os.loadavg()[0];
+    const load = isWindows ? 0 : (os.loadavg()[0] ?? 0);
     const freeMemRatio = os.freemem() / os.totalmem();
 
     if (!isWindows && load > this.config.cpuLoadThreshold) {

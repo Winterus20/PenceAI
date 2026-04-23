@@ -3,7 +3,7 @@ import type { IncomingMessage, Server as HttpServer } from 'http';
 import fs from 'fs';
 import path from 'path';
 import type { Duplex } from 'stream';
-import { WebSocketServer } from 'ws';
+import type { WebSocketServer } from 'ws';
 
 import { runWithTraceId, logger } from '../utils/logger.js';
 

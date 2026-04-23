@@ -19,16 +19,17 @@ import type { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdi
 import type { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import type { Tool, CallToolResult, ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
 
-import {
+import type {
   MCPServerConfig,
-  MCPToolDefinition,
   MCPToolCallArgs,
-  MCPToolCallResult,
   MCPServerStatus,
   MCPServerStatusInfo,
   MCPEvent,
   MCPEventCallback,
-  UnifiedToolDefinition,
+  UnifiedToolDefinition} from './types.js';
+import {
+  MCPToolDefinition,
+  MCPToolCallResult
 } from './types.js';
 import { createTransport, connectClient, disconnectClient } from './transport.js';
 import { MCPSecurityManager } from './security.js';

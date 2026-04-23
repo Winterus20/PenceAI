@@ -1,6 +1,6 @@
 import type { RetrievalSpreadingActivationState, RetrievalSpreadingActivationConfig, BundleSelectionContext, RetrievalSpreadingActivationSkipSummary, RetrievalOrchestratorDeps, RetrievalSpreadingActivationReason, RetrievalActivatedCandidateSummary, MemoryRelationNeighbor } from './types.js';
 import type { MemoryRow } from '../types.js';
-import { RetrievalPrimer } from './RetrievalPrimer.js';
+import type { RetrievalPrimer } from './RetrievalPrimer.js';
 
 function localNormalizeConfidence(confidence: number | null | undefined): number {
     if (!Number.isFinite(confidence)) return 0.7;

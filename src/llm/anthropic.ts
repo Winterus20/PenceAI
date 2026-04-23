@@ -250,10 +250,13 @@ export class AnthropicProvider extends LLMProvider {
                 messages: [{ role: 'user', content: '.' }],
             });
             return true;
-        } catch (err: any) {
+        } catch (err: unknown) {
             // 401 = gecersiz API key, 403 = yetkisiz
             // Diger hatalar (rate limit, network) false doner
-            return err.status !== 401 && err.status !== 403;
+            if (err instanceof Error && 'status' in err) {
+                return (err as any).status !== 401 && (err as any).status !== 403;
+            }
+            return false;
         }
     }
 }

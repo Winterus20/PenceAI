@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
-import { exec, execFile } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as shellQuote from 'shell-quote';
 import { Readability } from '@mozilla/readability';
@@ -10,7 +10,7 @@ import TurndownService from 'turndown';
 import { z } from 'zod';
 import { glob } from 'glob';
 import { getConfig } from '../gateway/config.js';
-import { MemoryManager } from '../memory/manager.js';
+import type { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/logger.js';
 import { SmartSearchEngine } from './search/index.js';
 
@@ -881,13 +881,13 @@ function extractPathsFromCommand(command: string): string[] {
     // 1) Çift tırnaklı yollar: "C:\some path\..."
     const doubleQuoted = command.matchAll(/"([^"]+)"/g);
     for (const m of doubleQuoted) {
-        if (looksLikePath(m[1])) paths.push(m[1]);
+        if (m[1] && looksLikePath(m[1])) paths.push(m[1]);
     }
 
     // 2) Tek tırnaklı yollar: 'C:\some path\...'
     const singleQuoted = command.matchAll(/'([^']+)'/g);
     for (const m of singleQuoted) {
-        if (looksLikePath(m[1])) paths.push(m[1]);
+        if (m[1] && looksLikePath(m[1])) paths.push(m[1]);
     }
 
     // 3) Tırnaksız yollar — boşluklarla veya "=" işaretiyle ayrılmış tokenlardan çıkar
@@ -911,7 +911,7 @@ function extractPathsFromCommand(command: string): string[] {
 function looksLikePath(s: string): boolean {
     if (!s || s.length < 3) return false;
     // Windows mutlak yol: C:\..., D:\...
-    if (/^[A-Za-z]:[\\\/]/.test(s)) return true;
+    if (/^[A-Za-z]:[\\/]/.test(s)) return true;
     // Windows UNC: \\server\...
     if (s.startsWith('\\\\')) return true;
     // Unix mutlak yol: /home/..., /usr/...

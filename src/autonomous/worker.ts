@@ -1,4 +1,5 @@
-import { TaskQueue, AutonomousTask } from './queue.js';
+import type { TaskQueue} from './queue.js';
+import { AutonomousTask } from './queue.js';
 import { logger } from '../utils/logger.js';
 import os from 'os';
 

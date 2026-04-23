@@ -8,30 +8,18 @@ import type { ConversationSummary } from './manager/types.js';
 import type {
     BundleSelectionContext,
     CognitiveLoadAssessment,
-    CognitiveLoadLevel,
-    DualProcessMode,
     DualProcessRoutingSnapshot,
     PromptContextRecipe,
     PromptContextRequest,
-    RetrievalActivatedCandidateSummary,
     RetrievalBehaviorDiscoveryConfig,
     RetrievalBehaviorDiscoveryShadowPlan,
     RetrievalBudgetApplication,
-    RetrievalCoverageGap,
     RetrievalIntentSignals,
-    RetrievalMemoryBreakdown,
     RetrievalMemoryExplanation,
     RetrievalOrchestratorDeps,
     RetrievalPrimerSnapshot,
-    RetrievalPrimingBonusSummary,
-    RetrievalRankedEntry,
-    RetrievalSecondPassAdjustment,
     RetrievalSecondPassAuditSnapshot,
     RetrievalSelectionSnapshot,
-    RetrievalSpreadingActivationConfig,
-    RetrievalSpreadingActivationReason,
-    RetrievalSpreadingActivationSkipSummary,
-    RetrievalSpreadingActivationSnapshot,
     RetrievalSpreadingActivationState,
     RetrievalTypePreference,
 } from './retrieval/types.js';
@@ -84,7 +72,7 @@ export type {
     RetrievalBehaviorDiscoveryShadowPlan,
     MemoryRelationNeighbor,
 } from './retrieval/types.js';
-import { GraphRAGEngine, type GraphRAGResult } from './graphRAG/index.js';
+import { type GraphRAGResult } from './graphRAG/index.js';
 import { logger } from '../utils/logger.js';
 
 function estimateMemoryTokenCount(memories: MemoryRow[]): number {
@@ -192,7 +180,7 @@ export class MemoryRetrievalOrchestrator {
     private createSelectionSnapshot(
         candidates: MemoryRow[],
         selected: MemoryRow[],
-        activeConversationId: string,
+        _activeConversationId: string,
     ): RetrievalSelectionSnapshot {
         return {
             candidateCount: candidates.length,
@@ -508,7 +496,7 @@ export class MemoryRetrievalOrchestrator {
         const dualProcess = this.budgetApplier.resolveDualProcessRouting(query, signals, recipe, cognitiveLoad, baseBudgetApplication);
         const budgetApplication = this.budgetApplier.applyDualProcessAdjustments(dualProcess, baseBudgetApplication);
 
-        let agenticFilteredMemories: MemoryRow[] = searchResult.active;
+        const agenticFilteredMemories: MemoryRow[] = searchResult.active;
 
         const relevantCandidateLimit = Math.max(budgetApplication.relevantLimit, searchLimit);
         const conversationPrioritized = this.deps.prioritizeConversationMemories(

@@ -1,4 +1,4 @@
-import { ExtractorStep, ExtractionContext } from './types.js';
+import type { ExtractorStep, ExtractionContext } from './types.js';
 import { logger } from '../../utils/logger.js';
 
 export class ExtractorPipeline {

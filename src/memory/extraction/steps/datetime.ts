@@ -1,5 +1,5 @@
 import * as chrono from 'chrono-node';
-import { ExtractorStep, ExtractionContext, ExtractedEntity } from '../types.js';
+import type { ExtractorStep, ExtractionContext, ExtractedEntity } from '../types.js';
 
 export class DateTimeStep implements ExtractorStep {
     name = 'DateTimeStep';

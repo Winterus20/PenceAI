@@ -85,7 +85,7 @@ export class MemoryExtractor {
             const combinedUser = batchedContext.map(c => c.user).join('\n');
             const combinedAssistant = batchedContext.map(c => c.assistant).join('\n');
             const combinedPrev = batchedContext.map(c => c.prevAssistant).filter(Boolean).join('\n');
-            const contextUserName = batchedContext[0].userName || 'Kullanıcı';
+            const contextUserName = batchedContext[0]?.userName || 'Kullanıcı';
 
             logger.info(`[Agent] 🚀 Hafif tarama başlatıldı (${batchedContext.length} mesaj çifti birleştirildi, interval=${interval})`);
 
@@ -457,17 +457,17 @@ export class MemoryExtractor {
                 }
                 return {
                     entities: Array.isArray(parsed.entities) ? parsed.entities.filter(
-                        (e): e is { name: string; type: string } =>
-                            e != null && typeof e.name === 'string' && e.name.length > 0
-                    ).map((e) => ({
+                                (e): e is { name: string; type: string } =>
+                                    e !== null && e !== undefined && typeof e.name === 'string' && e.name.length > 0
+                            ).map((e) => ({
                         name: e.name,
                         type: ['person', 'technology', 'project', 'place', 'organization', 'concept'].includes(e.type) ? e.type : 'concept',
                     })) : [],
                     relations: Array.isArray(parsed.relations) ? parsed.relations.filter(
-                        (r): r is { targetMemoryId: number; relationType?: string; relation?: string; confidence?: number; description?: string } =>
-                            r != null && typeof r.targetMemoryId === 'number' &&
-                            filteredRelated.some(m => m.id === r.targetMemoryId)
-                    ).map((r) => ({
+                                (r): r is { targetMemoryId: number; relationType?: string; relation?: string; confidence?: number; description?: string } =>
+                                    r !== null && r !== undefined && typeof r.targetMemoryId === 'number' &&
+                                    filteredRelated.some(m => m.id === r.targetMemoryId)
+                            ).map((r) => ({
                         targetMemoryId: r.targetMemoryId,
                         relationType: ['related_to', 'supports', 'contradicts', 'caused_by', 'part_of'].includes(r.relationType ?? r.relation ?? '') ? (r.relationType ?? r.relation ?? 'related_to') : 'related_to',
                         confidence: typeof r.confidence === 'number' ? Math.min(1, Math.max(0, r.confidence)) : 0.5,

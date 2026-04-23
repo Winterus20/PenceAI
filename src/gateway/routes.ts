@@ -14,7 +14,7 @@ import { AppError } from '../errors/AppError.js';
 import { BASE_SYSTEM_PROMPT } from '../agent/prompt.js';
 import { logger } from '../utils/logger.js';
 import { logRingBuffer } from '../utils/logRingBuffer.js';
-import { AgentRuntime } from '../agent/runtime.js';
+import type { AgentRuntime } from '../agent/runtime.js';
 import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../memory/graphRAG/config.js';
 import { BehaviorDiscoveryShadow } from '../memory/graphRAG/BehaviorDiscoveryShadow.js';
 import type { MemoryGraph, GraphNode, GraphEdge } from '../memory/types.js';

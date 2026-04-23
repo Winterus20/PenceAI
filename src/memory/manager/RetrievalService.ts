@@ -814,7 +814,7 @@ export class RetrievalService {
     }
 
     // 4. Community bilgisi ekle
-    let communitySummaries: CommunitySummary[] = [];
+    const communitySummaries: CommunitySummary[] = [];
     if (useCommunities && communitySummarizer) {
       const expandedNodeIds = expansion.nodes.map(n => n.id);
       const communities = communityDetector?.detectLocalCommunity(expandedNodeIds, maxHops) ?? [];

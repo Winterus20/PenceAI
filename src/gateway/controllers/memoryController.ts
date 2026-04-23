@@ -1,4 +1,5 @@
-import express, { Router } from 'express';
+import type { Router } from 'express';
+import express from 'express';
 import { logger } from '../../utils/logger.js';
 import type { MemoryManager } from '../../memory/manager.js';
 import type { MessageRouter } from '../../router/index.js';
@@ -238,9 +239,9 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
                   const db = memory.getDatabase();
                   if (db) {
                       const scorer = new PageRankScorer(db);
-                      const allNodeIds = limitedGraph.nodes
-                          .filter((n: GraphNode) => n.type === 'memory' && n.rawId != null)
-                          .map((n: GraphNode) => n.rawId!);
+          const allNodeIds = limitedGraph.nodes
+              .filter((n: GraphNode) => n.type === 'memory' && n.rawId !== null && n.rawId !== undefined)
+              .map((n: GraphNode) => n.rawId!);
                       if (allNodeIds.length > 0) {
                           pageRankScores = scorer.scoreSubgraph(allNodeIds);
                       }
@@ -251,7 +252,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
               }
           }
 
-          let communityMap = new Map<number, string>();
+          const communityMap = new Map<number, string>();
           if (doCommunities) {
               try {
                   const db = memory.getDatabase();

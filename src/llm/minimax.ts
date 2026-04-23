@@ -34,11 +34,11 @@ export class MiniMaxProvider extends LLMProvider {
         return /auto tool choice requires .*enable-auto-tool-choice.*tool-call-parser|tool_choice.+auto|tool choice.+auto/i.test(error.message);
     }
 
-    private async createChatCompletionWithToolFallback(reqOpts: Record<string, unknown>): Promise<any> {
+    private async createChatCompletionWithToolFallback(reqOpts: Record<string, unknown>): Promise<unknown> {
         try {
             return await (this.client.chat.completions as any).create(reqOpts);
         } catch (error) {
-            if (!reqOpts?.tools || (reqOpts.tools as any[]).length === 0 || !this.isAutoToolChoiceUnsupported(error)) {
+            if (!reqOpts?.tools || !Array.isArray(reqOpts.tools) || reqOpts.tools.length === 0 || !this.isAutoToolChoiceUnsupported(error)) {
                 throw error;
             }
 
@@ -129,6 +129,9 @@ export class MiniMaxProvider extends LLMProvider {
         }) as OpenAI.Chat.ChatCompletion;
 
         const choice = response.choices[0];
+        if (!choice) {
+            throw new LLMError('Minimax API boş yanıt döndürdü (choice yok)');
+        }
 
         // Thinking içeriğini çıkar (reasoning_split: true ise reasoning_details alanında olur)
         let thinkingContent: string | undefined;

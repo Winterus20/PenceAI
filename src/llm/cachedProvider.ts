@@ -14,7 +14,7 @@
 
 import { LLMProvider, type ChatOptions } from './provider.js';
 import type { LLMMessage, LLMResponse } from '../router/types.js';
-import { LLMCacheService } from './llmCache.js';
+import type { LLMCacheService } from './llmCache.js';
 import { logger } from '../utils/logger.js';
 
 export class CachedLLMProvider extends LLMProvider {

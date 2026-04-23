@@ -8,7 +8,7 @@ import { extractFallbackToolCalls } from './fallbackParser.js';
 import { getConfig } from '../gateway/config.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/index.js';
-import { CompactEngine } from './compactEngine.js';
+import type { CompactEngine } from './compactEngine.js';
 import { getHookRegistry } from './mcp/hooks.js';
 
 export interface ReActLoopInput {

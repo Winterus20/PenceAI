@@ -15,7 +15,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { PenceDatabase } from '../database.js';
+import type { PenceDatabase } from '../database.js';
 import type { ConversationMessage, ChannelType } from '../../router/types.js';
 import { createEmbeddingProvider, type EmbeddingProvider } from '../embeddings.js';
 import { getConfig } from '../../gateway/config.js';
@@ -24,7 +24,7 @@ import type { TaskQueue } from '../../autonomous/queue.js';
 import { MemoryGraphManager } from '../graph.js';
 import { MemoryRetrievalOrchestrator } from '../retrievalOrchestrator.js';
 import type { LLMProvider } from '../../llm/provider.js';
-import { GraphRAGEngine } from '../graphRAG/GraphRAGEngine.js';
+import type { GraphRAGEngine } from '../graphRAG/GraphRAGEngine.js';
 import {
   type MemoryRow,
   type MessageRow,
