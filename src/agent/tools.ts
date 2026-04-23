@@ -792,8 +792,8 @@ export function createBuiltinTools(
 
           // Allowlist kontrolü — base komut listede olmalı
           const baseCmd = normalized.split(/\s+/)[0];
-          if (!SHELL_COMMAND_ALLOWLIST.has(baseCmd)) {
-            return `⛔ Güvenlik: "${baseCmd}" komutu allowlist'te yok. İzin verilen komutlar: ${Array.from(SHELL_COMMAND_ALLOWLIST).join(', ')}`;
+          if (!baseCmd || !SHELL_COMMAND_ALLOWLIST.has(baseCmd)) {
+            return `⛔ Güvenlik: "${baseCmd || 'Bilinmeyen'}" komutu allowlist'te yok. İzin verilen komutlar: ${Array.from(SHELL_COMMAND_ALLOWLIST).join(', ')}`;
           }
 
           // cwd parametresi güvenlik kontrolü

@@ -85,7 +85,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         }
         paths.push(newPath.trim());
         memory.setSensitivePaths(paths);
-        res.json(paths);
+        return res.json(paths);
     });
 
     app.delete('/api/settings/sensitive-paths', validateBody(SensitivePathSchema), (req, res) => {

@@ -115,14 +115,14 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
         return res.status(404).json({ error: 'Konuşma bulunamadı' });
       }
       broadcastStats();
-      res.json({ success: true });
+      return res.json({ success: true });
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
       if (err.message?.includes('not found')) {
         return res.status(404).json({ error: err.message });
       }
       logger.error({ err }, '[API] Delete conversation failed');
-      res.status(500).json({ error: 'Delete failed' });
+      return res.status(500).json({ error: 'Delete failed' });
     }
   });
 
@@ -184,7 +184,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
   expressRouter.get('/memories/search', validateQuery(SearchMemoriesQuerySchema), (req, res) => {
       const q = (req.query as Record<string, string>).q;
       try {
-          const results = memory.searchMemories(q.trim(), 20);
+          const results = memory.searchMemories((q || '').trim(), 20);
           res.json(results);
       } catch (error: unknown) {
           const err = error instanceof Error ? error : new Error(String(error));
