@@ -114,14 +114,6 @@ const ConfigSchema = z.object({
   agenticRAGVerificationSupportFloor: z.coerce.number().min(0).max(1).default(0.6),
   agenticRAGVerificationUtilityFloor: z.coerce.number().min(1).max(5).default(2),
   agenticRAGMaxRegenerations: z.coerce.number().min(0).max(3).default(1),
-
-  // GraphRAG
-  graphRAGEnabled: z.coerce.boolean().default(true),
-  graphRAGSampleRate: z.coerce.number().min(0).max(1).default(1.0),
-  graphRAGMaxHops: z.coerce.number().min(1).max(5).default(3),
-  graphRAGTokenBudget: z.coerce.number().min(4000).max(128000).default(48000),
-  graphRAGUsePageRank: z.coerce.boolean().default(true),
-  graphRAGUseCommunities: z.coerce.boolean().default(true),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema> & {
@@ -202,14 +194,6 @@ export function loadConfig(): AppConfig {
         agenticRAGVerificationSupportFloor: process.env.AGENTIC_RAG_VERIFICATION_SUPPORT_FLOOR,
         agenticRAGVerificationUtilityFloor: process.env.AGENTIC_RAG_VERIFICATION_UTILITY_FLOOR,
         agenticRAGMaxRegenerations: process.env.AGENTIC_RAG_MAX_REGENERATIONS,
-
-        // GraphRAG
-        graphRAGEnabled: process.env.GRAPH_RAG_ENABLED,
-        graphRAGSampleRate: process.env.GRAPH_RAG_SAMPLE_RATE,
-        graphRAGMaxHops: process.env.GRAPH_RAG_MAX_HOPS,
-        graphRAGTokenBudget: process.env.GRAPH_RAG_TOKEN_BUDGET,
-        graphRAGUsePageRank: process.env.GRAPH_RAG_USE_PAGE_RANK,
-        graphRAGUseCommunities: process.env.GRAPH_RAG_USE_COMMUNITIES,
     };
 
     const parsed = ConfigSchema.safeParse(rawConfig);

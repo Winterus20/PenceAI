@@ -9,14 +9,10 @@
  * Faz 2 (SHADOW): Shadow mode aktif (%10 sorgu shadow'da test)
  * Faz 3 (PARTIAL): Kısmi aktif (%30 sorgu GraphRAG ile)
  * Faz 4 (FULL): Tam aktif (%100 sorgu GraphRAG ile)
- * 
- * Production için: config.ts'den GRAPH_RAG_ENABLED=true ile tam mode'a geçilir.
- * Shadow mode otomatik olarak devre dışı kalır.
  */
 
 import { logger } from '../../utils/logger.js';
 import { ValidationError } from '../../errors/ValidationError.js';
-import { getConfig } from '../../gateway/config.js';
 
 /** GraphRAG feature flag */
 export interface GraphRAGFeatureFlag {
@@ -128,46 +124,13 @@ export const ROLLOUT_PHASE_CONFIG: Record<GraphRAGRolloutPhase, GraphRAGFeatureF
   }
 };
 
-/**
- * Get config from AppConfig (gateway/config.ts).
- * Returns FULL phase config when GRAPH_RAG_ENABLED=true (production mode).
- */
-function getDefaultConfig(): GraphRAGFeatureFlag {
-  // Canonical FULL config - avoid duplication
-  const FULL_CONFIG = ROLLOUT_PHASE_CONFIG[GraphRAGRolloutPhase.FULL];
-  
-  try {
-    const appConfig = getConfig();
-    
-    // Production mode: GraphRAG enabled, shadow mode OFF
-    if (appConfig.graphRAGEnabled !== false) {
-      logger.info('[GraphRAGConfig] Production mode: GraphRAG enabled, shadow mode OFF');
-      return {
-        ...FULL_CONFIG,
-        shadowMode: false,  // PRODUCTION: Shadow mode KAPALI
-        sampleRate: appConfig.graphRAGSampleRate ?? FULL_CONFIG.sampleRate,
-        maxHops: appConfig.graphRAGMaxHops ?? FULL_CONFIG.maxHops,
-        usePageRank: appConfig.graphRAGUsePageRank ?? FULL_CONFIG.usePageRank,
-        useCommunities: appConfig.graphRAGUseCommunities ?? FULL_CONFIG.useCommunities,
-        tokenBudget: appConfig.graphRAGTokenBudget ?? FULL_CONFIG.tokenBudget,
-      };
-    }
-    
-    // GraphRAG disabled
-    logger.info('[GraphRAGConfig] GraphRAG disabled via GRAPH_RAG_ENABLED=false');
-    return ROLLOUT_PHASE_CONFIG[GraphRAGRolloutPhase.OFF];
-  } catch (err) {
-    // Fallback: Use canonical FULL config
-    logger.warn({ err }, '[GraphRAGConfig] AppConfig not available, using FULL defaults');
-    return FULL_CONFIG;
-  }
-}
-
 /** Başlangıç config'i: FULL mode — tüm sorgularda GraphRAG aktif */
 export const CURRENT_ROLLOUT_PHASE = GraphRAGRolloutPhase.FULL;
 
-/** Default config — AppConfig'den veya FULL phase'den türetilir */
-export const DEFAULT_GRAPH_RAG_CONFIG: GraphRAGFeatureFlag = getDefaultConfig();
+/** Default config — CURRENT_ROLLOUT_PHASE'den türetilir */
+export const DEFAULT_GRAPH_RAG_CONFIG: GraphRAGFeatureFlag = {
+  ...ROLLOUT_PHASE_CONFIG[CURRENT_ROLLOUT_PHASE]
+};
 
 /** Config validation kuralları */
 const CONFIG_VALIDATION_RULES = {
