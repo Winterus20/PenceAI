@@ -389,12 +389,23 @@ export class MemoryRetrievalOrchestrator {
 
     private async phase2Retrieval(request: PromptContextRequest, phase1: Phase1Result): Promise<Phase2Result> {
         const { query, options } = request;
-        const { signals, recipe, skipHeavyRetrieval } = phase1;
+        const { signals, recipe } = phase1;
+        let { skipHeavyRetrieval } = phase1;
         const searchLimit = options?.searchLimit ?? 10;
         const summaryLimit = options?.summaryLimit ?? 5;
         const reviewLimit = options?.reviewLimit ?? 5;
         const followUpDays = options?.followUpDays ?? 14;
         const followUpLimit = options?.followUpLimit ?? 3;
+
+        // Adaptive routing: küçük bellek setlerinde masraflı path'leri atla
+        const appConfig = getConfig();
+        if (!skipHeavyRetrieval && appConfig.wikiAdaptiveThreshold > 0) {
+            const sampleMemories = await Promise.resolve(this.deps.getUserMemories(100));
+            if (sampleMemories.length < appConfig.wikiAdaptiveThreshold) {
+                skipHeavyRetrieval = true;
+                logger.info(`[AdaptiveRetrieval] Memory set size ${sampleMemories.length} < threshold ${appConfig.wikiAdaptiveThreshold} — forcing keyword-only strategy`);
+            }
+        }
 
         let graphRAGResult: GraphRAGResult | null = null;
         const resolvedEngine = typeof this.deps.graphRAGEngine === 'function'

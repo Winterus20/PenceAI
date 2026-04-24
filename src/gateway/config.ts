@@ -114,6 +114,16 @@ const ConfigSchema = z.object({
   agenticRAGVerificationSupportFloor: z.coerce.number().min(0).max(1).default(0.6),
   agenticRAGVerificationUtilityFloor: z.coerce.number().min(1).max(5).default(2),
   agenticRAGMaxRegenerations: z.coerce.number().min(0).max(3).default(1),
+
+  // Karpathy LLM Wiki Feature Flags
+  enableMemoryLint: z.coerce.boolean().default(true),
+  lintPassIntervalHours: z.coerce.number().min(1).max(720).default(168),
+  lintLLMValidationEnabled: z.coerce.boolean().default(true),
+  lintDeterministicThresholdJaccard: z.coerce.number().min(0).max(1).default(0.8),
+  lintMaxLLMPairsPerRun: z.coerce.number().min(0).max(100).default(20),
+  enableProvenanceTracking: z.coerce.boolean().default(true),
+  wikiExportDir: z.string().default('./exports'),
+  wikiAdaptiveThreshold: z.coerce.number().min(0).max(10000).default(100),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema> & {
@@ -194,6 +204,16 @@ export function loadConfig(): AppConfig {
         agenticRAGVerificationSupportFloor: process.env.AGENTIC_RAG_VERIFICATION_SUPPORT_FLOOR,
         agenticRAGVerificationUtilityFloor: process.env.AGENTIC_RAG_VERIFICATION_UTILITY_FLOOR,
         agenticRAGMaxRegenerations: process.env.AGENTIC_RAG_MAX_REGENERATIONS,
+
+        // Karpathy LLM Wiki Feature Flags
+        enableMemoryLint: process.env.ENABLE_MEMORY_LINT,
+        lintPassIntervalHours: process.env.LINT_PASS_INTERVAL_HOURS,
+        lintLLMValidationEnabled: process.env.LINT_LLM_VALIDATION_ENABLED,
+        lintDeterministicThresholdJaccard: process.env.LINT_DETERMINISTIC_THRESHOLD_JACCARD,
+        lintMaxLLMPairsPerRun: process.env.LINT_MAX_LLM_PAIRS_PER_RUN,
+        enableProvenanceTracking: process.env.ENABLE_PROVENANCE_TRACKING,
+        wikiExportDir: process.env.WIKI_EXPORT_DIR,
+        wikiAdaptiveThreshold: process.env.WIKI_ADAPTIVE_THRESHOLD,
     };
 
     const parsed = ConfigSchema.safeParse(rawConfig);

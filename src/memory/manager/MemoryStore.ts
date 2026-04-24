@@ -34,6 +34,9 @@ import { decideMemoryMerge, decideReconsolidationPilot, normalizeMemoryWriteInpu
 import type { EmbeddingProvider } from '../embeddings.js';
 import type { TaskQueue } from '../../autonomous/queue.js';
 import type { AddMemoryResult, DecayResult, MemoryStats, GraphManagerInterface } from './types.js';
+import { ProvenanceTracker } from '../wiki/provenance.js';
+import { getConfig } from '../../gateway/config.js';
+import type { ContradictionCandidate } from '../wiki/types.js';
 
 export class MemoryStore {
   private memoryLocks: Map<string, Promise<void>> = new Map();
@@ -576,12 +579,27 @@ export class MemoryStore {
   }
 
   /**
-   * Bellek kaydını günceller.
+   * Bellek kaydını günceller. Güncelleme öncesi provenance snapshot kaydeder.
    */
-  async editMemory(memoryId: number, content: string, category: string, importance: number): Promise<boolean> {
+  async editMemory(memoryId: number, content: string, category?: string, importance?: number): Promise<boolean> {
     try {
-      const oldMemory = this.db.prepare(`SELECT content as old_content FROM memories WHERE id = ?`).get(memoryId) as { old_content: string } | undefined;
+      const oldMemory = this.db.prepare(
+        `SELECT content, category, importance FROM memories WHERE id = ?`
+      ).get(memoryId) as { content: string; category: string; importance: number } | undefined;
       if (!oldMemory) return false;
+
+      const finalCategory = category ?? oldMemory.category;
+      const finalImportance = importance ?? oldMemory.importance;
+
+      // Provenance snapshot (Faz 3 entegrasyonu)
+      if (getConfig().enableProvenanceTracking) {
+        const tracker = new ProvenanceTracker({ db: this.db });
+        tracker.storeRevision(memoryId, {
+          content: oldMemory.content,
+          category: oldMemory.category,
+          importance: oldMemory.importance,
+        });
+      }
 
       const result = this.db.prepare(`
         UPDATE memories
@@ -589,11 +607,11 @@ export class MemoryStore {
           max_importance = MAX(COALESCE(max_importance, ?), ?),
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(content, category, importance, importance, importance, memoryId);
+      `).run(content, finalCategory, finalImportance, finalImportance, finalImportance, memoryId);
 
       if (result.changes > 0) {
         // Sadece içerik değiştiyse embedding'i güncelle
-        if (oldMemory.old_content !== content) {
+        if (oldMemory.content !== content) {
           try {
             await this.computeAndStoreEmbedding(memoryId, content);
           } catch (err) {
@@ -612,6 +630,66 @@ export class MemoryStore {
       logger.error({ err: err }, `[Memory] Bellek güncellenemedi (id=${memoryId}):`);
       return false;
     }
+  }
+
+  // ========== Contradiction CRUD (Karpathy LLM Wiki Faz 1) ==========
+
+  getOpenContradictions(): ContradictionCandidate[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, memory_a_id, memory_b_id, detection_type, status, confidence,
+                description, detected_at, resolved_at, resolution_notes
+         FROM memory_contradictions
+         WHERE status = 'open'
+         ORDER BY confidence DESC`
+      )
+      .all() as Array<{
+        id: number;
+        memory_a_id: number;
+        memory_b_id: number;
+        detection_type: string;
+        status: string;
+        confidence: number;
+        description: string;
+        detected_at: string;
+        resolved_at: string | null;
+        resolution_notes: string | null;
+      }>;
+
+    return rows.map((r) => ({
+      id: r.id,
+      memoryAId: r.memory_a_id,
+      memoryBId: r.memory_b_id,
+      detectionType: r.detection_type,
+      status: r.status,
+      confidence: r.confidence,
+      description: r.description,
+      detectedAt: r.detected_at,
+      resolvedAt: r.resolved_at,
+      resolutionNotes: r.resolution_notes ?? '',
+    })) as ContradictionCandidate[];
+  }
+
+  resolveContradiction(id: number, resolutionNotes: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE memory_contradictions
+         SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolution_notes = ?
+         WHERE id = ?`
+      )
+      .run(resolutionNotes, id);
+    return result.changes > 0;
+  }
+
+  markFalsePositive(id: number): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE memory_contradictions
+         SET status = 'false_positive', resolved_at = CURRENT_TIMESTAMP
+         WHERE id = ?`
+      )
+      .run(id);
+    return result.changes > 0;
   }
 
   /**

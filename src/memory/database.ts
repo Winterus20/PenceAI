@@ -48,7 +48,7 @@ export class PenceDatabase {
   private embeddingDimensions: number;
 
   /** En son migration versiyonu. Her yeni migration'da artırın. */
-  private static readonly LATEST_SCHEMA_VERSION = 19;
+  private static readonly LATEST_SCHEMA_VERSION = 20;
 
   constructor(dbPath: string, embeddingDimensions: number = 1536) {
     // data dizinini oluştur
@@ -113,6 +113,7 @@ export class PenceDatabase {
         category TEXT DEFAULT 'general',
         content TEXT NOT NULL,
         importance INTEGER DEFAULT 5,
+        max_importance INTEGER,
         access_count INTEGER DEFAULT 0,
         is_archived INTEGER DEFAULT 0,
         last_accessed DATETIME,
@@ -123,7 +124,11 @@ export class PenceDatabase {
         provenance_message_id INTEGER,
         confidence REAL DEFAULT 0.7,
         review_profile TEXT DEFAULT 'standard',
-        memory_type TEXT DEFAULT 'semantic' CHECK(memory_type IN ('episodic', 'semantic'))
+        memory_type TEXT DEFAULT 'semantic' CHECK(memory_type IN ('episodic', 'semantic')),
+        stability REAL DEFAULT 2.0,
+        retrievability REAL DEFAULT 1.0,
+        next_review_at INTEGER,
+        review_count INTEGER DEFAULT 0
       );
 
       -- Yüklü skill'ler
@@ -250,6 +255,38 @@ export class PenceDatabase {
       
       -- Composite index: Konuşma mesajlarını rol ve tarih ile sıralı getirmek için
       CREATE INDEX IF NOT EXISTS idx_messages_conv_role_created ON messages(conversation_id, role, created_at DESC);
+
+      -- Karpathy LLM Wiki: Bellek çelişkileri (Madde 9)
+      CREATE TABLE IF NOT EXISTS memory_contradictions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        memory_a_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        memory_b_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        detection_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        confidence REAL DEFAULT 0.5,
+        description TEXT DEFAULT '',
+        detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME,
+        resolution_notes TEXT DEFAULT '',
+        UNIQUE(memory_a_id, memory_b_id, detection_type)
+      );
+      CREATE INDEX IF NOT EXISTS idx_contradictions_status ON memory_contradictions(status);
+      CREATE INDEX IF NOT EXISTS idx_contradictions_memory ON memory_contradictions(memory_a_id, memory_b_id);
+
+      -- Karpathy LLM Wiki: Bellek revizyon geçmişi (Madde 9)
+      CREATE TABLE IF NOT EXISTS memory_revisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        memory_id INTEGER NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+        revision_number INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        category TEXT NOT NULL,
+        importance INTEGER NOT NULL,
+        provenance_source TEXT,
+        provenance_model TEXT,
+        provenance_prompt_hash TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_revisions_memory ON memory_revisions(memory_id, revision_number DESC);
 
       -- Anahtar-değer ayarlar tablosu
       CREATE TABLE IF NOT EXISTS settings (

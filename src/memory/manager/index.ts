@@ -303,8 +303,20 @@ export class MemoryManager {
     return this.memoryStore.deleteMemory(memoryId);
   }
 
-  async editMemory(memoryId: number, content: string, category: string, importance: number): Promise<boolean> {
+  async editMemory(memoryId: number, content: string, category?: string, importance?: number): Promise<boolean> {
     return this.memoryStore.editMemory(memoryId, content, category, importance);
+  }
+
+  getOpenContradictions() {
+    return this.memoryStore.getOpenContradictions();
+  }
+
+  resolveContradiction(id: number, resolutionNotes: string): boolean {
+    return this.memoryStore.resolveContradiction(id, resolutionNotes);
+  }
+
+  markFalsePositive(id: number): boolean {
+    return this.memoryStore.markFalsePositive(id);
   }
 
   decayMemories(): { decayed: number; archived: number } {

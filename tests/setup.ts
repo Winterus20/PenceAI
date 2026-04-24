@@ -1,4 +1,4 @@
-import { jest } from '@jest/globals';
+import { jest, afterEach } from '@jest/globals';
 
 // ═══════════════════════════════════════════════════════════
 //  Test Environment Setup

@@ -6,9 +6,9 @@ export default {
         '^(\\.{1,2}/.*)\\.js$': '$1',
         '^@/(.*)$': '<rootDir>/src/$1',
     },
-    setupFiles: ['<rootDir>/tests/setup.ts'],
+    setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
     transform: {
-        '^.+\\.tsx?$': [
+        '^.+\\.[tj]sx?$': [
             'ts-jest',
             {
                 useESM: true,
@@ -23,6 +23,9 @@ export default {
     testPathIgnorePatterns: [
         '/node_modules/',
         '/dist/',
+    ],
+    transformIgnorePatterns: [
+        '/node_modules/(?!uuid)/',
     ],
     // Paralellik ve performans ayarları
     maxWorkers: process.env.CI ? 2 : '50%',

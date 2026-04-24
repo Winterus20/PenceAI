@@ -68,7 +68,7 @@
     "shell-quote": "^1.8.3",
     "sqlite-vec": "^0.1.7-alpha.2",
     "turndown": "^7.2.2",
-    "uuid": "^11.1.0",
+    "uuid": "^14.0.0",
     "validator": "^13.15.26",
     "ws": "^8.18.0",
     "zod": "^3.25.76"
@@ -89,7 +89,6 @@
     "@types/node": "^22.10.0",
     "@types/shell-quote": "^1.7.5",
     "@types/turndown": "^5.0.6",
-    "@types/uuid": "^10.0.0",
     "@types/ws": "^8.5.13",
     "concurrently": "^8.2.2",
     "cross-env": "^10.1.0",
@@ -106,6 +105,9 @@
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.0.0",
     "wait-on": "^9.0.4"
+  },
+  "overrides": {
+    "protobufjs": "^7.5.5"
   },
   "engines": {
     "node": ">=22.0.0"

@@ -68,6 +68,63 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     app.use('/api', createMemoryController(memory, router, broadcastStats));
     app.use('/api/mcp', createMCPController());
 
+    // ============ Karpathy LLM Wiki API (Madde 9) ============
+
+    app.put('/api/memories/:id', asyncHandler(async (req, res) => {
+        const memoryId = parseInt(req.params.id, 10);
+        const { content, category, importance } = req.body;
+        if (isNaN(memoryId)) {
+            return res.status(400).json({ error: 'Invalid memory id' });
+        }
+        let editSuccess = false;
+        if (typeof content === 'string' && typeof category === 'string' && typeof importance === 'number') {
+            editSuccess = await memory.editMemory(memoryId, content, category, importance);
+        } else if (typeof content === 'string' && typeof category === 'string') {
+            editSuccess = await memory.editMemory(memoryId, content, category);
+        } else if (typeof content === 'string' && typeof importance === 'number') {
+            editSuccess = await memory.editMemory(memoryId, content, undefined, importance);
+        } else if (typeof content === 'string') {
+            editSuccess = await memory.editMemory(memoryId, content);
+        } else {
+            return res.status(400).json({ error: 'At least content field is required' });
+        }
+        const success = editSuccess;
+        if (!success) {
+            return res.status(404).json({ error: 'Memory not found or no changes' });
+        }
+        res.json({ success: true, memoryId });
+    }));
+
+    app.get('/api/memories/contradictions', asyncHandler(async (_req, res) => {
+        const rows = memory.getOpenContradictions();
+        res.json({ success: true, contradictions: rows });
+    }));
+
+    app.post('/api/memories/contradictions/:id/resolve', asyncHandler(async (req, res) => {
+        const id = parseInt(req.params.id, 10);
+        const { resolutionNotes } = req.body;
+        if (isNaN(id)) {
+            return res.status(400).json({ error: 'Invalid contradiction id' });
+        }
+        const success = memory.resolveContradiction(id, typeof resolutionNotes === 'string' ? resolutionNotes : '');
+        if (!success) {
+            return res.status(404).json({ error: 'Contradiction not found' });
+        }
+        res.json({ success: true, id });
+    }));
+
+    app.post('/api/memories/contradictions/:id/false-positive', asyncHandler(async (req, res) => {
+        const id = parseInt(req.params.id, 10);
+        if (isNaN(id)) {
+            return res.status(400).json({ error: 'Invalid contradiction id' });
+        }
+        const success = memory.markFalsePositive(id);
+        if (!success) {
+            return res.status(404).json({ error: 'Contradiction not found' });
+        }
+        res.json({ success: true, id });
+    }));
+
     app.get('/api/health', asyncHandler(async (_req, res) => {
         const llmHealthy = await llm.healthCheck();
         res.json({

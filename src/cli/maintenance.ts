@@ -8,6 +8,10 @@ import { logger } from '../utils/logger.js';
 import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../memory/graphRAG/config.js';
 import { defaultRollbackManager, RollbackReason } from '../memory/graphRAG/rollback.js';
 import { defaultMonitor, AlertSeverity } from '../memory/graphRAG/monitoring.js';
+import { MemoryLintPass } from '../memory/wiki/lintPass.js';
+import { exportToMarkdown, exportToObsidian } from '../memory/wiki/export.js';
+import fs from 'fs';
+import path from 'path';
 
 async function runMaintenance() {
     logger.info('--- PençeAI Memory Graph Maintenance ---');
@@ -227,6 +231,75 @@ async function graphRAGMetrics() {
     }
 }
 
+// ============ Karpathy LLM Wiki CLI Komutları ============
+
+async function memoryLint() {
+    const config = getConfig();
+    registerAllProviders();
+
+    const llm = await LLMProviderFactory.create(config.defaultLLMProvider);
+    const penceDb = new PenceDatabase(config.dbPath);
+    const memory = new MemoryManager(penceDb);
+
+    const dryRun = process.argv.includes('--dry-run');
+
+    const lintPass = new MemoryLintPass({
+        db: penceDb.getDb(),
+        llm,
+        config: {
+            deterministicThresholdJaccard: config.lintDeterministicThresholdJaccard,
+            llmValidationEnabled: config.lintLLMValidationEnabled,
+            maxLLMPairsPerRun: config.lintMaxLLMPairsPerRun,
+        },
+    });
+
+    const result = await lintPass.runLintPass({ dryRun });
+    logger.info(`\n📋 Memory Lint Pass Result:`);
+    logger.info(`  Scanned pairs: ${result.scannedPairs}`);
+    logger.info(`  Contradictions found: ${result.contradictionsFound}`);
+    logger.info(`  False positives filtered: ${result.falsePositivesFiltered}`);
+    logger.info(`  Duration: ${result.durationMs}ms`);
+}
+
+async function memoryExportMarkdown() {
+    const config = getConfig();
+    const penceDb = new PenceDatabase(config.dbPath);
+    const memory = new MemoryManager(penceDb);
+
+    const memories = memory.getUserMemories(10000);
+    const markdown = exportToMarkdown(memories);
+
+    const outFlag = process.argv.findIndex((a) => a === '--out');
+    const outPath = outFlag >= 0 && process.argv[outFlag + 1]
+        ? path.resolve(process.argv[outFlag + 1]!)
+        : path.join(config.wikiExportDir, 'penceai-memories.md');
+
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, markdown, 'utf-8');
+    logger.info(`\n📝 Markdown export written to: ${outPath}`);
+}
+
+async function memoryExportObsidian() {
+    const config = getConfig();
+    const penceDb = new PenceDatabase(config.dbPath);
+    const memory = new MemoryManager(penceDb);
+
+    const memories = memory.getUserMemories(10000);
+    const { files } = exportToObsidian(memories);
+
+    const outFlag = process.argv.findIndex((a) => a === '--out');
+    const outDir = outFlag >= 0 && process.argv[outFlag + 1]
+        ? path.resolve(process.argv[outFlag + 1]!)
+        : path.join(config.wikiExportDir, 'obsidian-vault');
+
+    fs.mkdirSync(outDir, { recursive: true });
+    for (const f of files) {
+        const filePath = path.join(outDir, f.filename);
+        fs.writeFileSync(filePath, f.content, 'utf-8');
+    }
+    logger.info(`\n📝 Obsidian vault export written to: ${outDir} (${files.length} files)`);
+}
+
 // CLI argument parsing
 const command = process.argv[2];
 
@@ -252,6 +325,15 @@ if (command) {
             break;
         case 'graphrag-metrics':
             await graphRAGMetrics();
+            break;
+        case 'memory:lint':
+            await memoryLint();
+            break;
+        case 'memory:export-md':
+            await memoryExportMarkdown();
+            break;
+        case 'memory:export-obsidian':
+            await memoryExportObsidian();
             break;
         default:
             // Eğer GraphRAG komutu değilse, mevcut maintenance'i çalıştır
