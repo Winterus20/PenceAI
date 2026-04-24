@@ -10,7 +10,7 @@ npm install
 npm run dev
 
 # Sadece backend
-npm run dev:backend-only
+npm run dev:backend
 
 # Production build
 npm run build
@@ -92,6 +92,10 @@ BRAVE_SEARCH_API_KEY=
 21. **Message Embeddings**: Mesajlarda semantik arama için ayrı vektör tablosu
 22. **GraphRAG Hierarchical Communities**: Çok seviyeli topluluk hiyerarşisi (level, parent_id)
 23. **Claim Extraction**: Bellek iddia (claim) çıkarma ve doğrulama altyapısı
+24. **LLM Prompt Cache**: SQLite tabanlı prompt-response önbellekleme — TTL + LRU eviction
+25. **Context Compaction**: Token threshold aşıldığında otomatik bağlam sıkıştırma
+26. **Hook Execution Engine**: Tool call lifecycle'ında security, sanitization, budget guard
+27. **Error Module**: Hiyerarşik error sınıfları (AppError, LLMError, DatabaseError, vb.)
 
 ### Kritik Import Kuralı
 
@@ -108,7 +112,7 @@ import { MemoryManager } from '../memory/manager';      // ❌ Yanlış
 
 ---
 
-> Bu doküman PenceAI projesinin tamamını anlamak için tek bir referans noktası olarak hazırlanmıştır. Son güncelleme: 24 Haziran 2026.
+> Bu doküman PenceAI projesinin tamamını anlamak için tek bir referans noktası olarak hazırlanmıştır. Son güncelleme: 24 Nisan 2026.
 
 ---
 [← İçindekilere Dön](./README.md)

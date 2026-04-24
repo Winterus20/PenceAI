@@ -1,6 +1,6 @@
 ## Veritabanı Şeması
 
-**Mevcut Şema Versiyonu:** 18 ([`LATEST_SCHEMA_VERSION`](src/memory/database.ts:40))
+**Mevcut Şema Versiyonu:** 19 ([`LATEST_SCHEMA_VERSION`](src/memory/database.ts:51))
 
 ### Tablolar
 
@@ -28,6 +28,7 @@
 | `graph_communities` | Topluluklar | id (PK), modularity_score, dominant_relation_types, level, parent_id, created_at, updated_at |
 | `graph_community_members` | Topluluk üyeleri | community_id (FK), node_id (PK composite) |
 | `graph_community_summaries` | Topluluk özetleri | community_id (PK), summary, key_entities, key_relations, topics, generated_at |
+| `llm_cache` | LLM prompt önbelleği | cache_key (PK), response_json, model, provider, prompt_tokens, completion_tokens, created_at, last_accessed_at, access_count |
 
 ### İlişkiler
 
@@ -53,6 +54,11 @@ PRAGMA foreign_keys = ON;
 ### FTS5 Index'leri
 
 `memories` ve `messages` tablolarında content sync trigger'ları (AFTER INSERT/DELETE/UPDATE) ile otomatik güncellenir.
+
+### Trigger'lar
+
+- `trg_messages_insert_count` — `messages` INSERT sonrası `conversations.message_count` artırma
+- `trg_messages_delete_count` — `messages` DELETE sonrası `conversations.message_count` azaltma
 
 ---
 

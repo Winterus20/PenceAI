@@ -18,6 +18,9 @@ Core capabilities include:
 - Experimental decision mechanisms including reconsolidation and dual-process routing
 - WebSocket-based web UI and gateway server
 - Jest-based test infrastructure
+- Hook Execution Engine for tool call lifecycle security
+- Context Compaction for automatic token budget management
+- LLM Prompt Cache for zero-cost repeated queries
 - **[NEW] Containerized Deployments via Docker and Docker Compose**
 
 ## Key Features
@@ -226,6 +229,7 @@ At least **one** LLM API key must be set. The `DEFAULT_LLM_PROVIDER` determines 
 
 #### Security
 - `ALLOW_SHELL_EXECUTION` — Enable shell command execution (default: false)
+- `SHELL_TIMEOUT` — Shell command timeout in ms (default: 30000)
 - `FS_ROOT_DIR` — Root directory for file operations
 - `DASHBOARD_PASSWORD` — Password for web dashboard
 - `BRAVE_SEARCH_API_KEY` — Brave Search API key
@@ -256,6 +260,18 @@ At least **one** LLM API key must be set. The `DEFAULT_LLM_PROVIDER` determines 
 - `HOOK_CONTEXT_BUDGET_GUARD` — Compaction enforcement (default: true)
 - `HOOK_SESSION_SUMMARY` — Session end metrics (default: true)
 
+#### Context Compaction
+- `COMPACT_ENABLED` — Enable automatic context compaction (default: true)
+- `COMPACT_TOKEN_THRESHOLD` — Token threshold to trigger compaction (default: 100000)
+- `COMPACT_PRESERVE_RECENT_MESSAGES` — Recent messages to preserve (default: 10)
+- `COMPACT_PRESERVE_FILE_ATTACHMENTS` — Preserve file attachments (default: true)
+- `COMPACT_MAX_FILE_ATTACHMENT_BYTES` — Max file attachment size in bytes (default: 51200)
+
+#### LLM Prompt Cache
+- `LLM_CACHE_ENABLED` — Enable LLM prompt caching (default: true)
+- `LLM_CACHE_TTL_HOURS` — Cache TTL in hours (default: 24)
+- `LLM_CACHE_MAX_ENTRIES` — Max cache entries (default: 1000)
+
 #### Agentic RAG
 - `AGENTIC_RAG_ENABLED` — Enable agentic RAG (default: true)
 - `AGENTIC_RAG_MAX_HOPS` — Multi-hop retrieval depth, 1-5 (default: 3)
@@ -275,7 +291,7 @@ At least **one** LLM API key must be set. The `DEFAULT_LLM_PROVIDER` determines 
 | `scripts\setup.ps1` *(Win)* / `bash scripts/setup.sh` *(Unix)* | One-command setup wizard |
 | `scripts\start.ps1` *(Win)* / `bash scripts/start.sh` *(Unix)* | Start production server |
 | `npm run dev` | Development mode (backend + frontend with hot-reload) |
-| `npm run dev:backend-only` | Backend only with hot-reload |
+| `npm run dev:backend` | Backend only with hot-reload |
 | `npm run build` | Production build (TypeScript + Vite) |
 | `npm start` | Start production server (requires `npm run build` first) |
 | `npm run cli` | Interactive CLI |

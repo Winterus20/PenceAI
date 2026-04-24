@@ -30,6 +30,10 @@
 | File Search | glob | 13.0+ | Dosya glob pattern eşleştirme |
 | Config | dotenv | 16.4+ | Ortam değişkenleri |
 | CORS | cors | 2.8+ | Cross-origin resource sharing |
+| Compression | compression | 1.8+ | HTTP response compression |
+| Security | helmet | 8.1+ | Security headers |
+| Rate Limiting | express-rate-limit | 8.3+ | HTTP rate limiting |
+| Shell Quote | shell-quote | 1.8+ | Safe shell command parsing |
 | Discord | discord.js | 14.26+ | Discord bot |
 
 ### Frontend

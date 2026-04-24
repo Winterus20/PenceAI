@@ -17,6 +17,9 @@
 - 🌿 **Konuşma Dallanma**: Fork, branch yönetimi ve ağaç görünümü ile konuşma dallanma desteği
 - 🔌 **MCP Marketplace**: Model Context Protocol entegrasyonu, genişletilebilir araç ekosistemi
 - 🛡️ **Agentic RAG**: Passage Critique, Response Verification ve Multi-Hop Retrieval ile kendi kendini doğrulayan RAG
+- 🪝 **Hook Execution Engine**: Tool call lifecycle event'lerini yakalama, engelleme ve modification sistemi
+- 🗜️ **Context Compaction**: Uzun konuşmalarda token bütçesini aşarsa otomatik sıkıştırma
+- 💾 **LLM Prompt Cache**: SQLite üzerinde MD5(prompt+model) önbellekleme — API maliyetini $0'a indirir
 - 📈 **Yerel Metrics Sistemi**: Provider bazlı token tüketimi, maliyet hesaplama ve performans metrikleri
 - 📊 **Observability UI**: Yerel metrikler, real-time dashboard ve hata analizi arayüzü
 - 📡 **Multi-Channel Support**: Discord ve WebSocket kanal entegrasyonları

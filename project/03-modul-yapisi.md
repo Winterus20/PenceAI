@@ -190,7 +190,18 @@ function tryAsync<T>(fn: () => Promise<T>): Promise<Result<T>>;
 
 ---
 
-### 2.2. LLM Modülü (`src/llm/`)
+### 2.2. LLM Cache Modülü (`src/llm/`)
+
+LLM prompt önbellekleme sistemi. Aynı prompt+model kombinasyonu için API maliyetini $0'a düşürür, yanıt süresini 10-20ms'ye indirir.
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`llmCache.ts`](src/llm/llmCache.ts) | SQLite tabanlı LLM cache — MD5(prompt+model) → response eşleştirme, TTL, LRU eviction |
+| [`cachedProvider.ts`](src/llm/cachedProvider.ts) | Cache-aware LLM provider wrapper — tüm provider'ları otomatik önbellekleme ile sarar |
+
+---
+
+### 2.3. LLM Modülü (`src/llm/`)
 
 Çoklu LLM sağlayıcı desteği için soyutlama katmanı.
 
@@ -250,7 +261,7 @@ Bilişsel bellek sistemi, bilgi yönetimi ve retrieval orchestration.
 
 | Dosya | Açıklama |
 |-------|----------|
-| [`database.ts`](src/memory/database.ts) | SQLite veritabanı bağlantısı, şema yönetimi (v17), sqlite-vec entegrasyonu |
+| [`database.ts`](src/memory/database.ts) | SQLite veritabanı bağlantısı, şema yönetimi (v19), sqlite-vec entegrasyonu |
 | [`graph.ts`](src/memory/graph.ts) | Bellek grafi yönetimi — entity, ilişki, proximity, Ebbinghaus stability |
 | [`ebbinghaus.ts`](src/memory/ebbinghaus.ts) | Ebbinghaus unutma eğrisi — saf matematik fonksiyonları |
 | [`embeddings.ts`](src/memory/embeddings.ts) | Embedding provider'ları — OpenAI, MiniMax, Voyage, retry mekanizması |
