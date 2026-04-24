@@ -312,6 +312,7 @@ finalHistory,
             archivalMemories,
             supplementalMemories,
             conversationSummaries,
+            telescopicSummaries,
             reviewMemories,
             followUpCandidates,
             recentMessages,
@@ -349,6 +350,7 @@ const graphRAGResult = await this.graphRAGManager.retrieve(
             reviewMemories,
             followUpCandidates,
             conversationSummaries,
+            telescopicSummaries,
             recentMessages,
 history: finalHistory,
             graphRAGCommunitySummaries: graphRAGResult.graphRAGResult?.communitySummaries ?? [],
@@ -397,6 +399,7 @@ history: finalHistory,
             contextTokenInfo: { systemPromptTokens, userMsgTokens, pastHistoryTokens },
             compactEngine: this.compactEngine,
             compactThreshold: getConfig().compactTokenThreshold,
+            confirmCallback,
         });
 
         const response = loopResult.uiContent;

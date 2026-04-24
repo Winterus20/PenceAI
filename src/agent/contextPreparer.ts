@@ -105,6 +105,7 @@ export class ContextPreparer {
         graphRAGCommunitySummaries: Array<{ id: string; summary: string }>;
         shouldAddCommunitySummaries: boolean;
         communitySummariesFormatted: string | null;
+        telescopicSummaries?: Array<{ id: number; summary: string; level: number; created_at: string; end_msg_id: number }>;
         allTools: LLMToolDefinition[];
         mcpListPrompt: string | null;
         requiresFallback: boolean;
@@ -165,7 +166,23 @@ export class ContextPreparer {
             finalSystemPrompt = injectFallbackToolDirectives(finalSystemPrompt, params.allTools);
         }
 
-        const llmMessages: LLMMessage[] = params.history.map(h => ({
+        // Telescopic summaries işleme
+        let historyToKeep = params.history;
+        if (params.telescopicSummaries && params.telescopicSummaries.length > 0) {
+            finalSystemPrompt += `\n\n## Önceki Konuşma Özetleri (Teleskopik)\nAşağıdaki özetler, bu konuşmanın daha eski ve sıkıştırılmış kısımlarını içerir:\n\n`;
+            let maxEndMsgId = 0;
+            for (const sum of params.telescopicSummaries) {
+                finalSystemPrompt += `[Seviye ${sum.level} Özet]: ${sum.summary}\n`;
+                if (sum.end_msg_id > maxEndMsgId) {
+                    maxEndMsgId = sum.end_msg_id;
+                }
+            }
+            if (maxEndMsgId > 0) {
+                historyToKeep = params.history.filter(h => (h.id ?? Infinity) > maxEndMsgId);
+            }
+        }
+
+        const llmMessages: LLMMessage[] = historyToKeep.map(h => ({
             role: h.role,
             content: h.content,
             toolCalls: h.toolCalls,

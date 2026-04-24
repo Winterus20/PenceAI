@@ -28,6 +28,7 @@ export interface SecuritySettingsProps {
     embeddingModel: string;
     logLevel: string;
     allowShellExecution: boolean;
+    hookApprovalMode?: string;
   };
   sensitivePaths: string[];
   newSensitivePath: string;
@@ -69,6 +70,13 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
             {['trace', 'debug', 'info', 'warn', 'error'].map((level) => (
               <option key={level} value={level}>{level}</option>
             ))}
+          </select>
+        </label>
+        <label className={labelClassName}>
+          <span>Hook Onay Modu (Güvenlik Kancaları)</span>
+          <select className={selectClassName} value={form.hookApprovalMode || 'ask'} onChange={(e) => updateField('hookApprovalMode', e.target.value)}>
+            <option value="ask">Manuel (Onay Sor)</option>
+            <option value="approve">Otomatik (Her Zaman Onayla)</option>
           </select>
         </label>
         <label className="section-surface flex items-start gap-3 rounded-xl border-surface px-4 py-4 text-sm text-surface-strong transition-colors hover:bg-surface-sm">

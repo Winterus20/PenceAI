@@ -263,6 +263,10 @@ async function main() {
     const autonomousWorker = new BackgroundWorker(taskQueue);
     logger.info(`[Gateway] ⚙️ Autonomous Background Worker and Persistent Priority Queue initialized`);
 
+    const { AutonomousScheduler } = await import('../autonomous/scheduler.js');
+    const autonomousScheduler = new AutonomousScheduler(taskQueue);
+    autonomousScheduler.start();
+
     // Background jobs ayrıştırıldı
     registerSystemJobs(taskQueue, { memory, agent, broadcastStats });
     registerAutonomousWorkerJobs(taskQueue, { memory, llm, feedbackManager, subAgentManager, wss, config, worker: autonomousWorker });
@@ -464,6 +468,8 @@ async function main() {
             logger.warn({ err }, '[Gateway] GraphRAG Worker shutdown error:');
         }
         
+        
+        autonomousScheduler.stop();
         autonomousWorker.stop();
         try {
             await router.disconnectAll();

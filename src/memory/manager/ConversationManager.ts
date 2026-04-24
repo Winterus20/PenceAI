@@ -257,6 +257,19 @@ export class ConversationManager {
   }
 
   /**
+   * Belirli bir konuşmanın teleskopik özetlerini getirir.
+   */
+  getTelescopicSummaries(conversationId: string, limit: number = 10): Array<{ id: number; summary: string; level: number; created_at: string; end_msg_id: number }> {
+    return this.db.prepare(`
+      SELECT id, summary, level, created_at, end_msg_id
+      FROM telescopic_summaries
+      WHERE conversation_id = ?
+      ORDER BY end_msg_id ASC
+      LIMIT ?
+    `).all(conversationId, limit) as Array<{ id: number; summary: string; level: number; created_at: string; end_msg_id: number }>;
+  }
+
+  /**
    * Konuşmayı LLM tüketimi için normalize eder.
    * Runtime, history + userName + düzleştirilmiş transcript'i tek niyet tabanlı çağrı ile alır.
    */

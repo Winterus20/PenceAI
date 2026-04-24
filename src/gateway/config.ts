@@ -92,6 +92,7 @@ const ConfigSchema = z.object({
   hookDevServerBlocker: z.coerce.boolean().default(true),
   hookContextBudgetGuard: z.coerce.boolean().default(true),
   hookSessionSummary: z.coerce.boolean().default(true),
+  hookApprovalMode: z.enum(['ask', 'approve']).default('ask'),
 
   // Context Compaction
   compactEnabled: z.coerce.boolean().default(true),
@@ -124,6 +125,7 @@ const ConfigSchema = z.object({
   enableProvenanceTracking: z.coerce.boolean().default(true),
   wikiExportDir: z.string().default('./exports'),
   wikiAdaptiveThreshold: z.coerce.number().min(0).max(10000).default(100),
+  autonomousScheduleCron: z.string().default('*/5 * * * *'),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema> & {
@@ -181,6 +183,7 @@ export function loadConfig(): AppConfig {
         hookDevServerBlocker: process.env.HOOK_DEV_SERVER_BLOCKER,
         hookContextBudgetGuard: process.env.HOOK_CONTEXT_BUDGET_GUARD,
         hookSessionSummary: process.env.HOOK_SESSION_SUMMARY,
+        hookApprovalMode: process.env.HOOK_APPROVAL_MODE,
 
         // Context Compaction
         compactEnabled: process.env.COMPACT_ENABLED,
@@ -214,6 +217,7 @@ export function loadConfig(): AppConfig {
         enableProvenanceTracking: process.env.ENABLE_PROVENANCE_TRACKING,
         wikiExportDir: process.env.WIKI_EXPORT_DIR,
         wikiAdaptiveThreshold: process.env.WIKI_ADAPTIVE_THRESHOLD,
+        autonomousScheduleCron: process.env.AUTONOMOUS_SCHEDULE_CRON,
     };
 
     const parsed = ConfigSchema.safeParse(rawConfig);

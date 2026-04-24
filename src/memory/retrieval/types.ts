@@ -147,6 +147,7 @@ export interface PromptContextRecipe {
 export interface RetrievalOrchestratorDeps {
     graphAwareSearch: (query: string, limit: number, maxDepth?: number) => Promise<GraphAwareSearchResult>;
     getRecentConversationSummaries: (limit: number) => Array<{ id: string; title: string; summary: string; updated_at: string }>;
+    getTelescopicSummaries?: (conversationId: string, limit?: number) => Array<{ id: number; summary: string; level: number; created_at: string; end_msg_id: number }>;
     getMemoriesDueForReview: (limit: number) => MemoryRow[];
     getFollowUpCandidates: (days: number, limit: number) => MemoryRow[];
     getRecentMessages: (hours: number, limit: number, excludeConversationId?: string) => Array<{ role: string; content: string; created_at: string; conversation_title: string }>;

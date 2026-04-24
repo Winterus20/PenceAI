@@ -97,6 +97,7 @@ export class ToolManager {
         toolCalls: ToolCall[],
         onEvent?: AgentEventCallback,
         metricsTracker?: MetricsTracker,
+        confirmCallback?: ConfirmCallback,
     ): Promise<Array<{ toolCallId: string; name: string; result: string; isError: boolean }>> {
         const config = getConfig();
         const hookRegistry = config.enableHooks ? getHookRegistry() : null;
@@ -139,6 +140,27 @@ export class ToolManager {
 
                 if (hookReport.finalDecision === 'ask') {
                     logger.info({ toolName: tc.name }, '[ToolManager] Hook recommends user approval (ask)');
+                    if (config.hookApprovalMode === 'approve') {
+                        logger.info({ toolName: tc.name }, '[ToolManager] Auto-approving hook due to hookApprovalMode=approve');
+                    } else if (confirmCallback) {
+                        const approved = await confirmCallback({
+                            toolName: tc.name,
+                            path: 'hook_approval',
+                            operation: 'execute',
+                            description: `Güvenlik kancası (hook) onayı: ${tc.name} aracı için izin istiyor.`,
+                        });
+                        if (!approved) {
+                            result = `⛔ Kullanıcı işlemi reddetti (Hook ask).`;
+                            isError = true;
+                            onEvent?.({
+                                type: 'tool_end',
+                                data: { name: tc.name, result: result.substring(0, 500), isError },
+                            });
+                            return { toolCallId: tc.id, name: tc.name, result, isError };
+                        }
+                    } else {
+                        logger.warn('[ToolManager] Confirm callback not available, proceeding without approval');
+                    }
                 }
             }
 

@@ -190,6 +190,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         // Gelişmiş Model Ayarları
         temperature: env.TEMPERATURE || '0.7',
         maxTokens: env.MAX_TOKENS || '4096',
+        hookApprovalMode: env.HOOK_APPROVAL_MODE || 'ask',
       });
     });
 
@@ -221,6 +222,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       // Gelişmiş Model Ayarları
       temperature: 'TEMPERATURE',
       maxTokens: 'MAX_TOKENS',
+      hookApprovalMode: 'HOOK_APPROVAL_MODE',
     };
   
     // LLM provider/model değişiklikleri runtime'ı etkilemez (startup'ta oluşturulur)

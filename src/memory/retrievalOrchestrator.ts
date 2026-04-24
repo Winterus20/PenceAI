@@ -93,6 +93,7 @@ interface Phase2Result {
     graphRAGResult: GraphRAGResult | null;
     searchResult: GraphAwareSearchResult;
     conversationSummaries: ConversationSummary[];
+    telescopicSummaries?: Array<{ id: number; summary: string; level: number; created_at: string; end_msg_id: number }>;
     reviewMemories: MemoryRow[];
     followUpCandidates: MemoryRow[];
     effectiveSearchLimit: number;
@@ -433,9 +434,10 @@ export class MemoryRetrievalOrchestrator {
         }
 
         const effectiveSearchLimit = skipHeavyRetrieval ? Math.min(searchLimit, 3) : searchLimit;
-        const [searchResult, conversationSummaries, reviewMemories, followUpCandidates] = await Promise.all([
+        const [searchResult, conversationSummaries, telescopicSummaries, reviewMemories, followUpCandidates] = await Promise.all([
             this.deps.graphAwareSearch(query, effectiveSearchLimit, skipHeavyRetrieval ? 0 : recipe.graphDepth),
             Promise.resolve(this.deps.getRecentConversationSummaries(summaryLimit)),
+            Promise.resolve(this.deps.getTelescopicSummaries ? this.deps.getTelescopicSummaries(request.activeConversationId, 10) : []),
             Promise.resolve(this.deps.getMemoriesDueForReview(reviewLimit * (recipe.preferReviewSignals ? 2 : 1))),
             Promise.resolve(this.deps.getFollowUpCandidates(followUpDays, followUpLimit)),
         ]);
@@ -483,7 +485,7 @@ export class MemoryRetrievalOrchestrator {
             searchResult.active = agenticActive;
         }
 
-        return { graphRAGResult, searchResult, conversationSummaries, reviewMemories, followUpCandidates, effectiveSearchLimit };
+        return { graphRAGResult, searchResult, conversationSummaries, telescopicSummaries, reviewMemories, followUpCandidates, effectiveSearchLimit };
     }
 
     private phase3Selection(request: PromptContextRequest, phase1: Phase1Result, phase2: Phase2Result): Phase3Result {
@@ -600,7 +602,7 @@ export class MemoryRetrievalOrchestrator {
     ): PromptContextBundle {
         const { query, activeConversationId, options } = request;
         const { recentMessages, signals, recipe, typePreference, cognitiveLoad, confidenceResult } = phase1;
-        const { graphRAGResult, searchResult, conversationSummaries } = phase2;
+        const { graphRAGResult, searchResult, conversationSummaries, telescopicSummaries } = phase2;
         const {
             relevantMemories, archivalMemories, supplementalMemories,
             rankedReviewMemories, rankedFollowUpCandidates,
@@ -722,6 +724,7 @@ export class MemoryRetrievalOrchestrator {
             archivalMemories,
             supplementalMemories,
             conversationSummaries,
+            telescopicSummaries,
             reviewMemories: rankedReviewMemories,
             followUpCandidates: rankedFollowUpCandidates,
             recentMessages,

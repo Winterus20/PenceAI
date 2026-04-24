@@ -46,6 +46,7 @@ type SettingsForm = {
   // Gelişmiş Model Ayarları
   temperature: string;
   maxTokens: string;
+  hookApprovalMode: string;
 };
 
 const emptyForm: SettingsForm = {
@@ -72,6 +73,7 @@ const emptyForm: SettingsForm = {
   // Gelişmiş Model Ayarları
   temperature: '0.7',
   maxTokens: '4096',
+  hookApprovalMode: 'ask',
 };
 
 export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: boolean, onOpenChange: (o: boolean) => void, inline?: boolean }) => {
@@ -119,6 +121,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
         semanticSearchThreshold: String(settings.semanticSearchThreshold ?? emptyForm.semanticSearchThreshold),
         temperature: String(settings.temperature ?? emptyForm.temperature),
         maxTokens: String(settings.maxTokens ?? emptyForm.maxTokens),
+        hookApprovalMode: settings.hookApprovalMode || emptyForm.hookApprovalMode,
       });
     }
   }, [settings]);

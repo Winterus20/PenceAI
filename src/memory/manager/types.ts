@@ -73,6 +73,7 @@ export interface PromptContextBundle {
   archivalMemories: MemoryRow[];
   supplementalMemories: MemoryRow[];
   conversationSummaries: ConversationSummary[];
+  telescopicSummaries?: Array<{ id: number; summary: string; level: number; created_at: string; end_msg_id: number }>;
   reviewMemories: MemoryRow[];
   followUpCandidates: MemoryRow[];
   recentMessages: RecentMessage[];

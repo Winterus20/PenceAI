@@ -151,6 +151,7 @@ export class MemoryManager {
     this.retrievalOrchestrator = new MemoryRetrievalOrchestrator({
       graphAwareSearch: (query, limit, maxDepth) => this.graphAwareSearch(query, limit, maxDepth),
       getRecentConversationSummaries: (limit) => this.conversationManager.getRecentConversationSummaries(limit),
+      getTelescopicSummaries: (conversationId, limit) => this.conversationManager.getTelescopicSummaries(conversationId, limit),
       getMemoriesDueForReview: (limit) => this.getMemoriesDueForReview(limit),
       getFollowUpCandidates: (days, limit) => this.getFollowUpCandidates(days, limit),
       getRecentMessages: (hours, limit, excludeConversationId) => this.getRecentMessages(hours, limit, excludeConversationId),

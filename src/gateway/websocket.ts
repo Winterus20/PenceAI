@@ -60,8 +60,8 @@ const WebSocketMessageSchema = z.union([
  * Tüm magic number'lar burada merkezi olarak yönetiliyor
  */
 export const WS_CONFIG = {
-  /** Onay isteği zaman aşımı (ms) */
-  confirmationTimeoutMs: 60000,
+  /** Onay isteği zaman aşımı (ms) - 5 dakika */
+  confirmationTimeoutMs: 300000,
   /** Maksimum mesaj uzunluğu (karakter) */
   maxMessageLength: 50000,
 } as const;

@@ -31,6 +31,7 @@ export interface ReActLoopInput {
     };
     compactEngine: CompactEngine;
     compactThreshold: number;
+    confirmCallback?: (info: { toolName: string; path: string; operation: string; description: string; }) => Promise<boolean>;
 }
 
 export interface ReActLoopResult {
@@ -66,6 +67,7 @@ export class ReActLoop {
             contextTokenInfo,
             compactEngine,
             compactThreshold,
+            confirmCallback,
         } = input;
 
         let uiContent = '';
@@ -214,7 +216,7 @@ export class ReActLoop {
                 llmMessages.push(assistantMessage);
 
                 // Araçları çalıştır — her biri için event gönder
-                const toolResults = await toolManager.executeToolsWithEvents(llmResponse.toolCalls, onEvent, metricsTracker);
+                const toolResults = await toolManager.executeToolsWithEvents(llmResponse.toolCalls, onEvent, metricsTracker, confirmCallback);
 
                 // Araç sonuçlarını ekle
                 const toolMessage: LLMMessage = {

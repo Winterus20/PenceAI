@@ -266,4 +266,30 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
 
         logger.info(`[Worker] ✅ SubAgent Raporu Tamamlandı: "${fixationTopic}"`);
     });
+
+    // 3. Telescopic Compaction
+    taskQueue.registerHandler('telescopic_compaction_scan', async (payload, signal) => {
+        if (signal.aborted) return;
+        logger.info(`[Worker] 🗜️ Telescopic Compaction scan started.`);
+        // To implement correctly, we would need to fetch active conversations 
+        // that have large uncompacted histories and compact them.
+        // For now, we stub this out as requested.
+        const conversations = memory.getRecentConversations(20);
+        for (const conv of conversations) {
+            if (signal.aborted) break;
+            const msgCount = Number(conv.message_count ?? 0);
+            if (msgCount > 30) {
+                logger.info(`[Worker] 🗜️ Compacting conversation ${conv.id} (${msgCount} messages)...`);
+                try {
+                    // Call TelescopicCompactor (which we can import)
+                    const { TelescopicCompactor } = await import('../../memory/telescopicCompactor.js');
+                    const compactor = new TelescopicCompactor(memory.getDatabase(), llm);
+                    await compactor.compactSession(conv.id);
+                } catch (err) {
+                    logger.warn({ err }, `[Worker] ❌ Failed to compact conversation ${conv.id}`);
+                }
+            }
+        }
+        logger.info(`[Worker] ✅ Telescopic Compaction scan finished.`);
+    });
 }

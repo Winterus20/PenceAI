@@ -48,7 +48,7 @@ export class PenceDatabase {
   private embeddingDimensions: number;
 
   /** En son migration versiyonu. Her yeni migration'da artırın. */
-  private static readonly LATEST_SCHEMA_VERSION = 20;
+  private static readonly LATEST_SCHEMA_VERSION = 21;
 
   constructor(dbPath: string, embeddingDimensions: number = 1536) {
     // data dizinini oluştur
@@ -153,6 +153,19 @@ export class PenceDatabase {
         next_run DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+
+      -- KinBot Mimarisi: Telescopic Compacting Özetleri (Faz 1)
+      CREATE TABLE IF NOT EXISTS telescopic_summaries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        start_msg_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        end_msg_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        summary TEXT NOT NULL,
+        level INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(conversation_id, start_msg_id, end_msg_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_telescopic_conv ON telescopic_summaries(conversation_id);
 
       -- FTS5 tam metin arama (bellekler için)
       CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -795,6 +808,32 @@ export class PenceDatabase {
         logger.info('[Database] ✅ PageRank persistence kolonları eklendi');
       } catch (err) {
         logger.error({ err: err }, '[Database] ❌ GraphRAG migration failed (pagerank columns):');
+      }
+    }
+
+    // KinBot Mimarisi: Telescopic Compacting
+    const telescopicTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='telescopic_summaries'"
+    ).get();
+    if (!telescopicTable) {
+      logger.info('[Database] 🚀 KinBot Migration: Creating telescopic_summaries table');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS telescopic_summaries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            start_msg_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+            end_msg_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+            summary TEXT NOT NULL,
+            level INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(conversation_id, start_msg_id, end_msg_id)
+          );
+          CREATE INDEX IF NOT EXISTS idx_telescopic_conv ON telescopic_summaries(conversation_id);
+        `);
+        logger.info('[Database] ✅ telescopic_summaries tablosu oluşturuldu');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ KinBot migration failed (telescopic_summaries):');
       }
     }
 
