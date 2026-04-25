@@ -131,17 +131,24 @@ export class SmartSearchEngine {
 
       if (!response.ok) return [];
 
-      const data = await response.json() as any;
-      const results = data?.web?.results ?? [];
+      const data: unknown = await response.json();
+      const payload = data as Record<string, unknown>;
+      const web = payload.web as Record<string, unknown> | undefined;
+      const results = Array.isArray(web?.results)
+        ? (web.results as unknown[])
+        : [];
 
-      return results.slice(0, query.count ?? 5).map((r: any, i: number) => ({
-        title: r.title ?? '',
-        url: r.url ?? '',
-        snippet: r.description ?? '',
-        source: 'brave' as const,
-        date: r.age,
-        score: 1.0 / (60 + i + 1),
-      }));
+      return results.slice(0, query.count ?? 5).map((r: unknown, i: number) => {
+        const item = r as Record<string, unknown>;
+        return {
+          title: typeof item.title === 'string' ? item.title : '',
+          url: typeof item.url === 'string' ? item.url : '',
+          snippet: typeof item.description === 'string' ? item.description : '',
+          source: 'brave' as const,
+          date: typeof item.age === 'string' ? item.age : undefined,
+          score: 1.0 / (60 + i + 1),
+        };
+      });
     } catch {
       return [];
     }

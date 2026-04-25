@@ -80,9 +80,10 @@ export async function secureUpdateEnv(updates: Record<string, string>): Promise<
   await fs.promises.writeFile(tempPath, content, 'utf-8');
   try {
       await fs.promises.rename(tempPath, envPath);
-  } catch (err: any) {
+  } catch (err: unknown) {
       // Windows'ta rename() EPERM verebilir, fallback kullan
-      if (err.code === 'EPERM' || err.code === 'EBUSY') {
+      const nodeErr = err as NodeJS.ErrnoException;
+      if (nodeErr.code === 'EPERM' || nodeErr.code === 'EBUSY') {
           await fs.promises.copyFile(tempPath, envPath);
           await fs.promises.unlink(tempPath).catch((e) => {
               // Temp dosya silinemezse kritik değil — OS tarafından temizlenecek

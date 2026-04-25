@@ -3,7 +3,7 @@
  * Express route handler'ları — index.ts'den çıkarıldı.
  */
 
-import type { Express } from 'express';
+import type { Express, Request, Response, NextFunction, RequestHandler } from 'express';
 import type { MemoryManager } from '../memory/manager.js';
 import type { MessageRouter } from '../router/index.js';
 import { LLMProviderFactory } from '../llm/index.js';
@@ -17,7 +17,6 @@ import { logRingBuffer } from '../utils/logRingBuffer.js';
 import type { AgentRuntime } from '../agent/runtime.js';
 import { GraphRAGConfigManager, GraphRAGRolloutPhase } from '../memory/graphRAG/config.js';
 import { BehaviorDiscoveryShadow } from '../memory/graphRAG/BehaviorDiscoveryShadow.js';
-import type { MemoryGraph, GraphNode, GraphEdge } from '../memory/types.js';
 import { createMCPController } from './controllers/mcpController.js';
 import { createMemoryController } from './controllers/memoryController.js';
 import { metricsCollector } from '../observability/metricsCollector.js';
@@ -49,9 +48,9 @@ function getBehaviorDiscoveryShadow(): BehaviorDiscoveryShadow {
 /** Async route handler wrapper — catches promise rejections and forwards to Express error handler.
  *  Prevents unhandled rejections from crashing the Express app.
  */
-const asyncHandler = (fn: (req: any, res: any, next: any) => Promise<any>) =>
-    (req: any, res: any, next: any) => {
-        Promise.resolve(fn(req, res, next)).catch(next);
+const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler =>
+    (req, res, next) => {
+        void Promise.resolve(fn(req, res, next)).catch(next);
     };
 
 export function registerRoutes(app: Express, deps: RouteDeps): void {
@@ -71,7 +70,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     // ============ Karpathy LLM Wiki API (Madde 9) ============
 
     app.put('/api/memories/:id', asyncHandler(async (req, res) => {
-        const memoryId = parseInt(req.params.id, 10);
+        const memoryId = parseInt(req.params.id as string, 10);
         const { content, category, importance } = req.body;
         if (isNaN(memoryId)) {
             return res.status(400).json({ error: 'Invalid memory id' });
@@ -92,16 +91,16 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         if (!success) {
             return res.status(404).json({ error: 'Memory not found or no changes' });
         }
-        res.json({ success: true, memoryId });
+        return res.json({ success: true, memoryId });
     }));
 
     app.get('/api/memories/contradictions', asyncHandler(async (_req, res) => {
         const rows = memory.getOpenContradictions();
-        res.json({ success: true, contradictions: rows });
+        return res.json({ success: true, contradictions: rows });
     }));
 
     app.post('/api/memories/contradictions/:id/resolve', asyncHandler(async (req, res) => {
-        const id = parseInt(req.params.id, 10);
+        const id = parseInt(req.params.id as string, 10);
         const { resolutionNotes } = req.body;
         if (isNaN(id)) {
             return res.status(400).json({ error: 'Invalid contradiction id' });
@@ -110,11 +109,11 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         if (!success) {
             return res.status(404).json({ error: 'Contradiction not found' });
         }
-        res.json({ success: true, id });
+        return res.json({ success: true, id });
     }));
 
     app.post('/api/memories/contradictions/:id/false-positive', asyncHandler(async (req, res) => {
-        const id = parseInt(req.params.id, 10);
+        const id = parseInt(req.params.id as string, 10);
         if (isNaN(id)) {
             return res.status(400).json({ error: 'Invalid contradiction id' });
         }
@@ -122,7 +121,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         if (!success) {
             return res.status(404).json({ error: 'Contradiction not found' });
         }
-        res.json({ success: true, id });
+        return res.json({ success: true, id });
     }));
 
     app.get('/api/health', asyncHandler(async (_req, res) => {
@@ -191,13 +190,17 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         temperature: env.TEMPERATURE || '0.7',
         maxTokens: env.MAX_TOKENS || '4096',
         hookApprovalMode: env.HOOK_APPROVAL_MODE || 'ask',
+        insightEngineEnabled: env.INSIGHT_ENGINE_ENABLED === 'true',
+        insightMinConfidence: env.INSIGHT_MIN_CONFIDENCE || '0.5',
+        insightDynamicTTL: env.INSIGHT_DYNAMIC_TTL === 'true',
+        insightDefaultTTLDays: env.INSIGHT_DEFAULT_TTL_DAYS || '30',
       });
     });
 
-    app.post('/api/settings', async (req, res, next) => {
+    app.post('/api/settings', async (req: Request, res: Response, next: NextFunction) => {
     const body = req.body;
     const updates: Record<string, string> = {};
-  
+
     const map: Record<string, string> = {
       defaultLLMProvider: 'DEFAULT_LLM_PROVIDER',
       defaultLLMModel: 'DEFAULT_LLM_MODEL',

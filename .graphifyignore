@@ -1,0 +1,36 @@
+# Dependencies and build output
+node_modules/
+dist/
+package-lock.json
+
+# Caches and temporary data
+.jest-cache/
+tmp_test_db/
+logs/
+data/
+
+# Environment and secrets
+.env
+.env.example
+
+# Graphify's own output (prevent recursion)
+graphify-out/
+
+# AI assistant instruction files (self-referential)
+AGENTS.md
+GEMINI.md
+QWEN.md
+CLAUDE.md
+
+# Generated / large documentation
+FUTURE_IMPLEMENTATION_PLAN.md
+TECHNOLOGY_RESEARCH_REPORT.md
+
+# Misc
+.git/
+.github/
+.vscode/
+.opencode/
+.clinerules
+.roo
+.qwen

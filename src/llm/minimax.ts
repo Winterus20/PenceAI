@@ -37,16 +37,18 @@ export class MiniMaxProvider extends LLMProvider {
         return /auto tool choice requires .*enable-auto-tool-choice.*tool-call-parser|tool_choice.+auto|tool choice.+auto/i.test(error.message);
     }
 
-    private async createChatCompletionWithToolFallback(reqOpts: Record<string, unknown>): Promise<unknown> {
+    private async createChatCompletionWithToolFallback(
+        reqOpts: OpenAI.Chat.ChatCompletionCreateParams & { stream?: boolean; reasoning_split?: boolean }
+    ): Promise<unknown> {
         try {
-            return await (this.client.chat.completions as any).create(reqOpts);
+            return await this.client.chat.completions.create(reqOpts);
         } catch (error) {
-            if (!reqOpts?.tools || !Array.isArray(reqOpts.tools) || reqOpts.tools.length === 0 || !this.isAutoToolChoiceUnsupported(error)) {
+            if (!reqOpts.tools || reqOpts.tools.length === 0 || !this.isAutoToolChoiceUnsupported(error)) {
                 throw error;
             }
 
             const { tools: _, tool_choice: __, ...fallbackReqOpts } = reqOpts;
-            return await (this.client.chat.completions as any).create(fallbackReqOpts);
+            return await this.client.chat.completions.create(fallbackReqOpts);
         }
     }
 

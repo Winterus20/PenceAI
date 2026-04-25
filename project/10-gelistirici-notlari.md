@@ -112,7 +112,7 @@ import { MemoryManager } from '../memory/manager';      // ❌ Yanlış
 
 ---
 
-> Bu doküman PenceAI projesinin tamamını anlamak için tek bir referans noktası olarak hazırlanmıştır. Son güncelleme: 24 Nisan 2026.
+> Bu doküman PenceAI projesinin tamamını anlamak için tek bir referans noktası olarak hazırlanmıştır. Son güncelleme: 25 Nisan 2026.
 
 ---
 [← İçindekilere Dön](./README.md)

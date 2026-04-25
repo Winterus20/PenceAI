@@ -173,3 +173,24 @@ export const MemoryGraphQuerySchema = z.object({
   includePageRank: z.enum(['true', 'false']).optional().default('true'),
   includeCommunities: z.enum(['true', 'false']).optional().default('true'),
 });
+
+// --- Insight Engine Schemas ---
+
+export const InsightIdParamSchema = z.object({
+  id: z.coerce.number().int().positive('Geçersiz insight ID'),
+});
+
+export const UpdateInsightSchema = z.object({
+  description: z.string().min(1, 'Açıklama boş olamaz').max(2000, 'Açıklama maksimum 2000 karakter').optional(),
+  status: z.enum(['active', 'suppressed', 'pruned']).optional(),
+});
+
+export const InsightFeedbackSchema = z.object({
+  isPositive: z.boolean(),
+});
+
+export const SearchInsightsQuerySchema = z.object({
+  q: z.string().min(1, 'Sorgu boş olamaz').max(500).optional(),
+  minConfidence: z.coerce.number().min(0).max(1).optional().default(0.5),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+});

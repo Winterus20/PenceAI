@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { useAgentStore } from '@/store/agentStore';
 import type { MessageMetrics } from '@/store/types';
 import {
@@ -94,7 +95,7 @@ const MetricCard = ({
   subValue,
   color = 'purple',
 }: {
-  icon: any;
+  icon: LucideIcon;
   label: string;
   value: string | number;
   subValue?: string;
@@ -647,7 +648,7 @@ export default function MetricsPage() {
         <div className="subtle-scrollbar overflow-y-auto flex-1">
           <div className="px-6 py-5">
             <Tabs.Content value="summary">
-              <SummaryTab entries={entries} backendSummary={backendSummary} />
+              <SummaryTab entries={entries} backendSummary={backendSummary ?? null} />
             </Tabs.Content>
             <Tabs.Content value="detail">
               <DetailTab backendMetrics={allMetrics?.metrics || []} />

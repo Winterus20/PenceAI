@@ -32,14 +32,17 @@ export const createSettingsSlice: StateCreator<
     try {
       const rawChannels = await api.get('/channels');
       // Backend getChannelStatus() returns { type, name, connected } — transform to frontend Channel shape
-      const channels = (Array.isArray(rawChannels) ? rawChannels : []).map((ch: any) => ({
-        id: ch.id || ch.type || String(ch.name).toLowerCase().replace(/\s+/g, '-'),
-        name: ch.name,
-        type: ch.type,
-        connected: ch.connected,
-        messageCount: ch.messageCount,
-        lastActivity: ch.lastActivity,
-      }));
+      const channels = (Array.isArray(rawChannels) ? rawChannels : []).map((ch: unknown) => {
+        const c = ch as Record<string, unknown>;
+        return {
+          id: String(c.id || c.type || String(c.name).toLowerCase().replace(/\s+/g, '-')),
+          name: String(c.name ?? ''),
+          type: String(c.type ?? ''),
+          connected: Boolean(c.connected),
+          messageCount: typeof c.messageCount === 'number' ? c.messageCount : 0,
+          lastActivity: String(c.lastActivity ?? ''),
+        };
+      });
       set({ channels });
     } catch (error) {
       console.error('Kanallar alınamadı:', error);
@@ -90,7 +93,8 @@ export const createSettingsSlice: StateCreator<
   
   setFeedback: (messageId, feedback) => set((state) => {
     if (feedback === null) {
-      const { [messageId]: _, ...rest } = state.feedbacks;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [messageId]: _removed, ...rest } = state.feedbacks;
       return { feedbacks: rest };
     }
     return {

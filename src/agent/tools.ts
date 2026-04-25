@@ -340,7 +340,7 @@ export function createBuiltinTools(
           if (!validation.success) return validation.error;
           
           const { path: filePath } = validation.data;
-          validatePath(filePath);
+          await validatePath(filePath);
           let handle: fs.FileHandle | null = null;
           try {
             const stats = await fs.stat(filePath);
@@ -379,7 +379,7 @@ export function createBuiltinTools(
           if (!validation.success) return validation.error;
           
           const { path: filePath, content } = validation.data;
-          validatePath(filePath);
+          await validatePath(filePath);
   
           // Hassas dizin onay kontrolü
           const rejection = await requireConfirmation(
@@ -496,7 +496,7 @@ export function createBuiltinTools(
           }
 
           try {
-            const allFiles = glob.sync(pattern, {
+            const allFiles = await glob(pattern, {
               cwd: searchDir,
               nodir: true,
               absolute: true,
@@ -969,17 +969,17 @@ function looksLikePath(s: string): boolean {
 
 /**
  * Dosya yolu güvenlik kontrolü.
- * Symlink bypass'larını önlemek için fs.realpathSync kullanır.
+ * Symlink bypass'larını önlemek için fs.promises.realpath kullanır.
  */
-function validatePath(filePath: string): void {
+async function validatePath(filePath: string): Promise<void> {
     const config = getConfig();
 
-    // Symlink bypass önlemi: realpathSync ile hedefi çöz
+    // Symlink bypass önlemi: realpath ile hedefi çöz
     let resolved: string;
     try {
-        resolved = fsSync.realpathSync(path.resolve(filePath));
+        resolved = await fs.realpath(path.resolve(filePath));
     } catch {
-        // realpathSync başarısız olursa (dosya yok veya erişim yok) path.resolve'a düş
+        // realpath başarısız olursa (dosya yok veya erişim yok) path.resolve'a düş
         resolved = path.resolve(filePath);
     }
 

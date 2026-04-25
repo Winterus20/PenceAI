@@ -18,6 +18,7 @@ import { MCPConfigWatcher } from './watcher.js';
 import { getHookRegistry } from './hooks.js';
 import { registerBuiltInHooks } from './builtInHooks.js';
 import { logger } from '../../utils/logger.js';
+import type { MemoryManager } from '../../memory/manager.js';
 
 /** Module-level MCP manager instance */
 let _mcpManager: MCPClientManager | null = null;
@@ -33,9 +34,10 @@ import type { MCPServerConfig } from './types.js';
  * Uygulama başlangıcında çağrılır.
  *
  * @param activeServers - Veritabanından yüklenen aktif MCP server yapılandırmaları
+ * @param memoryManager - Insight Engine entegrasyonu için MemoryManager instance (opsiyonel)
  * @returns MCPClientManager instance veya null (MCP sunucu yoksa)
  */
-export async function initializeMCP(activeServers: MCPServerConfig[] = []): Promise<MCPClientManager | null> {
+export async function initializeMCP(activeServers: MCPServerConfig[] = [], memoryManager?: MemoryManager): Promise<MCPClientManager | null> {
   if (activeServers.length === 0) {
     logger.info('[MCP:runtime] MCP is disabled or no active servers');
     return null;
@@ -79,7 +81,7 @@ export async function initializeMCP(activeServers: MCPServerConfig[] = []): Prom
     // Hook Execution Engine başlat
     if (!_hooksInitialized) {
       const hookRegistry = getHookRegistry();
-      registerBuiltInHooks(hookRegistry);
+      registerBuiltInHooks(hookRegistry, memoryManager);
 
       // Event bus ile hook'ları bağla
       const eventBus = getMCPEventBus();

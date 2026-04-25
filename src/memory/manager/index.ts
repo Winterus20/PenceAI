@@ -54,6 +54,7 @@ import { TokenUsageService } from './TokenUsageService.js';
 import { FeedbackService } from './FeedbackService.js';
 import { SpreadingActivationService } from './SpreadingActivationService.js';
 import { selectConversationAwareSupplementalMemories } from '../contextUtils.js';
+import { InsightEngine } from '../insightEngine/index.js';
 
 // Tip exports
 export type {
@@ -96,6 +97,7 @@ export class MemoryManager {
   private tokenUsageService: TokenUsageService;
   private feedbackService: FeedbackService;
   private spreadingActivationService: SpreadingActivationService;
+  private insightEngine: InsightEngine;
 
   constructor(penceDb: PenceDatabase) {
     this.db = penceDb.getDb();
@@ -144,6 +146,7 @@ export class MemoryManager {
     this.tokenUsageService = new TokenUsageService(this.db);
     this.feedbackService = new FeedbackService(this.db);
     this.spreadingActivationService = new SpreadingActivationService(this.graph);
+    this.insightEngine = new InsightEngine(this.db);
 
     // Retrieval Orchestrator (graphRAGEngine setGraphRAGEngine ile sonradan set edilir)
     // NOT: Bu closure'lar lazy evaluation ile çalışır — sadece getPromptContextBundle() çağrıldığında
@@ -450,12 +453,30 @@ export class MemoryManager {
     reviewMemories: MemoryRow[];
     followUpCandidates: MemoryRow[];
     recentMessages: Array<{ role: string; content: string; created_at: string; conversation_title: string }>;
+    insights?: Array<{ id: number; description: string; confidence: number; type: string }>;
   }> {
-    return this.retrievalOrchestrator.getPromptContextBundle({
+    const bundle = await this.retrievalOrchestrator.getPromptContextBundle({
       query,
       activeConversationId,
       options,
     });
+
+    // Insight Engine: sorguya göre dinamik insight seçimi
+    if (getConfig().insightEngineEnabled) {
+      try {
+        const insights = await this.insightEngine.getRelevantInsights(query, getConfig().insightMinConfidence);
+        if (insights.length > 0) {
+          return {
+            ...bundle,
+            insights: insights.map(i => ({ id: i.id, description: i.description, confidence: i.confidence, type: i.type })),
+          };
+        }
+      } catch (err) {
+        logger.warn({ err }, '[Memory] Insight retrieval failed, continuing without insights');
+      }
+    }
+
+    return bundle;
   }
 
   // ========== Memory Graph Delegasyonları ==========
@@ -497,7 +518,7 @@ export class MemoryManager {
 
   // ========== Debug ==========
 
-  getRetrievalDebugSnapshot(flow: 'hybridSearch' | 'hybridSearchMessages' | 'graphAwareSearch' | 'promptContextBundle'): unknown {
+  getRetrievalDebugSnapshot(flow: 'hybridSearch' | 'hybridSearchMessages' | 'graphAwareSearch' | 'graphRAGSearch' | 'promptContextBundle'): unknown {
     return this.retrievalService.getRetrievalDebugSnapshot(flow);
   }
 
@@ -581,10 +602,29 @@ export class MemoryManager {
     });
   }
 
+  // ========== Insight Engine ==========
+
+  getInsightEngine(): InsightEngine {
+    return this.insightEngine;
+  }
+
   // ========== Feedback Yönetimi (FeedbackService'e delege) ==========
 
   saveFeedback(input: FeedbackInput): FeedbackRow {
-    return this.feedbackService.saveFeedback(input);
+    const row = this.feedbackService.saveFeedback(input);
+    // Insight Engine'e observation olarak besle
+    try {
+      this.insightEngine.observe({
+        type: input.type === 'positive' ? 'user_affirmation' : 'correction',
+        context: input.comment || `Feedback: ${input.type}`,
+        timestamp: Date.now(),
+        sessionId: input.conversationId,
+        source: 'feedback',
+      });
+    } catch (err) {
+      logger.warn({ err }, '[MemoryManager] Insight observation from feedback failed');
+    }
+    return row;
   }
 
   getFeedbacks(conversationId: string): FeedbackRow[] {

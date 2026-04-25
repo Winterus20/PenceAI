@@ -885,9 +885,10 @@ export function think(
 
     logger.info(`[ThinkEngine] Seed selected: "${seed.content.substring(0, 50)}..." (${seed.type})`);
 
+    const effectiveMaxDepth = config?.maxHopDepth ?? MAX_HOP_DEPTH;
     logger.info(
         `[ThinkEngine] Graph-Walk completed: ${associations.length} associations found ` +
-        `(max depth: ${MAX_HOP_DEPTH})`
+        `(max depth: ${effectiveMaxDepth})`
     );
 
     // 3. Düşünce zinciri

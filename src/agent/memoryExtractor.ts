@@ -365,11 +365,11 @@ export class MemoryExtractor {
     private validateExtractedMemories(parsed: unknown[]): Array<{ content: string; category: string; importance: number }> {
         if (!Array.isArray(parsed)) return [];
 
-        return parsed.filter((item: any) =>
-            item && typeof item.content === 'string' && item.content.length > 0
-        ).map((item: any) => ({
-            content: item.content,
-            category: ['preference', 'fact', 'habit', 'project', 'event', 'other'].includes(item.category) ? item.category : 'other',
+        return parsed.filter((item): item is Record<string, unknown> =>
+            item !== null && typeof item === 'object' && typeof (item as Record<string, unknown>).content === 'string' && String((item as Record<string, unknown>).content).trim().length > 0
+        ).map((item) => ({
+            content: String(item.content).trim(),
+            category: ['preference', 'fact', 'habit', 'project', 'event', 'other'].includes(String(item.category)) ? String(item.category) : 'other',
             importance: typeof item.importance === 'number' ? Math.min(10, Math.max(1, item.importance)) : 5,
         }));
     }
@@ -388,12 +388,13 @@ export class MemoryExtractor {
                 objStr = objStr.replace(/,\s*([\]}])/g, '$1');
                 objStr = objStr.replace(/:\s*'([^']*?)'\s*([,}\]])/g, ': "$1"$2');
 
-                const parsed = JSON.parse(objStr);
-                if (parsed && typeof parsed.content === 'string' && parsed.content.length > 0) {
+                const parsed: unknown = JSON.parse(objStr);
+                if (parsed !== null && typeof parsed === 'object' && 'content' in parsed && typeof (parsed as Record<string, unknown>).content === 'string' && String((parsed as Record<string, unknown>).content).length > 0) {
+                    const p = parsed as Record<string, unknown>;
                     results.push({
-                        content: parsed.content,
-                        category: ['preference', 'fact', 'habit', 'project', 'event', 'other'].includes(parsed.category) ? parsed.category : 'other',
-                        importance: typeof parsed.importance === 'number' ? Math.min(10, Math.max(1, parsed.importance)) : 5,
+                        content: String(p.content),
+                        category: ['preference', 'fact', 'habit', 'project', 'event', 'other'].includes(String(p.category)) ? String(p.category) : 'other',
+                        importance: typeof p.importance === 'number' ? Math.min(10, Math.max(1, p.importance)) : 5,
                     });
                 }
             } catch (err) {

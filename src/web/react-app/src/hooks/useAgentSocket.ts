@@ -329,7 +329,7 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
     const handleAgentEvent = (eventType: string, data: unknown) => {
     const eventData = data as Record<string, unknown>;
     switch (eventType) {
-    case 'thinking':
+    case 'thinking': {
     const thinkingData = eventData as Partial<ThinkingEventData>;
     const cleaned = stripThinkTags(thinkingData.content);
                 if (cleaned) {
@@ -338,6 +338,7 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
                     syncAssistantMeta();
                 }
                 break;
+            }
             case 'tool_start': {
             const toolStartData = eventData as Partial<ToolStartEventData>;
             pendingToolCalls.current = [
@@ -484,7 +485,7 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
         socket.send(JSON.stringify(wsMsg));
     };
 
-    const sendMessage = (content: string, attachments: any[] = [], activeConversationId?: string) => {
+    const sendMessage = (content: string, attachments: AttachmentItem[] = [], activeConversationId?: string) => {
         sendChatPayload(content, attachments, activeConversationId, true);
     };
 
@@ -537,6 +538,7 @@ export function useAgentSocket(onMetrics?: (metrics: MessageMetrics) => void) {
                 ws.current = null;
             }
         };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     return {

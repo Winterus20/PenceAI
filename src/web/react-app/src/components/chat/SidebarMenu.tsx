@@ -1,11 +1,12 @@
 import { useState, lazy, Suspense } from 'react';
-import { Settings, BookOpen, Store, Radio, Activity, Menu, X, Terminal } from 'lucide-react';
+import { Settings, BookOpen, Store, Radio, Activity, Menu, X, Terminal, Brain } from 'lucide-react';
 import { UsageStatsCard } from '@/components/settings/UsageStatsCard';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { ActiveView } from '../../store/agentStore';
 
 const SettingsDialog = lazy(() => import('./SettingsDialog').then(m => ({ default: m.SettingsDialog })));
 const MemoryDialog = lazy(() => import('./MemoryDialog').then(m => ({ default: m.MemoryDialog })));
+const InsightManagerDialog = lazy(() => import('./InsightManagerDialog').then(m => ({ default: m.InsightManagerDialog })));
 
 interface SidebarMenuProps {
   setActiveView: (view: ActiveView) => void;
@@ -14,6 +15,7 @@ interface SidebarMenuProps {
 const MENU_ITEMS = [
   { id: 'settings', label: 'Ayarlar', icon: Settings, color: 'text-purple-400', bg: 'bg-purple-500/10 hover:bg-purple-500/20' },
   { id: 'memory', label: 'Bellek', icon: BookOpen, color: 'text-blue-400', bg: 'bg-blue-500/10 hover:bg-blue-500/20' },
+  { id: 'insights', label: 'Insight Manager', icon: Brain, color: 'text-pink-400', bg: 'bg-pink-500/10 hover:bg-pink-500/20' },
   { id: 'metrics', label: 'Observability', icon: Activity, color: 'text-blue-400', bg: 'bg-blue-500/10 hover:bg-blue-500/20' },
   { id: 'marketplace', label: 'Marketplace', icon: Store, color: 'text-green-400', bg: 'bg-green-500/10 hover:bg-green-500/20' },
   { id: 'channels', label: 'Kanallar', icon: Radio, color: 'text-orange-400', bg: 'bg-orange-500/10 hover:bg-orange-500/20' },
@@ -98,6 +100,7 @@ export function SidebarMenu({ setActiveView }: SidebarMenuProps) {
       {/* Dialogs */}
       <Suspense fallback={null}><SettingsDialog open={activeDialog === 'settings'} onOpenChange={(open) => !open && setActiveDialog(null)} /></Suspense>
       <Suspense fallback={null}><MemoryDialog open={activeDialog === 'memory'} onOpenChange={(open) => !open && setActiveDialog(null)} /></Suspense>
+      <Suspense fallback={null}><InsightManagerDialog open={activeDialog === 'insights'} onOpenChange={(open) => !open && setActiveDialog(null)} /></Suspense>
       <DialogWrapper open={activeDialog === 'usage'} onOpenChange={(open) => !open && setActiveDialog(null)} title="Kullanım İstatistikleri">
         <UsageStatsCard />
       </DialogWrapper>

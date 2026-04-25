@@ -82,6 +82,7 @@ export interface PromptContextBundle {
     communitySummaries: Array<{ communityId: string; summary: string }>;
     graphContext: Record<string, unknown>;
   } | null;
+  insights?: Array<{ id: number; description: string; confidence: number; type: string }>;
 }
 
 export interface PromptContextOptions {

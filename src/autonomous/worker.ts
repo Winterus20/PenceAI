@@ -214,7 +214,7 @@ export class BackgroundWorker {
     private interrupt(reason: string): void {
         if (this.abortController && !this.abortController.signal.aborted) {
             logger.info(`[Worker] 🛑 Graceful Interruption Triggered (${reason}). Aborting current task...`);
-            this.abortController.abort(new Error('AbortError'));
+            this.abortController.abort();
             // OPT F-10: isRunning'i burada false yapmıyoruz — runLoop.finally bloğu
             // bunu halleder. Aksi halde checkAndRun yeniden runLoop başlatabilir.
         }

@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import * as sqliteVec from "sqlite-vec";
-import { logger, calculateCost } from '../utils/index.js';
+import { logger } from '../utils/index.js';
 import { REVIEW_SCHEDULE_FACTOR } from './ebbinghaus.js';
 
 /**
@@ -16,30 +16,6 @@ function safeEmbeddingDimensions(dim: number): number {
   return dim;
 }
 
-/** Token usage kayıt tipi */
-export interface TokenUsageRecord {
-  provider: string;
-  model: string;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  estimatedCostUsd: number;
-}
-
-/** Token usage istatistik tipi */
-export interface TokenUsageStats {
-  totalTokens: number;
-  totalCost: number;
-  providerBreakdown: Record<string, { tokens: number; cost: number }>;
-}
-
-/** Günlük kullanım entry tipi */
-export interface DailyUsageEntry {
-  date: string;
-  tokens: number;
-  cost: number;
-}
-
 /**
  * SQLite veritabanı bağlantısı ve şema yönetimi.
  */
@@ -48,7 +24,7 @@ export class PenceDatabase {
   private embeddingDimensions: number;
 
   /** En son migration versiyonu. Her yeni migration'da artırın. */
-  private static readonly LATEST_SCHEMA_VERSION = 22;
+  private static readonly LATEST_SCHEMA_VERSION = 24;
 
   constructor(dbPath: string, embeddingDimensions: number = 1536) {
     // data dizinini oluştur
@@ -1013,6 +989,78 @@ export class PenceDatabase {
       }
     }
 
+    // ========== ECC Insight Engine Migration ==========
+    const insightsTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='insights'"
+    ).get();
+    if (!insightsTable) {
+      logger.info('[Database] 🚀 Insight Engine Migration: Creating insights table');
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS insights (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL DEFAULT 'default',
+            type TEXT NOT NULL CHECK(type IN ('preference', 'habit', 'correction_pattern', 'tool_pattern')),
+            description TEXT NOT NULL,
+            confidence REAL DEFAULT 0.5,
+            hit_count INTEGER DEFAULT 1,
+            first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_memory_ids TEXT DEFAULT '[]',
+            session_ids TEXT DEFAULT '[]',
+            status TEXT DEFAULT 'active' CHECK(status IN ('active', 'suppressed', 'pruned')),
+            ttl_days INTEGER DEFAULT 30,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_insights_user ON insights(user_id);
+          CREATE INDEX IF NOT EXISTS idx_insights_status ON insights(status);
+          CREATE INDEX IF NOT EXISTS idx_insights_confidence ON insights(confidence);
+          CREATE INDEX IF NOT EXISTS idx_insights_type ON insights(type);
+          CREATE INDEX IF NOT EXISTS idx_insights_last_seen ON insights(last_seen);
+        `);
+        logger.info('[Database] ✅ insights tablosu oluşturuldu');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Insight Engine migration failed:');
+      }
+    }
+
+    // Insight Engine FTS5
+    const insightsFtsTable = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='insights_fts'"
+    ).get();
+    if (!insightsFtsTable) {
+      logger.info('[Database] 🚀 Insight Engine Migration: Creating insights_fts table');
+      try {
+        this.db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS insights_fts USING fts5(
+            description,
+            content=insights,
+            content_rowid=id
+          );
+
+          CREATE TRIGGER IF NOT EXISTS insights_ai AFTER INSERT ON insights BEGIN
+            INSERT INTO insights_fts(rowid, description) VALUES (new.id, new.description);
+          END;
+          CREATE TRIGGER IF NOT EXISTS insights_ad AFTER DELETE ON insights BEGIN
+            INSERT INTO insights_fts(insights_fts, rowid, description) VALUES('delete', old.id, old.description);
+          END;
+          CREATE TRIGGER IF NOT EXISTS insights_au AFTER UPDATE ON insights BEGIN
+            INSERT INTO insights_fts(insights_fts, rowid, description) VALUES('delete', old.id, old.description);
+            INSERT INTO insights_fts(rowid, description) VALUES (new.id, new.description);
+          END;
+        `);
+        // Backfill: Mevcut kayıtları FTS tablosuna populate et
+        this.db.exec(`
+          INSERT INTO insights_fts(rowid, description)
+          SELECT id, description FROM insights;
+        `);
+        logger.info('[Database] ✅ insights_fts tablosu oluşturuldu ve backfill tamamlandı');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Insight Engine FTS5 migration failed:');
+      }
+    }
+
     // ========== Scheduled Tasks Timer Type Migration ==========
 
     const scheduledTasksInfo = this.db.prepare("PRAGMA table_info(scheduled_tasks)").all() as Array<{ name: string }>;
@@ -1113,123 +1161,6 @@ export class PenceDatabase {
    */
   getDb(): Database.Database {
     return this.db;
-  }
-
-  // ============================================
-  // Token Usage Tracking
-  // ============================================
-
-  /**
-   * Yeni token usage kaydı ekler.
-   */
-  saveTokenUsage(record: TokenUsageRecord): void {
-    const cost = calculateCost(record.provider, record.model, record.promptTokens, record.completionTokens);
-    this.db.prepare(`
-      INSERT INTO token_usage (provider, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    `).run(record.provider, record.model, record.promptTokens, record.completionTokens, record.totalTokens, cost);
-  }
-
-  /**
-   * Toplam kullanım istatistiğini döndürür.
-   * @param period - 'day', 'week', 'month', 'all'
-   */
-  getTokenUsageStats(period: string = 'week'): TokenUsageStats {
-    const now = Math.floor(Date.now() / 1000);
-    let periodSeconds: number;
-    switch (period) {
-      case 'day': periodSeconds = 86400; break;
-      case 'week': periodSeconds = 604800; break;
-      case 'month': periodSeconds = 2592000; break;
-      default: periodSeconds = 0; // all
-    }
-
-    // Toplam istatistik
-    const totalRow = periodSeconds > 0
-      ? this.db.prepare(`
-          SELECT
-            COALESCE(SUM(total_tokens), 0) as totalTokens,
-            COALESCE(SUM(estimated_cost_usd), 0) as totalCost
-          FROM token_usage
-          WHERE created_at >= datetime(?, 'unixepoch')
-        `).get(now - periodSeconds) as { totalTokens: number; totalCost: number }
-      : this.db.prepare(`
-          SELECT
-            COALESCE(SUM(total_tokens), 0) as totalTokens,
-            COALESCE(SUM(estimated_cost_usd), 0) as totalCost
-          FROM token_usage
-        `).get() as { totalTokens: number; totalCost: number };
-
-    // Provider bazlı breakdown
-    const providerRows = periodSeconds > 0
-      ? this.db.prepare(`
-          SELECT
-            provider,
-            SUM(total_tokens) as tokens,
-            SUM(estimated_cost_usd) as cost
-          FROM token_usage
-          WHERE created_at >= datetime(?, 'unixepoch')
-          GROUP BY provider
-          ORDER BY tokens DESC
-        `).all(now - periodSeconds) as Array<{ provider: string; tokens: number; cost: number }>
-      : this.db.prepare(`
-          SELECT
-            provider,
-            SUM(total_tokens) as tokens,
-            SUM(estimated_cost_usd) as cost
-          FROM token_usage
-          GROUP BY provider
-          ORDER BY tokens DESC
-        `).all() as Array<{ provider: string; tokens: number; cost: number }>;
-
-    const providerBreakdown: Record<string, { tokens: number; cost: number }> = {};
-    for (const row of providerRows) {
-      providerBreakdown[row.provider] = { tokens: row.tokens, cost: row.cost };
-    }
-
-    return {
-      totalTokens: totalRow.totalTokens,
-      totalCost: totalRow.totalCost,
-      providerBreakdown,
-    };
-  }
-
-  /**
-   * Günlük kullanım serisini döndürür.
-   * @param period - 'day', 'week', 'month', 'all'
-   */
-  getDailyUsage(period: string = 'week'): DailyUsageEntry[] {
-    const now = Math.floor(Date.now() / 1000);
-    let periodSeconds: number;
-    switch (period) {
-      case 'day': periodSeconds = 86400; break;
-      case 'week': periodSeconds = 604800; break;
-      case 'month': periodSeconds = 2592000; break;
-      default: periodSeconds = 0; // all
-    }
-
-    const rows = periodSeconds > 0
-      ? this.db.prepare(`
-          SELECT
-            DATE(created_at) as date,
-            SUM(total_tokens) as tokens,
-            SUM(estimated_cost_usd) as cost
-          FROM token_usage
-          WHERE created_at >= datetime(?, 'unixepoch')
-          GROUP BY DATE(created_at)
-          ORDER BY date ASC
-        `).all(now - periodSeconds) as Array<{ date: string; tokens: number; cost: number }>
-      : this.db.prepare(`
-          SELECT
-            DATE(created_at) as date,
-            SUM(total_tokens) as tokens,
-            SUM(estimated_cost_usd) as cost
-          FROM token_usage
-          GROUP BY DATE(created_at)
-          ORDER BY date ASC
-        `).all() as Array<{ date: string; tokens: number; cost: number }>;
-
-    return rows.map(r => ({ date: r.date, tokens: r.tokens, cost: r.cost }));
   }
 
   /**

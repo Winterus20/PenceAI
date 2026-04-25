@@ -96,10 +96,13 @@ export function useConversations() {
         }
         queryClient.invalidateQueries({ queryKey: [CONVERSATIONS_QUERY_KEY] });
         return true;
-      } catch (error: any) {
-        if (error?.status === 409) {
-          const branches = error?.data?.branches || [];
-          return { hasChildren: true, branches, conversationId };
+      } catch (error: unknown) {
+        if (error && typeof error === 'object' && 'status' in error) {
+          const apiError = error as { status: number; data?: { branches?: unknown[] } };
+          if (apiError.status === 409) {
+            const branches = apiError.data?.branches || [];
+            return { hasChildren: true, branches, conversationId };
+          }
         }
         console.error('Konuşma silinemedi:', error);
         hotToast.error('Konuşma silinirken bir hata oluştu');

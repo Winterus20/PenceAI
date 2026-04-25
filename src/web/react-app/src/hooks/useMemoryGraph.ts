@@ -601,7 +601,7 @@ export function useMemoryGraph({
     return () => {
       simulation.stop();
     };
-  }, [filteredData, handleNodeClickStable]);
+  }, [filteredData, handleNodeClickStable, communityColorMap, getEdgeWidth, getNodeOpacity, getNodeSize]);
 
   // Zoom controls
   const handleZoomIn = useCallback(() => {

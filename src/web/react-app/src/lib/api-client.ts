@@ -3,6 +3,7 @@
  * Tüm HTTP istekleri bu istemci üzerinden geçirilir.
  * Bu sayede auth token, hata yönetimi ve baseURL ekleme işlemleri tek bir yerden çözülür.
  */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const API_BASE_URL = '/api'; // Gerekirse çevre değişkenlerinden alınabilir (import.meta.env.VITE_API_URL)
 
@@ -13,9 +14,9 @@ interface FetchOptions extends RequestInit {
 // Standart API hatası fırlatıcı
 class ApiError extends Error {
   public status: number;
-  public data: any;
+  public data: unknown;
 
-  constructor(message: string, status: number, data?: any) {
+  constructor(message: string, status: number, data?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;

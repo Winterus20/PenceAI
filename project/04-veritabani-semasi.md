@@ -1,6 +1,6 @@
 ## Veritabanı Şeması
 
-**Mevcut Şema Versiyonu:** 19 ([`LATEST_SCHEMA_VERSION`](src/memory/database.ts:51))
+**Mevcut Şema Versiyonu:** 24 ([`LATEST_SCHEMA_VERSION`](src/memory/database.ts:51))
 
 ### Tablolar
 
@@ -24,11 +24,16 @@
 | `metrics` | Observability metrikleri | id (PK), conversation_id, message_id, timestamp, performance_json, cost_json, context_json |
 | `memory_claims` | Bellek iddiaları | id (PK), memory_id (FK), subject, predicate, object, status, start_date, end_date, confidence, created_at |
 | `skills` | Yüklü skill'ler *(reserve edilmiş)* | id (PK), name, description, version, enabled, config, installed_at |
-| `scheduled_tasks` | Zamanlanmış görevler *(reserve edilmiş)* | id (PK), name, cron_expression, action, enabled, last_run, next_run, created_at |
+| `scheduled_tasks` | Zamanlanmış görevler | id (PK), name, cron_expression, action, enabled, last_run, next_run, timer_type, conversation_id, created_at |
 | `graph_communities` | Topluluklar | id (PK), modularity_score, dominant_relation_types, level, parent_id, created_at, updated_at |
 | `graph_community_members` | Topluluk üyeleri | community_id (FK), node_id (PK composite) |
 | `graph_community_summaries` | Topluluk özetleri | community_id (PK), summary, key_entities, key_relations, topics, generated_at |
 | `llm_cache` | LLM prompt önbelleği | cache_key (PK), response_json, model, provider, prompt_tokens, completion_tokens, created_at, last_accessed_at, access_count |
+| `insights` | Insight Engine pattern'leri | id (PK), user_id, type, description, confidence, hit_count, first_seen, last_seen, source_memory_ids, session_ids, status, ttl_days, created_at, updated_at |
+| `insights_fts` | Insight FTS5 arama | description — content=insights, content_rowid=id |
+| `memory_contradictions` | Bellek çelişkileri | id (PK), memory_a_id (FK), memory_b_id (FK), detection_type, status, confidence, description, detected_at, resolved_at, resolution_notes |
+| `memory_revisions` | Bellek revizyon geçmişi | id (PK), memory_id (FK), revision_number, content, category, importance, provenance_source, provenance_model, provenance_prompt_hash, created_at |
+| `telescopic_summaries` | Teleskopik özetler | id (PK), conversation_id (FK), start_msg_id (FK), end_msg_id (FK), summary, level, created_at |
 
 ### İlişkiler
 

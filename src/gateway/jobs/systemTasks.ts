@@ -82,4 +82,17 @@ export function registerSystemJobs(taskQueue: TaskQueue, deps: SystemJobsDeps): 
             logger.error({ err }, '[Worker] Konuşma özetleme hatası');
         }
     });
+
+    taskQueue.registerHandler('insight_prune', async (_payload, signal) => {
+        if (signal.aborted) return;
+        try {
+            const engine = memory.getInsightEngine();
+            const result = engine.prune();
+            if (result.pruned > 0 || result.suppressed > 0) {
+                logger.info(`[Worker] 🧠 Insight bakımı: ${result.pruned} pruned, ${result.suppressed} suppressed`);
+            }
+        } catch (err) {
+            logger.error({ err }, '[Worker] Insight prune hatası');
+        }
+    });
 }

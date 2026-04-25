@@ -74,8 +74,11 @@ export class ReActLoop {
         let lastDbContent = '';
         let iterations = 0;
 
+        // Çalışma kopyası — orijinal diziyi mutasyona uğratma
+        let workingMessages = [...llmMessages];
+
         // Artımlı token takibi — her reduce() yerine sadece delta ekle
-        let incrementalCharCount = llmMessages.reduce((sum, msg) => sum + estimateMessageTokensChar(msg), 0);
+        let incrementalCharCount = workingMessages.reduce((sum, msg) => sum + estimateMessageTokensChar(msg), 0);
 
         while (iterations < maxIterations) {
             iterations++;
@@ -108,7 +111,7 @@ export class ReActLoop {
             let llmResponse: LLMResponse;
             const llmCallStart = Date.now();
             if (llm.chatStream) {
-                llmResponse = await llm.chatStream(llmMessages, chatOptions, (token) => {
+                llmResponse = await llm.chatStream(workingMessages, chatOptions, (token) => {
                     if (token === TOOL_CALL_CLEAR_SIGNAL) {
                         // clear_stream engellendi; ara yazılar artık silinmeyecek.
                     } else {
@@ -116,7 +119,7 @@ export class ReActLoop {
                     }
                 });
             } else {
-                llmResponse = await llm.chat(llmMessages, chatOptions);
+                llmResponse = await llm.chat(workingMessages, chatOptions);
             }
             const llmCallDuration = Date.now() - llmCallStart;
             metricsTracker.recordPerf(`llm_call_${iterations}`, llmCallDuration);
@@ -213,7 +216,7 @@ export class ReActLoop {
                     content: historyContent,
                     toolCalls: llmResponse.toolCalls,
                 };
-                llmMessages.push(assistantMessage);
+                workingMessages.push(assistantMessage);
 
                 // Araçları çalıştır — her biri için event gönder
                 const toolResults = await toolManager.executeToolsWithEvents(llmResponse.toolCalls, onEvent, metricsTracker, confirmCallback);
@@ -224,7 +227,7 @@ export class ReActLoop {
                     content: '',
                     toolResults,
                 };
-                llmMessages.push(toolMessage);
+                workingMessages.push(toolMessage);
 
                 // UI içeriğini güncelle
                 uiContent = this.joinUIContent(uiContent, llmResponse.content || '');
@@ -267,17 +270,16 @@ export class ReActLoop {
                         }
 
                         const compactResult = await compactEngine.compactIfNeeded(
-                            llmMessages,
+                            workingMessages,
                             [],
                             conversationId,
                             toolManager.sessionToolCallCount,
                         );
 
                         if (compactResult.wasCompacted) {
-                            llmMessages.length = 0;
-                            llmMessages.push(...compactResult.messages);
+                            workingMessages = [...compactResult.messages];
                             // Compact sonrası artımlı sayacı yeniden hesapla
-                            incrementalCharCount = llmMessages.reduce((sum, msg) => sum + estimateMessageTokensChar(msg), 0);
+                            incrementalCharCount = workingMessages.reduce((sum, msg) => sum + estimateMessageTokensChar(msg), 0);
                             metricsTracker.recordCompaction({
                                 originalTokens: compactResult.originalTokens,
                                 compactedTokens: compactResult.compactedTokens,

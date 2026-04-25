@@ -126,6 +126,12 @@ const ConfigSchema = z.object({
   wikiExportDir: z.string().default('./exports'),
   wikiAdaptiveThreshold: z.coerce.number().min(0).max(10000).default(100),
   autonomousScheduleCron: z.string().default('*/5 * * * *'),
+
+  // Insight Engine
+  insightEngineEnabled: z.coerce.boolean().default(true),
+  insightMinConfidence: z.coerce.number().min(0).max(1).default(0.5),
+  insightDynamicTTL: z.coerce.boolean().default(true),
+  insightDefaultTTLDays: z.coerce.number().min(1).max(365).default(30),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema> & {
@@ -218,6 +224,12 @@ export function loadConfig(): AppConfig {
         wikiExportDir: process.env.WIKI_EXPORT_DIR,
         wikiAdaptiveThreshold: process.env.WIKI_ADAPTIVE_THRESHOLD,
         autonomousScheduleCron: process.env.AUTONOMOUS_SCHEDULE_CRON,
+
+        // Insight Engine
+        insightEngineEnabled: process.env.INSIGHT_ENGINE_ENABLED,
+        insightMinConfidence: process.env.INSIGHT_MIN_CONFIDENCE,
+        insightDynamicTTL: process.env.INSIGHT_DYNAMIC_TTL,
+        insightDefaultTTLDays: process.env.INSIGHT_DEFAULT_TTL_DAYS,
     };
 
     const parsed = ConfigSchema.safeParse(rawConfig);

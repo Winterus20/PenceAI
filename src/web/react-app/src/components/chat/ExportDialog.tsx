@@ -10,11 +10,19 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 
+interface ExportMessage {
+  role: string;
+  content: string;
+  thinking?: string[];
+  toolCalls?: Array<{ name: string; result?: string }>;
+  timestamp?: string;
+}
+
 interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   conversationTitle: string;
-  messages: any[];
+  messages: ExportMessage[];
 }
 
 type ExportFormat = 'md' | 'json';
@@ -67,7 +75,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       // Araç çağrıları varsa ekle
       if (message.toolCalls && Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
         markdown += `### Kullanılan Araçlar\n\n`;
-        message.toolCalls.forEach((tool: any) => {
+        message.toolCalls.forEach((tool: { name: string; result?: string }) => {
           markdown += `- **${tool.name}**: ${tool.result || 'Sonuç yok'}\n`;
         });
         markdown += '\n';

@@ -160,7 +160,7 @@ export function useSettingsForm(open: boolean): UseSettingsFormReturn {
     };
 
     void loadData();
-  }, [open]);
+  }, [open, savedLLMSettings]);
 
   // Model seçenekleri
   const modelOptions = useMemo(() => {
@@ -223,8 +223,8 @@ export function useSettingsForm(open: boolean): UseSettingsFormReturn {
       const paths = await api.post<{ path: string }, string[]>('/settings/sensitive-paths', { path: newSensitivePath.trim() });
       setSensitivePaths(Array.isArray(paths) ? paths : []);
       setNewSensitivePath('');
-    } catch (error: any) {
-      alert(error?.data?.error || 'Eklenemedi');
+    } catch (error: unknown) {
+      alert(error instanceof Error ? error.message : 'Eklenemedi');
     } finally {
       setPathLoading(false);
     }

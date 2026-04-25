@@ -13,6 +13,7 @@ import {
   UpdateConversationSchema, DeleteConversationsSchema,
   DeleteConversationSchema, SearchMemoriesQuerySchema,
   UsageStatsQuerySchema, MemoryGraphQuerySchema,
+  InsightIdParamSchema, UpdateInsightSchema, InsightFeedbackSchema, SearchInsightsQuerySchema,
 } from '../middleware/validate.js';
 
 export function createMemoryController(memory: MemoryManager, router: MessageRouter, broadcastStats: () => void): Router {
@@ -222,8 +223,8 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
           const limitedNodes = graphData.nodes.slice(0, graphLimit);
           const limitedNodeIds = new Set(limitedNodes.map((n: GraphNode) => n.id));
           const limitedEdges = graphData.edges.filter(
-              (e: GraphEdge) => limitedNodeIds.has(typeof e.source === 'string' ? e.source : e.source) &&
-                   limitedNodeIds.has(typeof e.target === 'string' ? e.target : e.target)
+              (e: GraphEdge) => limitedNodeIds.has(e.source) &&
+                   limitedNodeIds.has(e.target)
           );
           const limitedGraph: MemoryGraph = { nodes: limitedNodes, edges: limitedEdges };
 
@@ -346,6 +347,89 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       const err = error instanceof Error ? error : new Error(String(error));
       logger.error({ err }, '[API] Token usage stats error:');
       res.status(500).json({ error: 'Token usage stats alınamadı' });
+    }
+  });
+
+  // ============ Insight Engine API ============
+
+  expressRouter.get('/insights', (req, res) => {
+    try {
+      const engine = memory.getInsightEngine();
+      const insights = engine.getActiveInsights();
+      res.json({ success: true, insights });
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error({ err }, '[API] Get insights error:');
+      res.status(500).json({ error: 'Insight listesi alınamadı' });
+    }
+  });
+
+  expressRouter.get('/insights/search', validateQuery(SearchInsightsQuerySchema), async (req, res) => {
+    try {
+      const engine = memory.getInsightEngine();
+      const { q, minConfidence, limit } = req.query as Record<string, unknown>;
+      let insights;
+      if (typeof q === 'string' && q.trim().length > 0) {
+        insights = await engine.getRelevantInsights(q.trim(), Number(minConfidence));
+      } else {
+        insights = await engine.getHighConfidenceInsights(Number(minConfidence));
+      }
+      const sliced = insights.slice(0, Number(limit) || 20);
+      res.json({ success: true, insights: sliced });
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error({ err }, '[API] Search insights error:');
+      res.status(500).json({ error: 'Insight araması başarısız' });
+    }
+  });
+
+  expressRouter.patch('/insights/:id', validateParams(InsightIdParamSchema), validateBody(UpdateInsightSchema), (req, res, _next) => {
+    try {
+      const engine = memory.getInsightEngine();
+      const id = Number(req.params.id);
+      const { description, status } = req.body;
+      let updated = false;
+      if (typeof description === 'string') {
+        updated = engine.updateInsightDescription(id, description) || updated;
+      }
+      if (status) {
+        updated = engine.updateInsightStatus(id, status) || updated;
+      }
+      if (!updated) {
+        res.status(404).json({ error: 'Insight bulunamadı veya güncellenemedi' });
+        return;
+      }
+      res.json({ success: true });
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error({ err }, '[API] Update insight error:');
+      res.status(500).json({ error: 'Insight güncellenemedi' });
+    }
+  });
+
+  expressRouter.post('/insights/:id/feedback', validateParams(InsightIdParamSchema), validateBody(InsightFeedbackSchema), (req, res) => {
+    try {
+      const engine = memory.getInsightEngine();
+      const id = Number(req.params.id);
+      const { isPositive } = req.body;
+      engine.applyFeedback(id, isPositive);
+      res.json({ success: true });
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error({ err }, '[API] Insight feedback error:');
+      res.status(500).json({ error: 'Insight feedback uygulanamadı' });
+    }
+  });
+
+  expressRouter.post('/insights/prune', (_req, res) => {
+    try {
+      const engine = memory.getInsightEngine();
+      const result = engine.prune();
+      res.json({ success: true, result });
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error({ err }, '[API] Insight prune error:');
+      res.status(500).json({ error: 'Insight prune başarısız' });
     }
   });
 

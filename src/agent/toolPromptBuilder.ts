@@ -20,12 +20,14 @@ export function injectFallbackToolDirectives(systemPrompt: string, tools: LLMToo
     tools.forEach((t) => {
         let parametersPrompt = '';
         if (t.parameters && typeof t.parameters === 'object' && 'properties' in t.parameters) {
-            const props = t.parameters.properties as Record<string, any>;
-            const required = (t.parameters.required as string[]) || [];
+            const props = t.parameters.properties as Record<string, unknown>;
+            const required = Array.isArray(t.parameters.required) ? t.parameters.required as string[] : [];
             const paramList = Object.entries(props).map(([key, value]) => {
                 const isReq = required.includes(key) ? 'zorunlu' : 'opsiyonel';
-                const desc = value.description ? ` - ${value.description}` : '';
-                return `      "${key}": <${value.type}> (${isReq})${desc}`;
+                const v = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
+                const typeStr = typeof v.type === 'string' ? v.type : 'any';
+                const desc = typeof v.description === 'string' ? ` - ${v.description}` : '';
+                return `      "${key}": <${typeStr}> (${isReq})${desc}`;
             });
             
             if (paramList.length > 0) {

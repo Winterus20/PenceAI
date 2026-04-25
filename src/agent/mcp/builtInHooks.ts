@@ -13,6 +13,7 @@
 
 import type { MCPHook, HookContext, HookResult } from './hookTypes.js';
 import type { HookRegistry } from './hooks.js';
+import type { MemoryManager } from '../../memory/manager.js';
 import { getConfig } from '../../gateway/config.js';
 import { logger } from '../../utils/logger.js';
 
@@ -258,7 +259,38 @@ function registerSessionSummary(registry: HookRegistry): void {
   });
 }
 
-export function registerBuiltInHooks(registry: HookRegistry): void {
+function registerInsightObservation(registry: HookRegistry, memoryManager?: MemoryManager): void {
+  registry.register({
+    name: 'insight-observation-capture',
+    event: 'PostToolUseFailure',
+    matcher: /.*/,
+    priority: 50,
+    async: true,
+    handler: async (ctx: HookContext): Promise<HookResult> => {
+      try {
+        const observation = {
+          type: 'correction' as const,
+          timestamp: Date.now(),
+          sessionId: ctx.sessionId,
+          context: ctx.error || `Tool ${ctx.toolName} failed`,
+          source: 'hook' as const,
+          toolName: ctx.toolName,
+        };
+        if (memoryManager) {
+          memoryManager.getInsightEngine().observe(observation);
+          logger.debug({ toolName: ctx.toolName, sessionId: ctx.sessionId }, '[Hook:InsightObservation] Observation sent to InsightEngine');
+        } else {
+          logger.debug({ toolName: ctx.toolName, sessionId: ctx.sessionId }, '[Hook:InsightObservation] Tool failure captured (no memoryManager)');
+        }
+      } catch {
+        // Ignore insight engine errors in hook
+      }
+      return { decision: 'approve' };
+    },
+  });
+}
+
+export function registerBuiltInHooks(registry: HookRegistry, memoryManager?: MemoryManager): void {
   const config = getConfig();
 
   if (!config.enableHooks) {
@@ -285,6 +317,9 @@ export function registerBuiltInHooks(registry: HookRegistry): void {
   if (config.hookSessionSummary) {
     registerSessionSummary(registry);
   }
+  if (config.insightEngineEnabled) {
+    registerInsightObservation(registry, memoryManager);
+  }
 
   logger.info({
     securityMonitor: config.hookSecurityMonitor,
@@ -294,5 +329,6 @@ export function registerBuiltInHooks(registry: HookRegistry): void {
     devServerBlocker: config.hookDevServerBlocker,
     contextBudgetGuard: config.hookContextBudgetGuard,
     sessionSummary: config.hookSessionSummary,
+    insightEngine: config.insightEngineEnabled,
   }, '[Hooks] Built-in hooks registered');
 }

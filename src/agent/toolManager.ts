@@ -22,6 +22,8 @@ export class ToolManager {
     private _lastMcpListHash: string | null = null;
     private _lastMcpListPrompt: string | null = null;
     private _lastConfirmCallback?: ConfirmCallback;
+    private _lastMergeFn?: ((old: string, new_: string) => Promise<string>);
+    private _lastMemory?: MemoryManager;
     private static readonly MAX_TOOLS_IN_CONTEXT = 20;
 
     private _sessionTotalToolTime = 0;
@@ -43,13 +45,23 @@ export class ToolManager {
     }
 
     ensureTools(memory: MemoryManager, confirmCallback: ConfirmCallback | undefined, mergeFn: (old: string, new_: string) => Promise<string>): void {
-        if (!this._lastConfirmCallback || this._lastConfirmCallback !== confirmCallback) {
+        const needsRebuild =
+            !this._lastMemory ||
+            this._lastMemory !== memory ||
+            !this._lastConfirmCallback ||
+            this._lastConfirmCallback !== confirmCallback ||
+            !this._lastMergeFn ||
+            this._lastMergeFn !== mergeFn;
+
+        if (needsRebuild) {
             const builtinTools = createBuiltinTools(memory, confirmCallback, mergeFn);
             this.tools.clear();
             for (const tool of builtinTools) {
                 this.tools.set(tool.name, tool);
             }
+            this._lastMemory = memory;
             this._lastConfirmCallback = confirmCallback;
+            this._lastMergeFn = mergeFn;
 
             if (this._mcpEnabled) {
                 const registry = getUnifiedToolRegistry();

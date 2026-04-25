@@ -183,7 +183,7 @@ export class DiscordChannel implements Channel {
 
             for (let i = 0; i < messageChunks.length; i++) {
                 const chunk = messageChunks[i];
-                const msgPayload: any = { content: chunk !== '' ? chunk : undefined };
+                const msgPayload: Record<string, unknown> = { content: chunk !== '' ? chunk : undefined };
 
                 // Sadece son parçaya eklentileri (attachments) dahil et
                 if (i === messageChunks.length - 1 && response.attachments && response.attachments.length > 0) {
@@ -195,7 +195,8 @@ export class DiscordChannel implements Channel {
                 }
 
                 // If content is completely missing and no files, skip
-                if (!msgPayload.content && (!msgPayload.files || msgPayload.files.length === 0)) continue;
+                const hasFiles = Array.isArray(msgPayload.files) && msgPayload.files.length > 0;
+                if (!msgPayload.content && !hasFiles) continue;
 
                 const targetChannel = discordChannel as any;
                 await targetChannel.send(msgPayload);

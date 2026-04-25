@@ -224,11 +224,9 @@ constructor(llm: LLMProvider, memory: MemoryManager) {
 
         // OPT-2: Mükerrer Base64 dönüşümünü önlemek için cache mekanizması
         const base64Cache = new Map<Buffer | string, string>();
-        const getBase64 = (buf: any) => {
-            if (!Buffer.isBuffer(buf)) {
-                if (typeof buf === 'string') return buf;
-                return '';
-            }
+        const getBase64 = (buf: Buffer | string | unknown): string => {
+            if (typeof buf === 'string') return buf;
+            if (!Buffer.isBuffer(buf)) return '';
             if (!base64Cache.has(buf)) base64Cache.set(buf, buf.toString('base64'));
             return base64Cache.get(buf) as string;
         };

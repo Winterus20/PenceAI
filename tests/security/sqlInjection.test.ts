@@ -38,19 +38,31 @@ describe('SQL Injection Defense', () => {
   describe('PenceDatabase DDL injection resistance', () => {
     const testDbDir = path.join(process.cwd(), 'tmp_test_db');
     const testDbPath = path.join(testDbDir, 'test.db');
+    let db: PenceDatabase | null = null;
+
+    function cleanupDbFile(): void {
+      if (db) {
+        try { db.close(); } catch { /* ignore */ }
+        db = null;
+      }
+      // Windows'ta SQLite kilit salımı için kısa bekle
+      if (fs.existsSync(testDbPath)) {
+        try { fs.unlinkSync(testDbPath); } catch { /* ignore */ }
+      }
+    }
 
     beforeEach(() => {
-      if (fs.existsSync(testDbPath)) {
-        fs.unlinkSync(testDbPath);
-      }
+      cleanupDbFile();
+    });
+
+    afterEach(() => {
+      cleanupDbFile();
     });
 
     afterAll(() => {
-      if (fs.existsSync(testDbPath)) {
-        fs.unlinkSync(testDbPath);
-      }
+      cleanupDbFile();
       if (fs.existsSync(testDbDir)) {
-        fs.rmdirSync(testDbDir);
+        try { fs.rmdirSync(testDbDir); } catch { /* ignore */ }
       }
     });
 
@@ -67,14 +79,13 @@ describe('SQL Injection Defense', () => {
     });
 
     it('accepts valid embeddingDimensions and creates tables', () => {
-      const db = new PenceDatabase(testDbPath, 768);
+      db = new PenceDatabase(testDbPath, 768);
       const row = db.getDb().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memories'").get() as { name: string } | undefined;
       expect(row?.name).toBe('memories');
-      db.close();
     });
 
     it('uses parameterized queries for token usage stats', () => {
-      const db = new PenceDatabase(testDbPath, 768);
+      db = new PenceDatabase(testDbPath, 768);
       // Insert a dummy record
       db.saveTokenUsage({
         provider: 'openai',
@@ -86,7 +97,6 @@ describe('SQL Injection Defense', () => {
       });
       const stats = db.getTokenUsageStats('day');
       expect(stats.totalTokens).toBe(15);
-      db.close();
     });
   });
 });

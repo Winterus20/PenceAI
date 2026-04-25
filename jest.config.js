@@ -23,6 +23,7 @@ export default {
     testPathIgnorePatterns: [
         '/node_modules/',
         '/dist/',
+        '/tests/e2e/',
     ],
     transformIgnorePatterns: [
         '/node_modules/(?!uuid)/',

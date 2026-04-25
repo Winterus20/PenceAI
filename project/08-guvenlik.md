@@ -40,6 +40,7 @@ const ALLOWED_COMMANDS = ['npx', 'node', 'python', 'python3', 'curl'];
 - Basic HTTP Authentication
 - WebSocket protocol-based auth (`auth-{password}`)
 - Health endpoint muafiyeti
+- Geliştirme modunda localhost bağlantıları için auth bypass (Vite proxy desteği)
 
 ### Shell Execution
 
@@ -55,9 +56,16 @@ const ALLOWED_COMMANDS = ['npx', 'node', 'python', 'python3', 'curl'];
 
 ### Rate Limiting
 
-- Express `express-rate-limit` ile HTTP rate limiting
+- Express `express-rate-limit` ile HTTP rate limiting (15 dk pencerede IP başına 100 istek)
+- WebSocket per-connection rate limiting (sliding window: 60 saniyede 30 mesaj)
 - Helmet.js ile güvenlik başlıkları
 - CORS yapılandırması
+
+### Attachment Processing Security
+
+- Tehlikeli dosya uzantısı engelleme: `.exe`, `.bat`, `.cmd`, `.sh`, `.php`, `.ps1`, `.vbs`, `.jar`, `.com`, `.scr`, `.msi`, `.dll`, `.bin`
+- Maksimum attachment boyutu: 10 MB (base64)
+- Metin dosyası uzunluk sınırı: 20.000 karakter (fazlası kısaltılır)
 
 ---
 [← İçindekilere Dön](./README.md)

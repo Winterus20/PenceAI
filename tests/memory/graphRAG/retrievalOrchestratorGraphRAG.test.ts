@@ -17,6 +17,14 @@ jest.mock('../../../src/utils/logger.js', () => ({
   },
 }));
 
+jest.mock('../../../src/memory/retrieval/RetrievalConfidenceScorer.js', () => ({
+  computeRetrievalConfidence: jest.fn().mockReturnValue({
+    score: 0.9,
+    needsRetrieval: true,
+    reasons: ['test'],
+  }),
+}));
+
 import { MemoryRetrievalOrchestrator, type RetrievalOrchestratorDeps, type PromptContextBundle } from '../../../src/memory/retrievalOrchestrator.js';
 import { GraphRAGEngine, type GraphRAGResult } from '../../../src/memory/graphRAG/index.js';
 import type { MemoryRow, GraphAwareSearchResult } from '../../../src/memory/types.js';
@@ -110,7 +118,8 @@ describe('RetrievalOrchestrator + GraphRAG Integration (Extended)', () => {
       getMemoriesDueForReview: jest.fn().mockReturnValue([]),
       getFollowUpCandidates: jest.fn().mockReturnValue([]),
       getRecentMessages: jest.fn().mockReturnValue([]),
-      getUserMemories: jest.fn().mockReturnValue([]),
+      // wikiAdaptiveThreshold default 100 — 101 öğe döndürerek adaptive skip'i bypass et
+      getUserMemories: jest.fn().mockReturnValue(new Array(101).fill(createMemory(1))),
       getMemoryNeighborsBatch: jest.fn().mockReturnValue(new Map()),
       getBehaviorDiscoveryConfig: jest.fn().mockReturnValue({ retrieval: { state: 'shadow' } }),
       prioritizeConversationMemories: jest.fn((memories) => memories),

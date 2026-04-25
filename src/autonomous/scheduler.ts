@@ -21,7 +21,9 @@ export class AutonomousScheduler {
         logger.info(`[Scheduler] 🕒 Starting autonomous cron scheduler with pattern: ${cronExpression}`);
         
         this.cronJob = new Cron(cronExpression, () => {
-            this.handleCronWakeup();
+            this.handleCronWakeup().catch((err) => {
+                logger.error({ err }, '[Scheduler] Cron wakeup failed');
+            });
         });
     }
 

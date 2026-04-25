@@ -13,12 +13,96 @@ Ana ajan mantığını, ReAct döngüsünü ve LLM etkileşimini yöneten modül
 | [`toolManager.ts`](src/agent/toolManager.ts) | Birleşik araç yönetimi — built-in + MCP araçlarını koordine eder |
 | [`toolPromptBuilder.ts`](src/agent/toolPromptBuilder.ts) | Native tool API desteği olmayan modeller için fallback prompt enjeksiyonu |
 | [`contextPreparer.ts`](src/agent/contextPreparer.ts) | LLM bağlam hazırlama — prompt oluşturma, bellek ilişkileri, token hesaplama |
+
+```typescript
+class ContextPreparer {
+  prepare(params: ContextPrepareParams): PreparedContext;
+  // System prompt oluşturma: buildSystemPrompt() + GraphRAG community summaries + MCP listesi
+  // Bellek ilişkileri: getMemoryRelationsForPrompt() — komşu bellekler arası bağlantılar
+  // Token hesaplama: systemPrompt + userMsg + pastHistory token ayrımı
+  // Image attachment işleme: son kullanıcı mesajına imageBlocks ekleme
+  // Telescopic summaries: historyToKeep filtreleme (end_msg_id bazlı)
+  getTotalContextTokens(prepared: PreparedContext): number;
+}
+```
+
 | [`memoryExtractor.ts`](src/agent/memoryExtractor.ts) | Bellek çıkarım motoru — hafif/derin tarama, graph kuyruğu, merge fonksiyonu |
 | [`metricsTracker.ts`](src/agent/metricsTracker.ts) | Oturum bazlı metrik takibi — token, maliyet, performans zamanlamaları |
+
+```typescript
+class MetricsTracker {
+  reset(startTimeMs: number): void;
+  recordPerf(key: string, ms: number): void;
+  setContextTokens(info: { systemPrompt: number; userMsg: number; pastHistory: number }): void;
+  recordLlmCall(provider, model, promptTokens, completionTokens, durationMs): number; // returns callCost
+  addToolTime(durationMs: number): void;
+  incrementToolCallCount(): number;
+  recordCompaction(data: { originalTokens, compactedTokens, durationMs, messagesCompacted, summaryLength }): void;
+  buildMetricsEvent(conversationId: string): AgentEvent;
+  buildPerformanceLog(): string;
+  buildCostLog(): string | null;
+  saveToDatabase(conversationId: string): Promise<void>;
+}
+```
+
 | [`graphRAGManager.ts`](src/agent/graphRAGManager.ts) | GraphRAG retrieval yöneticisi — shadow mode ve graph-aware arama |
+
+```typescript
+class GraphRAGManager {
+  setEngine(engine: GraphRAGEngine, shadow?: ShadowMode): void;
+  async retrieve(query, contextBundle, relevantMemories, recentMessageCount): Promise<GraphRAGRetrieveResult>;
+  // Shadow mode: config.shadowMode aktifse shadow query çalıştırır
+  // Sample rate: Math.random() < config.sampleRate ile kontrollü retrieval
+  // Skip logic: aktif bağlam + kısa query (<15 karakter) → GraphRAG atlanabilir
+  // Memory merge: graphRAGResult.memories'i relevantMemories ile birleştirir
+  formatCommunitySummaries(summaries): string | null;
+  shouldAddToSystemPrompt(graphRAGResult): boolean;
+}
+```
+
 | [`fallbackParser.ts`](src/agent/fallbackParser.ts) | Fallback araç çağrısı ayrıştırma — tool_code, JSON, fonksiyon çağrısı formatları |
+
+```typescript
+// Fallback parser fonksiyonları
+function extractFallbackToolCalls(content: string, knownToolNames: Set<string>): FallbackToolCallResult;
+// 1. ```tool_code ... ``` bloklarını ara
+// 2. tool_code inline formatını ara
+// 3. JSON bloklarını parse et (name/arguments/function pattern)
+// 4. Greedy JSON fallback ({...} bloklarını dene)
+// 5. Fonksiyon çağrısı formatını parse et: toolName(arg1="val", ...)
+
+function parseFallbackArgs(toolName: string, argsString: string): Record<string, unknown>;
+// JSON objesi, key=value çiftleri, veya primaryParam fallback
+
+function getPrimaryParam(toolName: string): string;
+// readFile/writeFile/editFile → 'path', searchFiles → 'pattern', executeShell → 'command', ...
+```
+
 | [`runtimeContext.ts`](src/agent/runtimeContext.ts) | Konuşma geçmişi budama ve bağlam formatlama |
+
+```typescript
+function pruneConversationHistory(history, estimateMessageTokens, maxHistoryTokens): HistoryPruneResult;
+// Chunk bazlı budama: assistant+tool çiftleri birlikte tutulur
+// Sondan başa token biriktirme: maxHistoryTokens aşılınca budama
+// Validasyon: eşsiz assistant(toolCalls) → tool result eşleşmesi kontrolü
+// Repair: eşleşmeyen assistant mesajları toolCalls'i temizlenir
+
+function formatRecentContextMessages(messages: RecentPromptMessage[]): string[];
+// [Tarih] [Konuşma Başlığı] Kullanıcı/Sen: içerik formatı
+```
+
 | [`compactEngine.ts`](src/agent/compactEngine.ts) | Bağlam sıkıştırma motoru — token optimizasyonu ve context window yönetimi |
+
+```typescript
+class CompactEngine {
+  async compactIfNeeded(llmMessages, conversationHistory, sessionId, sessionToolCallCount): Promise<CompactResult>;
+  // Threshold kontrolü: yaklaşık tahmin (char/4) → tam sayım (threshold'a yakınsa)
+  // Teleskopik compaction: recent (1h) / medium (24h) / old (>24h) zaman dilimleri
+  // Artımlı özetleme: mevcut boundary özeti varsa genişletir, yoksa taze özet üretir
+  // Konuşma tipi tespiti: technical (toolDensity > 0.3 || codeDensity > 0.2) vs conversational
+  // Fallback: LLM özetleme başarısız olursa heuristic summary
+}
+```
 
 #### Search Alt Modülü (`src/agent/search/`)
 
@@ -51,16 +135,34 @@ class AgentRuntime {
   private graphRAGManager: GraphRAGManager;
   private contextPreparer: ContextPreparer;
   private memoryExtractor: MemoryExtractor;
+  private compactEngine: CompactEngine;
   private responseVerifier?: ResponseVerifier;  // Agentic RAG
   private metricsTracker: MetricsTracker;
+  private feedbackManager?: FeedbackManager;
+  private taskQueue?: TaskQueue;
 
   // Ana metotlar
-  processMessage()       // Kullanıcı mesajını işler
-  runReActLoop()         // Reason-Act-Observe döngüsü (ReActLoop'a delege)
+  processMessage()       // Kullanıcı mesajını işler (içinde ReActLoop.execute() çağrır)
 
   // GraphRAG
   setGraphRAGComponents() // GraphRAG motorunu dış bağımlılıklarla bağlar
+  setAgenticRAGVerifier() // Agentic RAG verifier'ı yapılandırır
+
+  // Autonomous
+  setAutonomousManagers() // FeedbackManager bağlar
+  setTaskQueue()          // Arka plan görev kuyruğu bağlar
 }
+
+// processMessage() akışı:
+// 1. beginConversationTurn() — konuşma başlatma / geçmiş yükleme
+// 2. Context compaction — compactEngine.compactIfNeeded() + sliding window fallback
+// 3. getPromptContextBundle() — bellek retrieval (FTS + semantik + graph-aware)
+// 4. GraphRAG retrieve — graphRAGManager.retrieve()
+// 5. ContextPreparer.prepare() — system prompt + llmMessages oluşturma
+// 6. ReActLoop.execute() — iteratif LLM çağrısı ve araç yürütme
+// 7. Agentic RAG verification — responseVerifier.verify() (varsa)
+// 8. Metrics kaydetme — metricsTracker.saveToDatabase()
+// 9. Background extraction — memoryExtractor.pushExtractionContext()
 ```
 
 #### `reactLoop.ts` - ReAct Döngüsü
@@ -74,6 +176,26 @@ class ReActLoop {
   // 3. Tool call tespiti (native veya fallback parser)
   // 4. Araç yürütülür, sonuç mesajlara eklenir
   // 5. TOOL_CALL_CLEAR_SIGNAL ile stream temizlenir
+  // 6. Context compaction — token bütçesi aşılırsa compactEngine devreye girer
+}
+
+interface ReActLoopInput {
+  llm: LLMProvider;
+  toolManager: ToolManager;
+  metricsTracker: MetricsTracker;
+  memory: MemoryManager;
+  conversationId: string;
+  finalSystemPrompt: string;
+  llmMessages: LLMMessage[];
+  maxIterations: number;
+  isToolingDisabled: boolean;
+  onEvent?: AgentEventCallback;
+  thinking?: boolean;
+  isFirstMessage: boolean;
+  contextTokenInfo: { systemPromptTokens: number; userMsgTokens: number; pastHistoryTokens: number };
+  compactEngine: CompactEngine;
+  compactThreshold: number;
+  confirmCallback?: ConfirmCallback;
 }
 ```
 
@@ -83,6 +205,9 @@ class ReActLoop {
 |------|----------|----------|
 | `readFile` | Dosya okuma | Path validation + Zod schema |
 | `writeFile` | Dosya yazma | Path validation + confirm |
+| `editFile` | Dosya düzenleme (metin değiştirme) | Path validation + confirm + oldText uzunluk kısıtı |
+| `appendFile` | Dosyaya ekleme (sonuna yaz) | Path validation + confirm |
+| `searchFiles` | Dosya arama (glob pattern) | Path validation |
 | `listDirectory` | Dizin listeleme | Path validation |
 | `searchMemory` | Bellek arama | Read-only, graph-aware |
 | `deleteMemory` | Bellek silme | Confirm required |
@@ -91,6 +216,11 @@ class ReActLoop {
 | `webTool` | Web isteği | URL validation, quick/deep mode |
 | `executeShell` | Komut çalıştırma | Blocked commands + path extraction |
 | `webSearch` | Web arama | Brave Search API, rate limited |
+| `prompt_human` | Kullanıcıya proaktif soru sorma | Zorunlu question parametresi |
+| `wake_me_in` | Gelecekte uyan ve görev yürüt | Zod validation |
+| `wake_me_every` | Düzenli cron görevi | Zod validation |
+| `cancel_timer` | Zamanlayıcı iptal | Zod validation |
+| `list_timers` | Aktif zamanlayıcıları listele | Zod validation |
 
 #### `toolManager.ts` - Araç Yöneticisi
 
@@ -98,10 +228,17 @@ class ReActLoop {
 class ToolManager {
   // Built-in + MCP araçlarını birleştirir
   ensureTools()                      // Araçları başlat (built-in + MCP)
-  getEffectiveToolDefinitions()      // Tüm araç tanımlarını döndür (önbellekli)
-  executeTool()                      // Araç yürüt (built-in veya MCP)
+  getEffectiveToolDefinitions()      // Tüm araç tanımlarını döndür (önbellekli hash + LRU)
+  executeToolsWithEvents()           // Araç yürüt + event emit + hook çağrıları
+  getMcpListPrompt()                 // Aktif MCP sunucularının listesi prompt'u
   compressToolDefinitions()          // Token tasarrufu için açıklama kısaltma
   pruneExcessTools()                 // MAX_TOOLS_IN_CONTEXT (20) sınırı
+
+  // Session tracking
+  setSessionId()                     // Hook context için session ID ayarla
+  sessionTotalToolTime               // Toplam araç çalışma süresi (ms)
+  sessionToolCallCount               // Toplam araç çağrı sayısı
+  resetSessionTracking()             // Session istatistiklerini sıfırla
 }
 ```
 
@@ -109,19 +246,25 @@ class ToolManager {
 
 ```typescript
 class MemoryExtractor {
-  // Hafif tarama: her 3 mesajda bir (EXTRACTION_INTERVAL = 3)
+  // Hafif tarama: adaptif interval (MIN=2, MAX=5, DEFAULT=3)
   pushExtractionContext()            // Çıkarım bağlamını kuyruğa ekle
-  checkAndPrepareExtraction()        // Eşik kontrolü ve birleştirme
+  checkAndPrepareExtraction()        // Adaptif interval kontrolü ve birleştirme
+  getAdaptiveInterval()              // Dinamik extraction interval hesaplama
 
   // Derin tarama: konuşma sonunda
   extractMemoriesDeep()              // Derin bellek çıkarımı
   summarizeConversation()            // Konuşma özetleme
+  processRawTextForMemories()        // Ham metinden bellek çıkarımı
 
   // Graph kuyruğu
-  enqueueGraphTask()                 // Graph işlemini kuyruğa ekle (retry: 3)
+  enqueueGraphTask()                 // Graph işlemini kuyruğa ekle (retry: MAX_GRAPH_QUEUE_RETRIES=3)
+  getDeadLetterQueue()               // Kalıcı başarısız görevlerin izlenmesi
 
   // Merge fonksiyonu
   createMergeFn()                    // LLM tabanlı bellek birleştirme
+
+  // Embedding cache
+  getCachedEmbedding()               // LRU cache'lenmiş embedding getirici
 }
 ```
 
@@ -519,6 +662,7 @@ HTTP/WebSocket sunucusu, REST API ve uygulama başlatma.
 | [`userName.ts`](src/gateway/userName.ts) | Kullanıcı adı çözümleme — fallback zinciri |
 | [`intents.ts`](src/gateway/intents.ts) | Lokal semantik intent'ler — kuyruk temizleme, worker durumu |
 | [`attachmentProcessor.ts`](src/gateway/attachmentProcessor.ts) | WebSocket ek dosya işleme — metin, görsel, binary, boyut limiti |
+| [`errorHandler.ts`](src/gateway/errorHandler.ts) | Express global hata yakalama — AppError operational vs 500 ayrımı |
 
 #### Controllers (`src/gateway/controllers/`)
 
@@ -526,6 +670,12 @@ HTTP/WebSocket sunucusu, REST API ve uygulama başlatma.
 |-------|----------|
 | [`mcpController.ts`](src/gateway/controllers/mcpController.ts) | MCP sunucu yönetimi API — marketplace, CRUD, activate/deactivate |
 | [`memoryController.ts`](src/gateway/controllers/memoryController.ts) | Bellek yönetimi API — konuşmalar, bellekler, graph, istatistikler |
+
+#### Middleware (`src/gateway/middleware/`)
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`validate.ts`](src/gateway/middleware/validate.ts) | Zod tabanlı request validation — body, query, params schema'ları |
 
 #### Services (`src/gateway/services/`)
 

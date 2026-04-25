@@ -8,7 +8,6 @@ import rateLimit from 'express-rate-limit';
 import compression from 'compression';
 import type Database from 'better-sqlite3';
 
-
 import { getConfig, loadConfig } from './config.js';
 
 import { PenceDatabase } from '../memory/database.js';
@@ -146,7 +145,7 @@ async function main() {
             timeout: s.timeout,
         }));
     
-    const mcpManager = await initializeMCP(activeServers);
+    const mcpManager = await initializeMCP(activeServers, memory);
     if (mcpManager) {
         logger.info(`[Gateway] 🔌 MCP Runtime initialized — ${mcpManager.connectedServerCount} server(s), ${mcpManager.totalToolCount} tool(s)`);
     }

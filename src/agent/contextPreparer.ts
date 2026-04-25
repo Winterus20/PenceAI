@@ -113,7 +113,7 @@ export class ContextPreparer {
             content: string;
             attachments: Attachment[];
         };
-        getBase64: (buf: any) => string | undefined;
+        getBase64: (buf: Buffer | string) => string | undefined;
         maxMemoryTokens?: number;
     }): PreparedContext {
         let memoryStrings = [
@@ -196,7 +196,7 @@ export class ContextPreparer {
                     const msgUser = llmMessages[i] as LLMMessage;
                     msgUser.imageBlocks = imageAttachments.map(a => ({
                         mimeType: a.mimeType,
-                        data: params.getBase64(a.data as Buffer)!,
+                        data: Buffer.isBuffer(a.data) ? params.getBase64(a.data)! : '',
                         fileName: a.fileName,
                     }));
                     break;

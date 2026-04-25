@@ -8,6 +8,7 @@ import { filterThought } from '../../autonomous/urgeFilter.js';
 import { think } from '../../autonomous/thinkEngine.js';
 import { TaskPriority } from '../../autonomous/index.js';
 import { logger } from '../../utils/logger.js';
+import { WebSocket } from 'ws';
 import type { WebSocketServer } from 'ws';
 import type { AppConfig } from '../config.js';
 import { z } from 'zod';
@@ -159,8 +160,8 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
         // --- 5. AKSİYON AL ---
         if (decisionResult.decision === 'send') {
             logger.info(`[Worker] 🚀 PROAKTİF MESAJ GÖNDERİLİYOR: ` + llmThoughtOutput.substring(0, 100));
-            wss.clients.forEach((client: any) => {
-                if (client.readyState === 1 /* WebSocket.OPEN */) {
+            wss.clients.forEach((client) => {
+                if (client.readyState === WebSocket.OPEN) {
                     client.send(JSON.stringify({
                         type: 'system_thought',
                         payload: llmThoughtOutput,
@@ -237,10 +238,10 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
                     headers: { 'Accept': 'application/json', 'X-Subscription-Token': config.braveSearchApiKey }
                 });
                 if (response.ok) {
-                    const data = await response.json() as any;
-                    const results = data?.web?.results || [];
+                    const data = await response.json() as Record<string, unknown>;
+                    const results = (data?.web as Record<string, unknown> | undefined)?.results as Array<Record<string, unknown>> | undefined || [];
                     if (results.length > 0) {
-                        researchContent = results.map((r: any) => `* **${r.title}**: ${r.description}`).join('\\n');
+                        researchContent = results.map((r) => `* **${r.title}**: ${r.description}`).join('\\n');
                     }
                 }
             } catch (err) {

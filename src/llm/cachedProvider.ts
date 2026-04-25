@@ -90,7 +90,7 @@ export class CachedLLMProvider extends LLMProvider {
      */
     async chatStream(
         messages: LLMMessage[],
-        options: ChatOptions,
+        options: ChatOptions | undefined,
         onToken: (token: string) => void,
     ): Promise<LLMResponse> {
         if (this.inner.chatStream) {

@@ -23,6 +23,7 @@ export interface AppConfig {
   semanticSearchThreshold: string;
   logLevel: string;
   temperature: string;
+  hookApprovalMode?: string;
   maxTokens: string;
 }
 
