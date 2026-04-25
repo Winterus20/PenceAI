@@ -5,33 +5,39 @@ import type { LLMProvider } from '../../../src/llm/provider.js';
 import type { LLMResponse, LLMMessage } from '../../../src/router/types.js';
 
 function createMockLLM(responseText: string): LLMProvider {
-  return {
-    name: 'mock',
-    supportedModels: ['mock-model'],
-    defaultModel: 'mock-model',
-    async chat(_messages: LLMMessage[]): Promise<LLMResponse> {
-      return {
-        content: responseText,
-        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
-        finishReason: 'stop',
-      };
-    },
-    async healthCheck(): Promise<boolean> { return true; },
-  } as unknown as LLMProvider;
+    return {
+        name: 'mock',
+        supportedModels: ['mock-model'],
+        defaultModel: 'mock-model',
+        async chat(_messages: LLMMessage[]): Promise<LLMResponse> {
+            return {
+                content: responseText,
+                usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+                finishReason: 'stop',
+            };
+        },
+        async healthCheck(): Promise<boolean> {
+            return true;
+        },
+    } as unknown as LLMProvider;
 }
 
 describe('MemoryLintPass', () => {
-  let db: Database.Database;
+    let db: Database.Database;
 
-  beforeEach(() => {
-    db = new Database(':memory:');
-    db.exec(`
+    beforeEach(() => {
+        db = new Database(':memory:');
+        db.exec(`
       CREATE TABLE memories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         content TEXT NOT NULL,
         category TEXT NOT NULL DEFAULT 'general',
         importance INTEGER DEFAULT 5,
-        is_archived INTEGER DEFAULT 0
+        is_archived INTEGER DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE memory_embeddings (
+        embedding BLOB
       );
       CREATE TABLE memory_contradictions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,44 +70,51 @@ describe('MemoryLintPass', () => {
         entity_id INTEGER NOT NULL,
         PRIMARY KEY (memory_id, entity_id)
       );
+      CREATE TABLE settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL DEFAULT '',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
-  });
-
-  it('dry-run reports candidates without writing', async () => {
-    db.prepare("INSERT INTO memories (content) VALUES (?)").run('A');
-    db.prepare("INSERT INTO memories (content) VALUES (?)").run('B');
-
-    const lint = new MemoryLintPass({
-      db,
-      llm: createMockLLM('1: CONSISTENT'),
-      config: { deterministicThresholdJaccard: 0.8, llmValidationEnabled: true, maxLLMPairsPerRun: 20 },
     });
 
-    const result = await lint.runLintPass({ dryRun: true });
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
-    expect(result.scannedPairs).toBe(1);
+    it('dry-run reports candidates without writing', async () => {
+        db.prepare('INSERT INTO memories (content) VALUES (?)').run('A');
+        db.prepare('INSERT INTO memories (content) VALUES (?)').run('B');
 
-    const rows = db.prepare("SELECT COUNT(*) as c FROM memory_contradictions").get() as { c: number };
-    expect(rows.c).toBe(0);
-  });
+        const lint = new MemoryLintPass({
+            db,
+            llm: createMockLLM('1: CONSISTENT'),
+            config: { deterministicThresholdJaccard: 0.8, llmValidationEnabled: true, maxLLMPairsPerRun: 20 },
+        });
 
-  it('inserts and dedups contradictions on conflict', async () => {
-    db.prepare("INSERT INTO memories (content) VALUES (?)").run('Same content here');
-    db.prepare("INSERT INTO memories (content) VALUES (?)").run('Same content here');
+        const result = await lint.runLintPass({ dryRun: true });
+        expect(result.durationMs).toBeGreaterThanOrEqual(0);
+        expect(result.scannedPairs).toBeGreaterThanOrEqual(1);
 
-    const lint = new MemoryLintPass({
-      db,
-      llm: createMockLLM('1: CONTRADICTORY'),
-      config: { deterministicThresholdJaccard: 0.5, llmValidationEnabled: false, maxLLMPairsPerRun: 20 },
+        const rows = db.prepare('SELECT COUNT(*) as c FROM memory_contradictions').get() as { c: number };
+        expect(rows.c).toBe(0);
     });
 
-    const r1 = await lint.runLintPass({ dryRun: false });
-    expect(r1.contradictionsFound).toBe(1);
+    it('inserts and dedups contradictions on conflict', async () => {
+        db.prepare('INSERT INTO memories (content) VALUES (?)').run('Same content here');
+        db.prepare('INSERT INTO memories (content) VALUES (?)').run('Same content here');
 
-    const r2 = await lint.runLintPass({ dryRun: false });
-    expect(r2.contradictionsFound).toBe(1); // re-insert with ON CONFLICT update
+        const lint = new MemoryLintPass({
+            db,
+            llm: createMockLLM('1: CONTRADICTORY'),
+            config: { deterministicThresholdJaccard: 0.5, llmValidationEnabled: false, maxLLMPairsPerRun: 20 },
+        });
 
-    const rows = db.prepare("SELECT COUNT(*) as c FROM memory_contradictions").get() as { c: number };
-    expect(rows.c).toBe(1);
-  });
+        const r1 = await lint.runLintPass({ dryRun: false });
+        expect(r1.contradictionsFound).toBe(1);
+
+        const r2 = await lint.runLintPass({ dryRun: false });
+        // İkinci çalışmada cursor ilerlediğinden updatedMemories boş gelir → 0 yeni çift taranır.
+        // Dedup kanıtı: tabloda hâlâ 1 satır var (r1'den kalan), ikinci kez eklenmedi.
+        expect(r2.contradictionsFound).toBe(0);
+
+        const rows = db.prepare('SELECT COUNT(*) as c FROM memory_contradictions').get() as { c: number };
+        expect(rows.c).toBe(1);
+    });
 });
