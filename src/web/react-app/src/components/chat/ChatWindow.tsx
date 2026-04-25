@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
-import { BrainCircuit, Wrench, Menu, X, PanelLeftOpen, Command, ArrowLeft } from 'lucide-react';
+import { BrainCircuit, Wrench, Menu, X, PanelLeftOpen, Command, ArrowLeft, Sun, Moon } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { conversationService } from '@/services/conversationService';
 import { useAgentStore } from '../../store/agentStore';
@@ -51,14 +51,14 @@ const BranchDeleteDialog: React.FC<{
               Silme işlemini nasıl yapmak istersiniz?
             </p>
             <div className="space-y-2 mb-4">
-              <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-white/5 cursor-pointer border border-border/30">
+              <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 cursor-pointer border border-border/30">
                 <input type="radio" name="deleteOption" value="all" checked={deleteOption === 'all'} onChange={() => setDeleteOption('all')} className="mt-1" />
                 <div>
                   <div className="text-sm font-medium text-foreground">Dallarla birlikte sil</div>
                   <div className="text-xs text-muted-foreground">Ana konuşma ve tüm alt dallar silinecek</div>
                 </div>
               </label>
-              <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-white/5 cursor-pointer border border-border/30">
+              <label className="flex items-start gap-3 p-3 rounded-lg hover:bg-muted/50 cursor-pointer border border-border/30">
                 <input type="radio" name="deleteOption" value="onlyMain" checked={deleteOption === 'onlyMain'} onChange={() => setDeleteOption('onlyMain')} className="mt-1" />
                 <div>
                   <div className="text-sm font-medium text-foreground">Sadece ana konuşmayı sil</div>
@@ -106,6 +106,8 @@ export const ChatWindow = () => {
     messageMetrics,
     setCanvasArtifact,
     toggleCommandPalette,
+    theme,
+    toggleTheme,
     editingMessage,
     setEditingMessage,
     clearEditingMessage,
@@ -428,7 +430,7 @@ export const ChatWindow = () => {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 relative h-full bg-background">
         {/* Floating Top Header inside main content */}
-        <header className="absolute top-0 left-0 right-0 h-14 px-3 md:px-4 flex items-center justify-between z-30 transition-all duration-300 bg-background/60 backdrop-blur-md border-b border-white/[0.04]">
+        <header className="absolute top-0 left-0 right-0 h-14 px-3 md:px-4 flex items-center justify-between z-30 transition-all duration-300 bg-background/60 backdrop-blur-md border-b border-black/[0.04] dark:border-white/[0.04]">
           <div className="flex items-center gap-2">
             <AnimatePresence>
               {!showConversations && (
@@ -440,7 +442,7 @@ export const ChatWindow = () => {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-9 w-9 md:flex hidden hover:bg-white/10 rounded-lg text-muted-foreground hover:text-foreground transition-colors"
+                    className="h-9 w-9 md:flex hidden hover:bg-muted/50 rounded-lg text-muted-foreground hover:text-foreground transition-colors"
                     onClick={() => setShowConversations(true)}
                     title="Menüyü Büyüt"
                   >
@@ -452,7 +454,7 @@ export const ChatWindow = () => {
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 md:hidden flex hover:bg-white/10 rounded-lg text-muted-foreground hover:text-foreground transition-colors"
+              className="h-9 w-9 md:hidden flex hover:bg-muted/50 rounded-lg text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => setIsMobileSidebarOpen(true)}
             >
               <Menu size={18} />
@@ -461,7 +463,7 @@ export const ChatWindow = () => {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 gap-1.5 text-muted-foreground hover:text-foreground hover:bg-white/10 rounded-lg"
+                className="h-8 gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-lg"
                 onClick={async () => {
                   if (branchInfo.parentConversationId) {
                     await loadConversation(branchInfo.parentConversationId);
@@ -473,23 +475,31 @@ export const ChatWindow = () => {
                 <span className="text-xs">Üst Dal</span>
               </Button>
             )}
-            <button className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-white/5 transition-colors text-lg font-semibold text-foreground/90">
-              Pençe<span className="text-purple-400">AI</span>
-              <span className="text-muted-foreground text-xs font-normal border border-white/10 rounded-full px-2 py-0.5 bg-white/5">v0.1</span>
+            <button className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-lg font-semibold text-foreground/90">
+              Pençe<span className="text-purple-600 dark:text-purple-400">AI</span>
+              <span className="text-muted-foreground text-xs font-normal border border-black/10 dark:border-white/10 rounded-full px-2 py-0.5 bg-black/5 dark:bg-white/5">v0.1</span>
             </button>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <Button variant={showThinking ? 'secondary' : 'ghost'} size="icon" className={`h-9 w-9 rounded-full transition-colors ${showThinking ? 'bg-purple-500/20 text-purple-300 hover:bg-purple-500/30' : 'hover:bg-white/10 text-muted-foreground hover:text-foreground'}`} onClick={() => setShowThinking((prev) => !prev)} title="Düşünme Modu">
+          <div className="flex items-center gap-1.5">            <Button variant={showThinking ? 'secondary' : 'ghost'} size="icon" className={`h-9 w-9 rounded-full transition-colors ${showThinking ? 'bg-purple-500/20 text-purple-300 hover:bg-purple-500/30' : 'hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground'}`} onClick={() => setShowThinking((prev) => !prev)} title="Düşünme Modu">
               <BrainCircuit size={16} />
             </Button>
-            <Button variant={showTools ? 'secondary' : 'ghost'} size="icon" className={`h-9 w-9 rounded-full transition-colors ${showTools ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' : 'hover:bg-white/10 text-muted-foreground hover:text-foreground'}`} onClick={() => setShowTools((prev) => !prev)} title="Araçlar">
+            <Button variant={showTools ? 'secondary' : 'ghost'} size="icon" className={`h-9 w-9 rounded-full transition-colors ${showTools ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30' : 'hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground'}`} onClick={() => setShowTools((prev) => !prev)} title="Araçlar">
               <Wrench size={16} />
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 rounded-full hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+              className="h-9 w-9 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => toggleTheme()}
+              title={theme === 'dark' ? 'Açık Tema' : 'Koyu Tema'}
+            >
+              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => toggleCommandPalette()}
               title="Komut Paleti (⌘K)"
             >

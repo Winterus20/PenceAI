@@ -93,7 +93,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
 
   return (
     <div className="w-full flex justify-center pb-6 pt-2 z-40 relative">
-      <div className="max-w-3xl w-full flex flex-col relative bg-[#1c1c1c]/90 backdrop-blur-md rounded-[28px] border border-border/40 focus-within:border-purple-500/30 focus-within:ring-2 focus-within:ring-purple-500/10 focus-within:bg-[#1f1f1f]/95 transition-all duration-300 shadow-xl">
+      <div className="max-w-3xl w-full flex flex-col relative bg-card/90 backdrop-blur-md rounded-[28px] border border-border/40 focus-within:border-purple-500/30 focus-within:ring-2 focus-within:ring-purple-500/10 focus-within:bg-card transition-all duration-300 shadow-xl">
         
         {/* Editing indicator */}
         <AnimatePresence>
@@ -102,7 +102,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="px-4 py-2 border-b border-white/5 flex items-center justify-between text-xs"
+              className="px-4 py-2 border-b border-border/30 flex items-center justify-between text-xs"
             >
               <div className="flex items-center gap-2 text-purple-400 font-medium">
                 <Send size={12} className="rotate-[-45deg]" />
@@ -110,7 +110,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
               </div>
               <button 
                 onClick={handleCancelEdit}
-                className="text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-white/5"
+                className="text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-md hover:bg-black/5 dark:hover:bg-white/5"
               >
                 Vazgeç
               </button>
@@ -132,7 +132,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ scale: 0.8, opacity: 0 }}
                   key={`${attachment.fileName}-${index}`} 
-                  className="flex flex-col relative group rounded-xl border border-white/10 bg-[#2a2a2a] p-2 w-16 h-16 justify-center items-center shadow-sm"
+                  className="flex flex-col relative group rounded-xl border border-border/50 bg-muted p-2 w-16 h-16 justify-center items-center shadow-sm"
                 >
                   <span className="text-[10px] font-medium truncate w-full text-center text-foreground/80 px-1" title={attachment.fileName}>
                     {attachment.fileName.length > 8 ? attachment.fileName.substring(0, 8) + '...' : attachment.fileName}
@@ -156,7 +156,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
           <Button 
             variant="ghost" 
             size="icon" 
-            className="flex-shrink-0 h-8 w-8 rounded-full bg-white/5 hover:bg-white/10 text-foreground" 
+            className="flex-shrink-0 h-8 w-8 rounded-full bg-muted hover:bg-muted/80 text-foreground" 
             onClick={() => fileInputRef.current?.click()}
             title="Dosya Ekle"
           >
@@ -191,7 +191,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
               <button
                 type="button"
                 onClick={() => useAgentStore.getState().toggleCommandPalette()}
-                className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 mr-1 text-[10px] font-medium text-muted-foreground/40 hover:text-muted-foreground/70 bg-white/[0.03] hover:bg-white/[0.06] border border-white/8 rounded transition-all"
+                className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 mr-1 text-[10px] font-medium text-muted-foreground/40 hover:text-muted-foreground/70 bg-muted/30 hover:bg-muted/50 border border-border/20 rounded transition-all"
                 title="Komut paleti"
               >
                 <Command size={9} />
@@ -205,7 +205,7 @@ export const InputPanel: React.FC<InputPanelProps> = ({
               <Button
                 onClick={() => { onSend(); resetTextareaHeight(); }}
                 disabled={!input.trim() && pendingAttachments.length === 0} 
-                className={`h-8 w-8 rounded-full p-0 transition-all duration-300 flex items-center justify-center border-0 ${input.trim() || pendingAttachments.length ? 'bg-purple-600 text-white hover:bg-purple-500 glow-pulse hover:scale-110' : 'bg-[#2a2a2a] text-white/30'}`}
+                className={`h-8 w-8 rounded-full p-0 transition-all duration-300 flex items-center justify-center border-0 ${input.trim() || pendingAttachments.length ? 'bg-purple-600 text-white hover:bg-purple-500 glow-pulse hover:scale-110' : 'bg-muted text-muted-foreground'}`}
               >
                  <Send className="h-4 w-4 relative right-[1px]" strokeWidth={2} />
               </Button>

@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { fieldClassName, selectClassName } from '@/styles/dialog';
 
-const sectionClassName = 'section-surface rounded-xl border-surface';
+const sectionClassName = 'section-surface rounded-xl border-border';
 const labelClassName = 'space-y-2 text-sm text-surface-strong';
 
 const SettingsSection = ({ title, description, icon, children }: { title: string; description: string; icon: React.ReactNode; children: React.ReactNode }) => (
@@ -18,7 +18,7 @@ const SettingsSection = ({ title, description, icon, children }: { title: string
         <p className="max-w-2xl text-sm leading-6 text-surface-strong">{description}</p>
       </div>
     </div>
-    <div className="space-y-4 border-t border-surface px-5 py-5 sm:px-6">{children}</div>
+    <div className="space-y-4 border-t border-border/30 px-5 py-5 sm:px-6">{children}</div>
   </section>
 );
 
@@ -79,9 +79,9 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
             <option value="approve">Otomatik (Her Zaman Onayla)</option>
           </select>
         </label>
-        <label className="section-surface flex items-start gap-3 rounded-xl border-surface px-4 py-4 text-sm text-surface-strong transition-colors hover:bg-surface-sm">
+        <label className="section-surface flex items-start gap-3 rounded-xl border-border px-4 py-4 text-sm text-foreground/80 transition-colors hover:bg-muted/30">
           <input
-            className="mt-1 h-4 w-4 rounded border-surface bg-transparent accent-current"
+            className="mt-1 h-4 w-4 rounded border-border/50 bg-transparent accent-current"
             type="checkbox"
             checked={form.allowShellExecution}
             onChange={(e) => updateField('allowShellExecution', e.target.checked)}
@@ -123,17 +123,17 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
               {pathLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             </Button>
           </div>
-          <div className="max-h-[200px] overflow-y-auto rounded-md border border-surface bg-surface-xs">
+          <div className="max-h-[200px] overflow-y-auto rounded-md border border-border/30 bg-muted/10">
           {sensitivePaths.length === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-surface-muted">
               Henüz hassas dizin eklenmemiş.
             </div>
           ) : (
-            <div className="divide-y divide-surface">
+            <div className="divide-y divide-border/20">
               {sensitivePaths.map((path) => (
               <div
                 key={path}
-                className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-surface"
+                className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
               >
                 <span className="truncate text-sm text-surface-strong">{path}</span>
                 <Button

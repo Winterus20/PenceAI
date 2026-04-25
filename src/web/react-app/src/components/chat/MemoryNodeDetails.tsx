@@ -73,7 +73,7 @@ export function MemoryNodeDetails({ node, onClose, onMemoryUpdated }: MemoryNode
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 8, scale: 0.96 }}
       transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
-      className="absolute bottom-4 right-4 z-10 w-80 rounded-2xl border border-white/8 bg-black/70 backdrop-blur-md shadow-2xl overflow-hidden"
+      className="absolute bottom-4 right-4 z-10 w-80 rounded-2xl border border-border/40 bg-card/90 backdrop-blur-md shadow-2xl overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-3 pb-2">
@@ -87,7 +87,7 @@ export function MemoryNodeDetails({ node, onClose, onMemoryUpdated }: MemoryNode
               {node.category || 'Belirsiz'}
             </span>
             {node.importance != null && (
-              <span className="ml-auto text-xs text-white/50">Önem: {Math.round(node.importance)}/10</span>
+              <span className="ml-auto text-xs text-muted-foreground">Önem: {Math.round(node.importance)}/10</span>
             )}
           </div>
         ) : (
@@ -103,7 +103,7 @@ export function MemoryNodeDetails({ node, onClose, onMemoryUpdated }: MemoryNode
         )}
 
         <button
-          className="text-white/40 hover:text-white transition-colors p-0.5 rounded"
+          className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded"
           onClick={onClose}
           aria-label="Kapat"
         >
@@ -123,14 +123,14 @@ export function MemoryNodeDetails({ node, onClose, onMemoryUpdated }: MemoryNode
             <Textarea
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
-              className="min-h-[80px] text-sm bg-white/[0.04] border-white/8 rounded-xl resize-none focus:border-purple-500/30 focus:ring-1 focus:ring-purple-500/20"
+              className="min-h-[80px] text-sm bg-muted/30 border-border/40 rounded-xl resize-none focus:border-purple-500/30 focus:ring-1 focus:ring-purple-500/20"
               rows={4}
             />
             <div className="flex gap-2">
               <select
                 value={editCategory}
                 onChange={(e) => setEditCategory(e.target.value)}
-                className="flex-1 h-8 text-xs rounded-lg bg-white/[0.04] border border-white/8 text-foreground/80 px-2"
+                className="flex-1 h-8 text-xs rounded-lg bg-muted/30 border border-border/40 text-foreground/80 px-2"
               >
                 {categoryOptions.map((cat) => (
                   <option key={cat} value={cat}>{cat}</option>
@@ -142,7 +142,7 @@ export function MemoryNodeDetails({ node, onClose, onMemoryUpdated }: MemoryNode
                 max={10}
                 value={editImportance}
                 onChange={(e) => setEditImportance(Number(e.target.value))}
-                className="w-16 h-8 text-xs text-center rounded-lg bg-white/[0.04] border border-white/8 text-foreground/80"
+                className="w-16 h-8 text-xs text-center rounded-lg bg-muted/30 border border-border/40 text-foreground/80"
               />
             </div>
             <div className="flex gap-2">
@@ -158,7 +158,7 @@ export function MemoryNodeDetails({ node, onClose, onMemoryUpdated }: MemoryNode
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-8 rounded-lg border border-white/8 text-xs text-white/60 hover:text-white hover:bg-white/5"
+                className="h-8 rounded-lg border border-border/40 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30"
                 onClick={() => {
                   setIsEditing(false);
                   setEditContent(node.fullContent || node.label);
@@ -173,15 +173,15 @@ export function MemoryNodeDetails({ node, onClose, onMemoryUpdated }: MemoryNode
         ) : (
           /* View Mode */
           <>
-            <p className="text-sm leading-6 text-white/86 mb-3">{node.fullContent || node.label}</p>
+            <p className="text-sm leading-6 text-foreground/86 mb-3">{node.fullContent || node.label}</p>
 
             {/* Actions — only for memory nodes with rawId */}
             {isMemory && node.rawId && (
-              <div className="flex items-center gap-2 pt-2 border-t border-white/6">
+              <div className="flex items-center gap-2 pt-2 border-t border-border/30">
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 px-2.5 rounded-lg text-xs text-white/60 hover:text-white hover:bg-white/8 transition-colors"
+                  className="h-7 px-2.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
                   onClick={() => setIsEditing(true)}
                 >
                   <PencilLine size={12} className="mr-1" />

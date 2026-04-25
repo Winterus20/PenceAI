@@ -13,6 +13,8 @@ import { getConfig } from '../gateway/config.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/logger.js';
 import { SmartSearchEngine } from './search/index.js';
+import { createCronTools } from './mcp/tools/cronTools.js';
+import { globalEventBus } from '../utils/index.js';
 
 const execAsync = promisify(exec);
 
@@ -263,7 +265,7 @@ function validateArgs<T>(schema: z.ZodSchema<T>, args: Record<string, unknown>):
 
 export interface ToolExecutor {
     name: string;
-    execute(args: Record<string, unknown>): Promise<string>;
+    execute(args: Record<string, unknown>, context?: { conversationId?: string }): Promise<string>;
 }
 
 /**
@@ -328,6 +330,7 @@ export function createBuiltinTools(
     }
 
     const tools: ToolExecutor[] = [
+      ...createCronTools(memoryManager.getDatabase()),
       // --- Dosya Okuma ---
       {
         name: 'readFile',
@@ -832,6 +835,51 @@ export function createBuiltinTools(
         },
       });
     }
+
+    // --- prompt_human: Agent proaktif kullanıcıya soru sorar ---
+    tools.push({
+        name: 'prompt_human',
+        async execute(args, context) {
+            const question = String(args.question ?? '');
+            const conversationId = context?.conversationId || '';
+
+            if (!question) {
+                return 'Hata: "question" alanı zorunludur.';
+            }
+
+            return new Promise<string>((resolve) => {
+                const promptId = `ph_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                const timeoutMs = 300000; // 5 dakika
+
+                const cleanup = () => {
+                    globalEventBus.removeListener('prompt_human_response', handler);
+                    if (timeoutRef) clearTimeout(timeoutRef);
+                };
+
+                const handler = (data: { promptId: string; answer: string }) => {
+                    if (data.promptId === promptId) {
+                        cleanup();
+                        resolve(data.answer || '(Kullanıcı yanıt vermedi)');
+                    }
+                };
+
+                globalEventBus.on('prompt_human_response', handler);
+
+                // WebSocket üzerinden kullanıcıya soru gönder
+                globalEventBus.emit('prompt_human_request', {
+                    promptId,
+                    conversationId,
+                    question,
+                });
+
+                // Timeout — 5 dk sonra boş yanıt
+                const timeoutRef = setTimeout(() => {
+                    cleanup();
+                    resolve('(Zaman aşımı — kullanıcı yanıt vermedi)');
+                }, timeoutMs);
+            });
+        },
+    });
 
     // --- Web Arama (Smart Search: Brave + DuckDuckGo + Wikipedia + HN + Reddit) ---
     tools.push({

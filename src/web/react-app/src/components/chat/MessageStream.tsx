@@ -125,10 +125,10 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
             <Button
               key={action.text}
               variant="outline"
-              className="h-auto rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] hover:border-white/20 px-5 py-4 text-left flex items-start gap-3 transition-all duration-300 group"
+              className="h-auto rounded-2xl border border-border/40 bg-card/60 hover:bg-accent hover:border-border px-5 py-4 text-left flex items-start gap-3 transition-all duration-300 group"
               onClick={() => onQuickAction?.(action.text)}
             >
-              <div className="h-9 w-9 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 group-hover:bg-purple-500/20 transition-colors flex-shrink-0 mt-0.5">
+              <div className="h-9 w-9 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-500 dark:text-purple-400 group-hover:bg-purple-500/20 transition-colors flex-shrink-0 mt-0.5">
                 {action.icon}
               </div>
               <div className="min-w-0">

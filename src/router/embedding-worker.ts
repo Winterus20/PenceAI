@@ -11,7 +11,6 @@
  */
 import { parentPort } from 'node:worker_threads';
 import { pipeline, env } from '@xenova/transformers';
-import { logger } from '../utils/logger.js';
 
 // Local Node.js environment optimizations
 env.allowLocalModels = false;
@@ -45,11 +44,11 @@ async function ensureModel(): Promise<void> {
     if (initPromise) return initPromise;
 
     initPromise = (async () => {
-        logger.info('[EmbeddingWorker] 🔄 Loading model: Xenova/all-MiniLM-L6-v2 (quantized: INT8)');
+        console.log('[EmbeddingWorker] 🔄 Loading model: Xenova/all-MiniLM-L6-v2 (quantized: INT8)');
         extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
             quantized: true, // INT8 quantization — hızlı inference, düşük bellek
         });
-        logger.info('[EmbeddingWorker] ✅ Model loaded successfully');
+        console.log('[EmbeddingWorker] ✅ Model loaded successfully');
     })();
 
     return initPromise;
@@ -149,4 +148,4 @@ parentPort?.on('message', (msg: EmbeddingRequest) => {
 
 // Worker hazır sinyali
 parentPort?.postMessage({ type: 'ready' });
-logger.info('[EmbeddingWorker] 🚀 Worker thread started, listening for requests');
+console.log('[EmbeddingWorker] 🚀 Worker thread started, listening for requests');

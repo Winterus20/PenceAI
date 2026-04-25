@@ -7,6 +7,14 @@
     <title>PenceAI</title>
   </head>
   <body>
+    <script>
+      // Tema flash'ını önle — React hydrate öncesi doğru class'ı uygula
+      try {
+        var stored = JSON.parse(localStorage.getItem('pence-agent-store-v2') || '{}');
+        var theme = (stored && stored.state && stored.state.theme) || 'dark';
+        if (theme === 'dark') document.documentElement.classList.add('dark');
+      } catch(e) { document.documentElement.classList.add('dark'); }
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -18,11 +18,17 @@ const SuspenseFallback = () => (
 
 function App() {
   const activeView = useAgentStore((state) => state.activeView);
+  const theme = useAgentStore((state) => state.theme);
 
+  // Tema değişikliğini DOM'a uygula (dark class toggle)
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.add('dark');
-  }, []);
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+  }, [theme]);
 
   // View bazlı render — chat eager, diğerleri lazy
   const renderView = () => {
@@ -53,28 +59,28 @@ function App() {
         toastOptions={{
           duration: 4000,
           style: {
-            background: '#212121',
-            color: '#fff',
-            border: '1px solid #2f2f2f',
+            background: 'hsl(var(--card))',
+            color: 'hsl(var(--foreground))',
+            border: '1px solid hsl(var(--border))',
           },
           error: {
             style: {
-              background: '#2a1a1a',
-              border: '1px solid #5c2020',
+              background: 'hsl(0 84.2% 60.2% / 0.1)',
+              border: '1px solid hsl(0 84.2% 60.2% / 0.3)',
             },
             iconTheme: {
               primary: '#ff4b4b',
-              secondary: '#fff',
+              secondary: 'hsl(var(--foreground))',
             },
           },
           success: {
             style: {
-              background: '#1a2a1a',
-              border: '1px solid #205c20',
+              background: 'hsl(142 76% 36% / 0.1)',
+              border: '1px solid hsl(142 76% 36% / 0.3)',
             },
             iconTheme: {
               primary: '#4caf50',
-              secondary: '#fff',
+              secondary: 'hsl(var(--foreground))',
             },
           },
         }}

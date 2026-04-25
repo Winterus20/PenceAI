@@ -56,7 +56,7 @@ export const MemoryGraphView = ({
 
   if (loading) {
     return (
-      <div className="flex h-full min-h-[400px] items-center justify-center text-white/68">
+      <div className="flex h-full min-h-[400px] items-center justify-center text-muted-foreground">
         <Loader2 className="mr-2 h-5 w-5 animate-spin" />
         Grafik yükleniyor...
       </div>
@@ -65,7 +65,7 @@ export const MemoryGraphView = ({
 
   if (error) {
     return (
-      <div className="flex h-full min-h-[400px] flex-col items-center justify-center text-white/68">
+      <div className="flex h-full min-h-[400px] flex-col items-center justify-center text-muted-foreground">
         <p className="mb-4">{error}</p>
         <Button variant="outline" onClick={() => void refetch()}>
           Tekrar Dene

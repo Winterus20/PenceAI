@@ -31,9 +31,9 @@ const editorCategoryOptions = categoryOptions.filter((item) => item !== 'all');
 const formatDate = (value?: string) => value ? new Date(value).toLocaleDateString('tr-TR') : 'Tarih yok';
 
 const getImportanceTone = (importance: number) => {
-  if (importance >= 8) return 'bg-white/90 text-black';
-  if (importance >= 6) return 'bg-white/12 text-white/88';
-  return 'bg-white/[0.05] text-white/58';
+  if (importance >= 8) return 'bg-muted text-foreground';
+  if (importance >= 6) return 'bg-muted/50 text-foreground/80';
+  return 'bg-muted/20 text-muted-foreground';
 };
 
 type ViewMode = 'list' | 'graph';
@@ -122,7 +122,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
 
   const content = (
     <div className="glass-panel flex h-full w-full flex-col overflow-hidden text-foreground">
-      <div className="border-b border-white/6 bg-white/[0.015] px-6 py-5 sm:px-7 sm:py-6">
+      <div className="border-b border-border/30 bg-muted/10 px-6 py-5 sm:px-7 sm:py-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
             <div className="flex items-center gap-3 text-[1.7rem] font-semibold tracking-[-0.03em] text-foreground sm:text-[1.9rem]">
@@ -131,7 +131,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
               </span>
               Bellek Merkezi
             </div>
-            <p className="max-w-3xl text-sm leading-6 text-white/62 sm:text-[15px]">
+            <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-[15px]">
               Bellek kayıtlarını arayın, filtreleyin ve düzenleyin.
             </p>
           </div>
@@ -143,12 +143,12 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
       </div>
 
       {/* View Mode Tabs */}
-      <div className="flex border-b border-white/6 bg-white/[0.01]">
+      <div className="flex border-b border-border/30 bg-muted/5">
         <button
           className={`flex items-center gap-2 px-6 py-3.5 text-sm font-medium transition ${
             viewMode === 'list'
-              ? 'border-b-2 border-white/80 text-white/92'
-              : 'text-white/52 hover:text-white/72'
+              ? 'border-b-2 border-foreground/80 text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
           }`}
           onClick={() => setViewMode('list')}
         >
@@ -158,8 +158,8 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
         <button
           className={`flex items-center gap-2 px-6 py-3.5 text-sm font-medium transition ${
             viewMode === 'graph'
-              ? 'border-b-2 border-white/80 text-white/92'
-              : 'text-white/52 hover:text-white/72'
+              ? 'border-b-2 border-foreground/80 text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
           }`}
           onClick={() => setViewMode('graph')}
         >
@@ -188,7 +188,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
       ) : (
         /* List View */
         <div className="grid min-h-0 flex-1 gap-0 xl:grid-cols-[368px_minmax(0,1fr)]">
-          <aside className="min-h-0 border-b border-white/6 bg-white/[0.012] xl:border-b-0 xl:border-r xl:border-white/6">
+          <aside className="min-h-0 border-b border-border/30 bg-muted/5 xl:border-b-0 xl:border-r xl:border-border/30">
             <div className="subtle-scrollbar h-full min-h-0 overflow-y-auto px-5 py-5 sm:px-6">
               <div className="space-y-5">
                 <div className="section-surface rounded-[26px] p-5">
@@ -198,7 +198,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                   </div>
                   <div className="space-y-3.5">
                     <div className="relative">
-                      <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60" />
+                      <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
                         className={`${fieldClassName} pl-10.5`}
                         placeholder="Bellek ara..."
@@ -211,7 +211,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                         <option key={item} value={item}>{item}</option>
                       ))}
                     </select>
-                    <Button className="h-11 w-full rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-foreground transition-all duration-300" variant="outline" onClick={() => openEditor()}>
+                    <Button className="h-11 w-full rounded-full border border-border/30 bg-muted/30 hover:bg-muted/50 text-foreground transition-all duration-300" variant="outline" onClick={() => openEditor()}>
                       <Plus className="h-4 w-4" />
                       Yeni Bellek
                     </Button>
@@ -233,8 +233,8 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                   <div className="mb-3 text-caption">Kategori yoğunluğu</div>
                   <div className="flex flex-wrap gap-2">
                     {editorCategoryOptions.map((item) => (
-                      <span key={item} className="rounded-full border border-white/6 bg-white/[0.025] px-3 py-1.5 text-xs capitalize text-white/68">
-                        {item} <span className="text-white/88">{categoryCounts[item] || 0}</span>
+                      <span key={item} className="rounded-full border border-border/20 bg-muted/20 px-3 py-1.5 text-xs capitalize text-muted-foreground">
+                        {item} <span className="text-foreground/80">{categoryCounts[item] || 0}</span>
                       </span>
                     ))}
                   </div>
@@ -245,7 +245,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                     <div className="text-caption">
                       {editor.id ? 'Belleği düzenle' : 'Yeni bellek oluştur'}
                     </div>
-                    <span className="rounded-full border border-white/6 bg-white/[0.025] px-2.5 py-1 text-caption">
+                    <span className="rounded-full border border-border/20 bg-muted/20 px-2.5 py-1 text-caption">
                       {editorOpen ? 'Aktif' : 'Pasif'}
                     </span>
                   </div>
@@ -283,13 +283,13 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                           <Save className="h-4 w-4" />
                           Kaydet
                         </Button>
-                        <Button variant="ghost" className="h-11 rounded-full border border-white/6 bg-white/[0.02] text-white/82 hover:border-white/12 hover:bg-white/[0.035] hover:text-white transition-all duration-300" onClick={() => setEditorOpen(false)}>
+                        <Button variant="ghost" className="h-11 rounded-full border border-border/20 bg-muted/10 text-foreground/80 hover:border-border/40 hover:bg-muted/30 hover:text-foreground transition-all duration-300" onClick={() => setEditorOpen(false)}>
                           Vazgeç
                         </Button>
                       </div>
                     </div>
                   ) : (
-                    <div className="rounded-[24px] border border-dashed border-white/6 bg-white/[0.012] p-4 text-sm leading-6 text-white/58">
+                    <div className="rounded-[24px] border border-dashed border-border/30 bg-muted/5 p-4 text-sm leading-6 text-muted-foreground">
                       Sol alandaki kontrolleri kullanarak yeni kayıt başlatabilir veya listedeki bir belleği düzenlemeye açabilirsiniz.
                     </div>
                   )}
@@ -298,20 +298,20 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
             </div>
           </aside>
 
-          <div className="subtle-scrollbar min-h-0 overflow-y-auto bg-gradient-to-b from-white/[0.01] to-transparent px-5 py-5 sm:px-6">
+          <div className="subtle-scrollbar min-h-0 overflow-y-auto bg-gradient-to-b from-muted/5 to-transparent px-5 py-5 sm:px-6">
             <div className="mb-5 flex flex-wrap items-center gap-2 text-caption">
               <span className={badgeClassName}>{category === 'all' ? 'Tüm kategoriler' : category}</span>
               <span className={badgeClassName}>{query.trim() ? `Arama: ${query.trim()}` : 'Arama filtresi yok'}</span>
             </div>
 
             {isLoading ? (
-              <div className="section-surface flex min-h-[420px] items-center justify-center rounded-[28px] text-white/68">
+              <div className="section-surface flex min-h-[420px] items-center justify-center rounded-[28px] text-muted-foreground">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Bellekler yükleniyor...
               </div>
             ) : filteredMemories.length === 0 ? (
-              <div className="section-surface flex min-h-[420px] flex-col items-center justify-center rounded-[28px] px-6 text-center text-white/78">
-                <BrainCircuit className="mb-3 h-5 w-5 text-white/46" />
+              <div className="section-surface flex min-h-[420px] flex-col items-center justify-center rounded-[28px] px-6 text-center text-foreground/70">
+                <BrainCircuit className="mb-3 h-5 w-5 text-muted-foreground" />
                 <p className="max-w-md text-sm leading-6">Bu filtre için bellek bulunamadı. Arama terimini temizleyin veya yeni bir kayıt oluşturun.</p>
               </div>
             ) : (
@@ -319,11 +319,11 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                 {filteredMemories.map((memory) => {
                   const importance = memory.importance || 5;
                   return (
-                    <article key={memory.id} className="section-surface group rounded-[28px] p-5 transition-all duration-200 hover:border-white/10 hover:bg-white/[0.028] hover:shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
-                      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/6 pb-4">
+                    <article key={memory.id} className="section-surface group rounded-[28px] p-5 transition-all duration-200 hover:border-border/40 hover:bg-muted/20 hover:shadow-lg">
+                      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/20 pb-4">
                         <div className="space-y-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/6 bg-white/[0.025] px-3 py-1 text-caption">
+                            <span className="inline-flex items-center gap-1.5 rounded-full border border-border/20 bg-muted/20 px-3 py-1 text-caption">
                               <Tag className="h-3.5 w-3.5" />
                               {memory.category || 'general'}
                             </span>
@@ -331,7 +331,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                               önem {importance}/10
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 text-xs text-white/68">
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <Clock3 className="h-3.5 w-3.5" />
                             {formatDate(memory.created_at)}
                           </div>
@@ -340,7 +340,7 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                           <Button
                             variant="outline"
                             size="sm"
-                            className="h-9 rounded-full border-white/8 bg-white/[0.03] px-3 text-white/82 hover:border-white/12 hover:bg-white/[0.05] hover:text-white"
+                            className="h-9 rounded-full border-border/20 bg-muted/20 px-3 text-foreground/80 hover:border-border/40 hover:bg-muted/30 hover:text-foreground"
                             onClick={() => openEditor(memory)}
                           >
                             <PencilLine className="h-4 w-4" />
@@ -349,14 +349,14 @@ export const MemoryDialog = ({ open, onOpenChange, inline = false }: { open: boo
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-9 w-9 rounded-full border border-white/8 bg-white/[0.025] text-destructive/75 hover:border-destructive/20 hover:bg-destructive/10 hover:text-destructive"
+                            className="h-9 w-9 rounded-full border border-border/20 bg-muted/10 text-destructive/75 hover:border-destructive/20 hover:bg-destructive/10 hover:text-destructive"
                             onClick={() => void handleDeleteMemory(memory.id)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
                       </div>
-                      <p className="mt-5 whitespace-pre-wrap text-sm leading-7 text-white/86">{memory.content}</p>
+                      <p className="mt-5 whitespace-pre-wrap text-sm leading-7 text-foreground/80">{memory.content}</p>
                     </article>
                   );
                 })}

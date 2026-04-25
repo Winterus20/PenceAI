@@ -1,5 +1,5 @@
 import { useState, lazy, Suspense } from 'react';
-import { Settings, BookOpen, Store, Radio, BarChart3, Menu, X, Terminal } from 'lucide-react';
+import { Settings, BookOpen, Store, Radio, Activity, Menu, X, Terminal } from 'lucide-react';
 import { UsageStatsCard } from '@/components/settings/UsageStatsCard';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { ActiveView } from '../../store/agentStore';
@@ -14,7 +14,7 @@ interface SidebarMenuProps {
 const MENU_ITEMS = [
   { id: 'settings', label: 'Ayarlar', icon: Settings, color: 'text-purple-400', bg: 'bg-purple-500/10 hover:bg-purple-500/20' },
   { id: 'memory', label: 'Bellek', icon: BookOpen, color: 'text-blue-400', bg: 'bg-blue-500/10 hover:bg-blue-500/20' },
-  { id: 'metrics', label: 'Metrics', icon: BarChart3, color: 'text-cyan-400', bg: 'bg-cyan-500/10 hover:bg-cyan-500/20' },
+  { id: 'metrics', label: 'Observability', icon: Activity, color: 'text-blue-400', bg: 'bg-blue-500/10 hover:bg-blue-500/20' },
   { id: 'marketplace', label: 'Marketplace', icon: Store, color: 'text-green-400', bg: 'bg-green-500/10 hover:bg-green-500/20' },
   { id: 'channels', label: 'Kanallar', icon: Radio, color: 'text-orange-400', bg: 'bg-orange-500/10 hover:bg-orange-500/20' },
   { id: 'logs', label: 'Loglar', icon: Terminal, color: 'text-gray-300', bg: 'bg-gray-500/10 hover:bg-gray-500/20' },
@@ -51,7 +51,7 @@ export function SidebarMenu({ setActiveView }: SidebarMenuProps) {
       <div className="relative">
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center justify-center gap-2 w-full rounded-xl py-2.5 text-xs font-medium text-muted-foreground transition-all hover:bg-white/10 hover:text-foreground"
+          className="flex items-center justify-center gap-2 w-full rounded-xl py-2.5 text-xs font-medium text-muted-foreground transition-all hover:bg-muted/50 hover:text-foreground"
         >
           <Menu className="h-4 w-4" />
           <span>Menü</span>
@@ -123,7 +123,7 @@ function DialogWrapper({ open, onOpenChange, title, children }: { open: boolean;
           <h2 className="text-lg font-semibold text-foreground">{title}</h2>
           <button
             onClick={() => onOpenChange(false)}
-            className="rounded-lg p-1.5 text-muted-foreground hover:bg-white/10 hover:text-foreground transition-colors"
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
           >
             <X className="h-4 w-4" />
           </button>

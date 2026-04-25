@@ -267,6 +267,14 @@ async function main() {
     const autonomousScheduler = new AutonomousScheduler(taskQueue);
     autonomousScheduler.start();
 
+    // Rehydrate cron/one-time timers from DB (survives restart)
+    try {
+        const { rehydrateTimers } = await import('../agent/mcp/tools/cronTools.js');
+        rehydrateTimers(database.getDb());
+    } catch (err) {
+        logger.warn({ err }, '[Gateway] Timer rehydration failed');
+    }
+
     // Background jobs ayrıştırıldı
     registerSystemJobs(taskQueue, { memory, agent, broadcastStats });
     registerAutonomousWorkerJobs(taskQueue, { memory, llm, feedbackManager, subAgentManager, wss, config, worker: autonomousWorker });

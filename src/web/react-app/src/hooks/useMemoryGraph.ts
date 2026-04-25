@@ -352,7 +352,7 @@ export function useMemoryGraph({
           .attr('y', 0)
           .attr('text-anchor', 'middle')
           .attr('dominant-baseline', 'middle')
-          .attr('fill', '#64748b')
+          .attr('fill', '#64748b')  /* empty state text — intentionally low-contrast */
           .attr('font-size', '14px')
           .text('Bu filtre için bellek bulunamadı');
       }
@@ -498,18 +498,19 @@ export function useMemoryGraph({
         return ENTITY_TYPE_COLORS[d.entityType || ''] || '#64748b';
       })
       .attr('fill-opacity', (d) => getNodeOpacity(d))
-      .attr('stroke', '#fff')
+      .attr('stroke', 'currentColor')
       .attr('stroke-width', 1.5)
-      .attr('stroke-opacity', 0.6);
+      .attr('stroke-opacity', 0.6)
+      .style('color', 'var(--color-card-foreground, #e5e5e5)');
 
     // Labels (only for new nodes)
     nodeEnter
       .append('text')
-      .attr('class', 'node-label')
+      .attr('class', 'node-label text-muted-foreground')
       .attr('dy', (d) => (d.type === 'entity' ? 24 : 26))
       .attr('text-anchor', 'middle')
       .attr('font-size', (d) => (d.type === 'entity' ? '10px' : '11px'))
-      .attr('fill', '#94a3b8')
+      .attr('fill', 'currentColor')
       .attr('pointer-events', 'none')
       .text((d) => {
         const maxLen = d.type === 'entity' ? 20 : 25;

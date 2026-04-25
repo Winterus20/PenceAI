@@ -31,7 +31,7 @@ export interface ReActLoopInput {
     };
     compactEngine: CompactEngine;
     compactThreshold: number;
-    confirmCallback?: (info: { toolName: string; path: string; operation: string; description: string; }) => Promise<boolean>;
+    confirmCallback?: (info: { toolName: string; path: string; operation: 'write' | 'delete' | 'execute'; description: string; }) => Promise<boolean>;
 }
 
 export interface ReActLoopResult {

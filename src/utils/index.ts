@@ -27,3 +27,9 @@ export type { LogEntry } from './logRingBuffer.js';
 // Think tags utility
 export { extractThinkingFromTags } from './thinkTags.js';
 export type { ExtractResult } from './thinkTags.js';
+
+// Global Event Bus
+export { globalEventBus } from './eventBus.js';
+
+// Secret Redactor
+export { redactSecrets, redactToolOutput, countSecretMatches } from './secretRedactor.js';

@@ -12,7 +12,7 @@
  * Meta badge için ortak stil
  * Kullanım: SettingsDialog, MemoryDialog
  */
-export const metaBadgeClassName = 'rounded-full border border-white/5 bg-white/5 px-3 py-1 text-[11px] tracking-wide text-muted-foreground';
+export const metaBadgeClassName = 'rounded-full border border-border/30 bg-muted/30 px-3 py-1 text-[11px] tracking-wide text-muted-foreground';
 
 export const fieldClassName = 'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-colors';
 
@@ -23,7 +23,7 @@ export const textareaClassName = 'flex min-h-[120px] w-full rounded-md border bo
 /**
  * Badge için ortak stil (MemoryDialog)
  */
-export const badgeClassName = 'rounded-full border border-white/5 bg-white/5 px-3 py-1 text-[11px] tracking-wide text-muted-foreground';
+export const badgeClassName = 'rounded-full border border-border/30 bg-muted/30 px-3 py-1 text-[11px] tracking-wide text-muted-foreground';
 
 /**
  * Surface label için ortak stil

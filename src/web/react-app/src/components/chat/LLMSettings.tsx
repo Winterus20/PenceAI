@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { fieldClassName, selectClassName, textareaClassName } from '@/styles/dialog';
 
-const sectionClassName = 'section-surface rounded-xl border-surface';
+const sectionClassName = 'section-surface rounded-xl border-border';
 const labelClassName = 'space-y-2 text-sm text-surface-strong';
 
 const SettingsSection = ({ title, description, icon, children }: { title: string; description: string; icon: React.ReactNode; children: React.ReactNode }) => (
@@ -18,7 +18,7 @@ const SettingsSection = ({ title, description, icon, children }: { title: string
         <p className="max-w-2xl text-sm leading-6 text-surface-strong">{description}</p>
       </div>
     </div>
-    <div className="space-y-4 border-t border-surface px-5 py-5 sm:px-6">{children}</div>
+    <div className="space-y-4 border-t border-border/30 px-5 py-5 sm:px-6">{children}</div>
   </section>
 );
 
@@ -148,7 +148,7 @@ export const LLMSettings: React.FC<LLMSettingsProps> = ({
               step="0.1"
               value={form.temperature}
               onChange={(e) => updateField('temperature', e.target.value)}
-              className="slider-surface h-2.5 w-full cursor-pointer appearance-none rounded-full bg-surface-lg transition-all"
+              className="slider-surface h-2.5 w-full cursor-pointer appearance-none rounded-full bg-muted/50 transition-all"
             />
             <div className="flex justify-between text-[11px] text-surface-muted">
               <span>Kesin (0.0)</span>

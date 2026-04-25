@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   /* Border radius */
   --radius-lg: var(--radius);
@@ -35,20 +37,22 @@
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-5: hsl(var(--chart-5));
 
-  /* Surface colors for glass-panel components */
-  --color-surface-border: rgba(255, 255, 255, 0.06);
-  --color-surface-xs: rgba(255, 255, 255, 0.01);
-  --color-surface-sm: rgba(255, 255, 255, 0.015);
-  --color-surface: rgba(255, 255, 255, 0.02);
-  --color-surface-md: rgba(255, 255, 255, 0.025);
-  --color-surface-lg: rgba(255, 255, 255, 0.028);
-  --color-surface-xl: rgba(255, 255, 255, 0.04);
+  /* Surface colors for glass-panel components (light tema varsayılan) */
+  --color-surface-border: rgba(0, 0, 0, 0.10);
+  --color-surface-xs: rgba(0, 0, 0, 0.03);
+  --color-surface-sm: rgba(0, 0, 0, 0.05);
+  --color-surface: rgba(0, 0, 0, 0.06);
+  --color-surface-md: rgba(0, 0, 0, 0.08);
+  --color-surface-lg: rgba(0, 0, 0, 0.10);
+  --color-surface-xl: rgba(0, 0, 0, 0.12);
+  --color-surface-strong: rgba(0, 0, 0, 0.12);
 
-  /* Text opacity colors */
-  --color-text-surface-muted: rgba(255, 255, 255, 0.42);
-  --color-text-surface: rgba(255, 255, 255, 0.62);
-  --color-text-surface-strong: rgba(255, 255, 255, 0.78);
-  --color-text-surface-emphasis: rgba(255, 255, 255, 0.92);
+  /* Text opacity colors (light tema) */
+  --color-text-surface-subtle: rgba(0, 0, 0, 0.45);
+  --color-text-surface-muted: rgba(0, 0, 0, 0.38);
+  --color-text-surface: rgba(0, 0, 0, 0.58);
+  --color-text-surface-strong: rgba(0, 0, 0, 0.74);
+  --color-text-surface-emphasis: rgba(0, 0, 0, 0.88);
 
   /* Category colors for memory graph */
   --color-category-purple: #8b5cf6;
@@ -79,16 +83,16 @@
   --color-edge-part-of: #8b5cf6;
   --color-edge-has-entity: #334155;
 
-  /* Dialog field colors */
-  --color-dialog-bg: rgba(255, 255, 255, 0.02);
-  --color-dialog-bg-hover: rgba(255, 255, 255, 0.028);
-  --color-dialog-border: rgba(255, 255, 255, 0.06);
-  --color-dialog-border-focus: rgba(255, 255, 255, 0.12);
-  --color-dialog-text: rgba(255, 255, 255, 0.92);
-  --color-dialog-text-muted: rgba(255, 255, 255, 0.42);
-  --color-dialog-text-label: rgba(255, 255, 255, 0.88);
-  --color-dialog-text-description: rgba(255, 255, 255, 0.78);
-  --color-dialog-icon-bg: rgba(255, 255, 255, 0.04);
+  /* Dialog field colors (light tema) */
+  --color-dialog-bg: rgba(0, 0, 0, 0.02);
+  --color-dialog-bg-hover: rgba(0, 0, 0, 0.04);
+  --color-dialog-border: rgba(0, 0, 0, 0.08);
+  --color-dialog-border-focus: rgba(0, 0, 0, 0.14);
+  --color-dialog-text: rgba(0, 0, 0, 0.88);
+  --color-dialog-text-muted: rgba(0, 0, 0, 0.38);
+  --color-dialog-text-label: rgba(0, 0, 0, 0.84);
+  --color-dialog-text-description: rgba(0, 0, 0, 0.74);
+  --color-dialog-icon-bg: rgba(0, 0, 0, 0.04);
 
   /* Font sizes */
   --text-meta: 10px;
@@ -102,38 +106,38 @@
   --text-label-sm--letter-spacing: 0.18em;
 }
 
-/* CSS Variables for runtime theming */
+/* CSS Variables for runtime theming — Light tema (varsayılan) */
 :root {
-  --background: 0 0% 8%; /* #141414 */
-  --foreground: 0 0% 98%;
+  --background: 0 0% 98%;
+  --foreground: 0 0% 9%;
 
-  --card: 0 0% 11%; /* #1c1c1c */
-  --card-foreground: 0 0% 98%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 9%;
 
-  --popover: 0 0% 11%;
-  --popover-foreground: 0 0% 98%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
 
-  --primary: 0 0% 98%;
-  --primary-foreground: 0 0% 9%;
+  --primary: 0 0% 9%;
+  --primary-foreground: 0 0% 98%;
 
-  --secondary: 0 0% 16%; 
-  --secondary-foreground: 0 0% 98%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 9%;
 
-  --muted: 0 0% 16%;
-  --muted-foreground: 0 0% 65%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 45%;
 
-  --accent: 0 0% 16%;
-  --accent-foreground: 0 0% 98%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 9%;
 
   --destructive: 0 84.2% 60.2%;
   --destructive-foreground: 0 0% 98%;
 
-  --border: 0 0% 16%; 
-  --input: 0 0% 16%;
-  --ring: 0 0% 68%;
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
+  --ring: 0 0% 9%;
   --radius: 1.25rem;
   
-  --sidebar: 0 0% 6%; /* #0f0f0f */
+  --sidebar: 0 0% 97%;
 
   /* Category colors for memory graph */
   --category-preference: #8b5cf6;
@@ -161,10 +165,9 @@
 }
 
 .dark {
-  /* Identical to root to ensure dark mode is always active */
-  --background: 0 0% 8%;
+  --background: 0 0% 8%; /* #141414 */
   --foreground: 0 0% 98%;
-  --card: 0 0% 11%;
+  --card: 0 0% 11%; /* #1c1c1c */
   --card-foreground: 0 0% 98%;
   --popover: 0 0% 11%;
   --popover-foreground: 0 0% 98%;
@@ -181,7 +184,34 @@
   --border: 0 0% 16%;
   --input: 0 0% 16%;
   --ring: 0 0% 68%;
-  --sidebar: 0 0% 6%;
+  --sidebar: 0 0% 6%; /* #0f0f0f */
+
+  /* Dark mode surface/dialog/text overrides */
+  --color-surface-border: rgba(255, 255, 255, 0.06);
+  --color-surface-xs: rgba(255, 255, 255, 0.01);
+  --color-surface-sm: rgba(255, 255, 255, 0.015);
+  --color-surface: rgba(255, 255, 255, 0.02);
+  --color-surface-md: rgba(255, 255, 255, 0.025);
+  --color-surface-lg: rgba(255, 255, 255, 0.028);
+  --color-surface-xl: rgba(255, 255, 255, 0.04);
+
+  --color-text-surface-subtle: rgba(255, 255, 255, 0.50);
+  --color-text-surface-muted: rgba(255, 255, 255, 0.42);
+  --color-text-surface: rgba(255, 255, 255, 0.62);
+  --color-text-surface-strong: rgba(255, 255, 255, 0.78);
+  --color-text-surface-emphasis: rgba(255, 255, 255, 0.92);
+
+  --color-surface-strong: rgba(255, 255, 255, 0.06);
+
+  --color-dialog-bg: rgba(255, 255, 255, 0.02);
+  --color-dialog-bg-hover: rgba(255, 255, 255, 0.028);
+  --color-dialog-border: rgba(255, 255, 255, 0.06);
+  --color-dialog-border-focus: rgba(255, 255, 255, 0.12);
+  --color-dialog-text: rgba(255, 255, 255, 0.92);
+  --color-dialog-text-muted: rgba(255, 255, 255, 0.42);
+  --color-dialog-text-label: rgba(255, 255, 255, 0.88);
+  --color-dialog-text-description: rgba(255, 255, 255, 0.78);
+  --color-dialog-icon-bg: rgba(255, 255, 255, 0.04);
 }
 
 @layer base {
@@ -190,10 +220,9 @@
   }
   
   html {
-    color-scheme: dark;
+    color-scheme: light;
   }
   
-  html,
   html.dark {
     color-scheme: dark;
   }
@@ -238,6 +267,10 @@
   .text-caption {
     font-size: 11px;
     letter-spacing: 0.08em;
+    color: hsl(var(--muted-foreground));
+  }
+  
+  .dark .text-caption {
     color: rgba(255, 255, 255, 0.72);
   }
   
@@ -259,7 +292,7 @@
   .glass-panel {
     background-color: hsl(var(--card));
     border: 1px solid hsl(var(--border));
-    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
   }
 
   .section-surface {
@@ -274,7 +307,7 @@
 
   .subtle-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: hsl(0 0% 100% / 0.16) transparent;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
     scrollbar-gutter: stable;
   }
   
@@ -284,7 +317,7 @@
   }
   
   .subtle-scrollbar::-webkit-scrollbar-thumb {
-    background: hsl(0 0% 100% / 0.12);
+    background: hsl(var(--muted-foreground) / 0.2);
     border-radius: 999px;
     border: none;
   }
@@ -302,7 +335,7 @@
   .slider-surface {
     -webkit-appearance: none;
     appearance: none;
-    background: linear-gradient(90deg, hsl(0 0% 100% / 0.08), hsl(0 0% 100% / 0.12));
+    background: linear-gradient(90deg, hsl(var(--muted) / 0.6), hsl(var(--muted) / 0.8));
   }
 
   .slider-surface::-webkit-slider-thumb {
@@ -311,32 +344,32 @@
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    background: linear-gradient(135deg, hsl(0 0% 100% / 0.95), hsl(0 0% 100% / 0.8));
-    border: 2px solid hsl(0 0% 100% / 0.15);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    background: linear-gradient(135deg, hsl(var(--foreground) / 0.9), hsl(var(--foreground) / 0.7));
+    border: 2px solid hsl(var(--border));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     cursor: pointer;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
 
   .slider-surface::-webkit-slider-thumb:hover {
     transform: scale(1.1);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   }
 
   .slider-surface::-moz-range-thumb {
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    background: linear-gradient(135deg, hsl(0 0% 100% / 0.95), hsl(0 0% 100% / 0.8));
-    border: 2px solid hsl(0 0% 100% / 0.15);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    background: linear-gradient(135deg, hsl(var(--foreground) / 0.9), hsl(var(--foreground) / 0.7));
+    border: 2px solid hsl(var(--border));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     cursor: pointer;
     transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
 
   .slider-surface::-moz-range-thumb:hover {
     transform: scale(1.1);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   }
 }
 
@@ -378,7 +411,7 @@
 .prose hr {
   border: none !important;
   height: 1px !important;
-  background: hsl(0 0% 100% / 0.1) !important;
+  background: hsl(var(--border)) !important;
   margin-top: 1.5rem !important;
   margin-bottom: 1.5rem !important;
 }
@@ -410,7 +443,7 @@
 
 .prose ul li::marker,
 .prose ol li::marker {
-  color: hsl(0 0% 100% / 0.5) !important;
+  color: hsl(var(--muted-foreground)) !important;
 }
 
 .prose li p {
@@ -460,7 +493,7 @@
 }
 
 .prose thead {
-  border-bottom: 1px solid hsl(0 0% 100% / 0.15) !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
 }
 
 .prose th {
@@ -471,18 +504,18 @@
 
 .prose td {
   padding: 0.5rem 0.75rem !important;
-  border-top: 1px solid hsl(0 0% 100% / 0.08) !important;
+  border-top: 1px solid hsl(var(--border)) !important;
 }
 
 /* Blockquotes */
 .prose blockquote {
-  border-left: 3px solid hsl(0 0% 100% / 0.15) !important;
+  border-left: 3px solid hsl(var(--border)) !important;
   padding-left: 1rem !important;
   margin-left: 0 !important;
   margin-right: 0 !important;
   margin-top: 1rem !important;
   margin-bottom: 1rem !important;
-  color: hsl(0 0% 100% / 0.6) !important;
+  color: hsl(var(--muted-foreground)) !important;
 }
 
 /* Headings */
@@ -515,6 +548,19 @@
 }
 
 /* Ensure proper display in dark mode */
+.dark .prose hr {
+  background: hsl(0 0% 100% / 0.1) !important;
+}
+.dark .prose thead {
+  border-bottom-color: hsl(0 0% 100% / 0.15) !important;
+}
+.dark .prose td {
+  border-top-color: hsl(0 0% 100% / 0.08) !important;
+}
+.dark .prose blockquote {
+  border-left-color: hsl(0 0% 100% / 0.15) !important;
+  color: hsl(0 0% 100% / 0.6) !important;
+}
 .dark .prose ul li::marker,
 .dark .prose ol li::marker {
   color: hsl(0 0% 100% / 0.5) !important;
@@ -547,9 +593,9 @@
 .skeleton-shimmer {
   background: linear-gradient(
     90deg,
-    hsl(0 0% 100% / 0.04) 25%,
-    hsl(0 0% 100% / 0.08) 50%,
-    hsl(0 0% 100% / 0.04) 75%
+    hsl(var(--muted) / 0.3) 25%,
+    hsl(var(--muted) / 0.5) 50%,
+    hsl(var(--muted) / 0.3) 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;

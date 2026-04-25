@@ -27,18 +27,15 @@ interface ChannelCardProps {
 }
 
 const ChannelCard: React.FC<ChannelCardProps> = ({ channel, isSelected, onSelect }) => {
-  const theme = useAgentStore((state) => state.theme);
-  
   return (
     <div
       onClick={() => onSelect(channel.id)}
       className={`
-        p-4 rounded-lg border cursor-pointer transition-all duration-200
+        p-4 rounded-lg border cursor-pointer transition-all duration-200 bg-card
         ${isSelected 
           ? 'border-primary bg-primary/10 ring-1 ring-primary' 
           : 'border-border hover:border-primary/50 hover:bg-muted/50'
         }
-        ${theme === 'dark' ? 'bg-card' : 'bg-white'}
       `}
     >
       <div className="flex items-center justify-between mb-3">
@@ -94,8 +91,6 @@ export const ChannelsView: React.FC = () => {
   const { channels, selectedChannel, fetchChannels, setSelectedChannel, setActiveView } = useAgentStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const theme = useAgentStore((state) => state.theme);
-
   useEffect(() => {
     fetchChannels();
   }, [fetchChannels]);
@@ -124,13 +119,13 @@ export const ChannelsView: React.FC = () => {
   };
 
   return (
-    <div className={`flex flex-col h-full ${theme === 'dark' ? 'bg-background' : 'bg-gray-50'}`}>
+    <div className="flex flex-col h-full bg-background">
       {/* Header with Back Button */}
       <div className="flex flex-col gap-3 px-4 py-3 border-b border-border/40 bg-surface/50">
         <div className="flex items-center gap-3">
           <button
             onClick={() => setActiveView('chat')}
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-white/10 hover:text-foreground transition-colors"
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-black/5 dark:hover:bg-white/10 hover:text-foreground transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
             <span>Geri</span>

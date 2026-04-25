@@ -50,7 +50,7 @@ Kullanıcının yazdığı dilde yanıtla — dili asla kendin değiştirme. Kar
 </davranis>
 
 <arac_kullanimi>
-- Kullanılabilir araçlar: \`readFile\`, \`writeFile\`, \`editFile\`, \`appendFile\`, \`searchFiles\`, \`listDirectory\`, \`executeShell\`, \`searchMemory\`, \`deleteMemory\`, \`saveMemory\`, \`searchConversation\`, \`webSearch\`, \`webTool\` ve MCP araçları (\`mcp:server:tool\` formatında).
+- Kullanılabilir araçlar: \`readFile\`, \`writeFile\`, \`editFile\`, \`appendFile\`, \`searchFiles\`, \`listDirectory\`, \`executeShell\`, \`searchMemory\`, \`deleteMemory\`, \`saveMemory\`, \`searchConversation\`, \`webSearch\`, \`webTool\`, \`wake_me_in\`, \`wake_me_every\`, \`cancel_timer\`, \`list_timers\`, \`prompt_human\` ve MCP araçları (\`mcp:server:tool\` formatında).
 - MCP araçları harici servisler içindir (GitHub, filesystem, veritabanları, API'ler).
 - Kullanıcı bir işlem istediğinde "yapacağım" deme, BİZZAT ARAÇLARI KULLAN.
 - JSON parametrelerinde sayısal değerleri tırnak içine alma: "count": 5 doğru, "count": "5" yanlış.
@@ -441,6 +441,119 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                     mode: { type: 'string', enum: ['quick', 'deep'] },
                 },
                 required: ['url'],
+            },
+        },
+        {
+            name: 'wake_me_in',
+            description: 'Belirtilen dakika sonra asistanın kendisini uyandırmasını sağlar. Uyandığında "reason" ifadesini bir görev olarak yürütür — araçları kullanır, web araması yapar, dosya okur vb. Sadece hatırlatma değil, gerçek görev yürütmesidir. Örnek: "Teknoloji haberlerini özetle" dersen, agent uyandığında webSearch kullanıp haber bulur ve özetler.',
+            llmDescription: 'Gelecekte uyan ve görevi yürüt (otonom zamanlayıcı)',
+            parameters: {
+                type: 'object',
+                properties: {
+                    minutes: {
+                        type: 'number',
+                        description: 'Kaç dakika sonra uyanılacağı',
+                    },
+                    reason: {
+                        type: 'string',
+                        description: 'Uyanma sebebi (bu not uyandığında sana gösterilecek)',
+                    },
+                },
+                required: ['minutes', 'reason'],
+            },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    minutes: { type: 'number' },
+                    reason: { type: 'string' },
+                },
+                required: ['minutes', 'reason'],
+            },
+        },
+        {
+            name: 'wake_me_every',
+            description: 'Belirtilen bir cron ifadesine göre asistanın düzenli olarak uyanmasını sağlar. Her tetiklendiğinde "reason" ifadesini bir görev olarak yürütür — araçları kullanır, sonuç üretir. Örnek: "0 9 * * *" ile "Teknoloji haberlerini özetle" dersen, her sabah 9\'da agent webSearch yapar ve haber özeti gönderir.',
+            llmDescription: 'Düzenli uyan ve görevi yürüt (cron job)',
+            parameters: {
+                type: 'object',
+                properties: {
+                    cronExpression: {
+                        type: 'string',
+                        description: 'Geçerli bir cron ifadesi (örn: "*/5 * * * *" her 5 dakikada bir)',
+                    },
+                    reason: {
+                        type: 'string',
+                        description: 'Uyanma sebebi',
+                    },
+                },
+                required: ['cronExpression', 'reason'],
+            },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    cronExpression: { type: 'string' },
+                    reason: { type: 'string' },
+                },
+                required: ['cronExpression', 'reason'],
+            },
+        },
+        {
+            name: 'cancel_timer',
+            description: 'Daha önce kurulmuş bir zamanlayıcıyı (wake_me_in veya wake_me_every) iptal eder.',
+            llmDescription: 'Zamanlayıcı iptal et',
+            parameters: {
+                type: 'object',
+                properties: {
+                    timerId: {
+                        type: 'string',
+                        description: 'İptal edilecek zamanlayıcının ID\'si',
+                    },
+                },
+                required: ['timerId'],
+            },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    timerId: { type: 'string' },
+                },
+                required: ['timerId'],
+            },
+        },
+        {
+            name: 'list_timers',
+            description: 'Şu anda aktif olan tüm zamanlayıcıları (wake_me_in ve wake_me_every) listeler.',
+            llmDescription: 'Aktif zamanlayıcıları listele',
+            parameters: {
+                type: 'object',
+                properties: {},
+                required: [],
+            },
+            llmParameters: {
+                type: 'object',
+                properties: {},
+                required: [],
+            },
+        },
+        {
+            name: 'prompt_human',
+            description: 'Kullanıcıya proaktif olarak bir soru sorar ve yanıt bekler. Belirsiz bir durumda, kullanıcı tercihi gerektiğinde veya ek bilgiye ihtiyaç duyulduğunda kullanılır.',
+            llmDescription: 'Kullanıcıya soru sor (yanıt bekle)',
+            parameters: {
+                type: 'object',
+                properties: {
+                    question: {
+                        type: 'string',
+                        description: 'Kullanıcıya sorulacak soru',
+                    },
+                },
+                required: ['question'],
+            },
+            llmParameters: {
+                type: 'object',
+                properties: {
+                    question: { type: 'string' },
+                },
+                required: ['question'],
             },
         },
     ];

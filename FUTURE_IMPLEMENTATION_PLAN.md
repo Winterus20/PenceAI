@@ -22,8 +22,8 @@ Geri döndüğünüzde bu dosyayı referans alarak uygulamaya başlayabilirsiniz
 | 7 | AgentMemory — Persistent Memory | 🟡 ORTA | 1-2 hafta | ⭐⭐⭐ | ⏳ |
 | 8 | MCP Resource & Prompt Support | 🟡 ORTA | 3-5 gün | ⭐⭐ | ⏳ |
 | 9 | Karpathy LLM Wiki - Memory İyileştirmeleri | 🔴 YÜKSEK | 1-2 hafta | ⭐⭐⭐ | ✅ Tamamlandı |
-| 10 | KinBot Mimarisi - Ajan Otonomi ve Memory İyileştirmeleri | 🔴 YÜKSEK | 1-2 hafta | ⭐⭐⭐ | ⏳ |
-| 11 | Permission Ask Mode (WebSocket Approval) | 🟡 ORTA | 2-3 gün | ⭐⭐ | ⏳ |
+| 10 | KinBot Mimarisi - Ajan Otonomi ve Memory İyileştirmeleri | 🔴 YÜKSEK | 1-2 hafta | ⭐⭐⭐ | ✅ Tamamlandı |
+| 11 | Permission Ask Mode (WebSocket Approval) | 🟡 ORTA | 2-3 gün | ⭐⭐ | ✅ Tamamlandı |
 | 12 | Plugin Manifest Sistemi | 🟢 DÜŞÜK | 1 hafta | ⭐⭐ | ⏳ |
 
 ---

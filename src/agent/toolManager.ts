@@ -10,7 +10,7 @@ import { getConfig } from '../gateway/config.js';
 import type { HookContext } from './mcp/hookTypes.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { MetricsTracker } from './metricsTracker.js';
-import { logger } from '../utils/index.js';
+import { logger, redactToolOutput } from '../utils/index.js';
 
 export class ToolManager {
     private tools: Map<string, ToolExecutor> = new Map();
@@ -182,7 +182,7 @@ export class ToolManager {
                         isError = true;
                     } else {
                         logger.info(`[ToolManager]   → ${tc.name}(${JSON.stringify(tc.arguments).substring(0, 100)})`);
-                        result = await tool.execute(tc.arguments);
+                        result = await tool.execute(tc.arguments, { conversationId: this._sessionId });
                     }
                 }
             } catch (err: unknown) {
@@ -199,6 +199,11 @@ export class ToolManager {
                         error: result,
                     });
                 }
+            }
+
+            // Secret Redaction — araç çıktılarındaki hassas verileri temizle
+            if (!isError) {
+                result = redactToolOutput(tc.name, result);
             }
 
             // PostToolUse Hook

@@ -71,12 +71,12 @@ const InlineMetaBlock: React.FC<{
       <button
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-white/5 transition-colors"
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
       >
         <span className="flex items-center gap-2 text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
           {icon}
           {title}
-          <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-foreground/70">{count}</span>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-foreground/70">{count}</span>
         </span>
         <motion.div
           animate={{ rotate: expanded ? 180 : 0 }}
@@ -93,7 +93,7 @@ const InlineMetaBlock: React.FC<{
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.3, ease: [0.04, 0.62, 0.23, 0.98] }}
           >
-            <div className="border-t border-border/40 px-4 py-3 bg-black/20">
+            <div className="border-t border-border/40 px-4 py-3 bg-muted/30">
               {children}
             </div>
           </motion.div>
@@ -128,7 +128,7 @@ const BranchDropdown: React.FC<{
               key={branch.id}
               type="button"
               onClick={() => { onLoadBranch(branch.id); setOpen(false); }}
-              className="w-full text-left px-3 py-1.5 text-sm text-foreground/80 hover:bg-white/5 truncate"
+              className="w-full text-left px-3 py-1.5 text-sm text-foreground/80 hover:bg-black/5 dark:hover:bg-white/5 truncate"
             >
               {branch.title || 'Başlıksız Dal'}
             </button>
@@ -255,14 +255,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
         <div className={cn(
           "text-base md:text-[15.5px] leading-relaxed font-normal tracking-[-0.01em] w-fit px-5 py-3.5 shadow-sm overflow-hidden",
           isUser
-            ? "bg-[#2f2f2f] text-foreground/90 rounded-[22px] rounded-br-sm"
+            ? "bg-purple-500/10 text-foreground/90 rounded-[22px] rounded-br-sm dark:bg-[#2f2f2f]"
             : isSystem
             ? "bg-destructive/10 text-destructive/80 italic border border-destructive/20 rounded-[22px]"
             : "bg-card border border-border/40 text-foreground rounded-[22px] rounded-bl-sm"
         )}>
           <AttachmentPreview attachments={msg.attachments} onImageClick={onImageClick} />
           <div className={cn(
-            "prose dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/5 prose-pre:rounded-xl prose-pre:p-4 hover:prose-a:text-foreground",
+            "prose dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-muted/40 prose-pre:border prose-pre:border-border/20 prose-pre:rounded-xl prose-pre:p-4 hover:prose-a:text-foreground",
             isUser ? "prose-p:mb-0 text-left" : "prose-p:mb-4"
           )}>
             {msg.content ? (

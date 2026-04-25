@@ -26,14 +26,14 @@ export function UsageStatsCard() {
 
   if (isLoading) {
     return (
-      <div className="rounded-xl border border-surface bg-surface-xs p-5 text-foreground">
+      <div className="rounded-xl border border-border/30 bg-muted/10 p-5 text-foreground">
         <div className="animate-pulse space-y-4">
-          <div className="h-6 w-32 rounded bg-surface-strong/20" />
+          <div className="h-6 w-32 rounded bg-muted/30" />
           <div className="grid grid-cols-2 gap-4">
-            <div className="h-16 rounded bg-surface-strong/20" />
-            <div className="h-16 rounded bg-surface-strong/20" />
+            <div className="h-16 rounded bg-muted/30" />
+            <div className="h-16 rounded bg-muted/30" />
           </div>
-          <div className="h-24 rounded bg-surface-strong/20" />
+          <div className="h-24 rounded bg-muted/30" />
         </div>
       </div>
     );
@@ -49,8 +49,8 @@ export function UsageStatsCard() {
 
   if (!data || data.totalTokens === 0) {
     return (
-      <div className="rounded-xl border border-surface bg-surface-xs p-5 text-foreground">
-        <div className="flex items-center gap-3 text-surface-subtle">
+      <div className="rounded-xl border border-border/30 bg-muted/10 p-5 text-foreground">
+        <div className="flex items-center gap-3 text-muted-foreground">
           <BarChart3 className="h-5 w-5" />
           <span>Henüz kullanım verisi yok. LLM çağrıları yaptıkça burada görünecek.</span>
         </div>
@@ -73,7 +73,7 @@ export function UsageStatsCard() {
               className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                 period === opt.value
                   ? 'bg-purple-500/20 text-purple-400'
-                  : 'text-surface-subtle hover:bg-surface-strong/10 hover:text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/30 hover:text-foreground'
               }`}
             >
               {opt.label}
@@ -84,8 +84,8 @@ export function UsageStatsCard() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-xl border border-surface bg-surface-xs p-4">
-          <div className="flex items-center gap-2 text-surface-subtle">
+        <div className="rounded-xl border border-border/30 bg-muted/10 p-4">
+          <div className="flex items-center gap-2 text-muted-foreground">
             <BarChart3 className="h-4 w-4" />
             <span className="text-xs">Toplam Token</span>
           </div>
@@ -93,8 +93,8 @@ export function UsageStatsCard() {
             {formatNumber(data.totalTokens)}
           </div>
         </div>
-        <div className="rounded-xl border border-surface bg-surface-xs p-4">
-          <div className="flex items-center gap-2 text-surface-subtle">
+        <div className="rounded-xl border border-border/30 bg-muted/10 p-4">
+          <div className="flex items-center gap-2 text-muted-foreground">
             <DollarSign className="h-4 w-4" />
             <span className="text-xs">Tahmini Maliyet</span>
           </div>
@@ -106,8 +106,8 @@ export function UsageStatsCard() {
 
       {/* Provider Breakdown */}
       {providerEntries.length > 0 && (
-        <div className="rounded-xl border border-surface bg-surface-xs p-4">
-          <div className="mb-3 flex items-center gap-2 text-surface-subtle">
+        <div className="rounded-xl border border-border/30 bg-muted/10 p-4">
+          <div className="mb-3 flex items-center gap-2 text-muted-foreground">
             <TrendingUp className="h-4 w-4" />
             <span className="text-xs font-medium">Provider Dağılımı</span>
           </div>
@@ -118,11 +118,11 @@ export function UsageStatsCard() {
                 <div key={provider}>
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-medium capitalize text-foreground">{provider}</span>
-                    <span className="text-surface-subtle">
+                    <span className="text-muted-foreground">
                       {formatNumber(stats.tokens)} token ({formatCost(stats.cost)})
                     </span>
                   </div>
-                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-strong/20">
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted/30">
                     <div
                       className="h-full rounded-full bg-purple-500 transition-all duration-500"
                       style={{ width: `${pct}%` }}
@@ -137,8 +137,8 @@ export function UsageStatsCard() {
 
       {/* Daily Usage Mini Chart */}
       {data.dailyUsage && data.dailyUsage.length > 0 && (
-        <div className="rounded-xl border border-surface bg-surface-xs p-4">
-          <div className="mb-3 text-xs font-medium text-surface-subtle">Günlük Kullanım</div>
+        <div className="rounded-xl border border-border/30 bg-muted/10 p-4">
+          <div className="mb-3 text-xs font-medium text-muted-foreground">Günlük Kullanım</div>
           <div className="flex items-end gap-1">
             {data.dailyUsage.slice(-7).map((day) => {
               const maxTokens = Math.max(...data.dailyUsage.map((d) => d.tokens), 1);
@@ -153,7 +153,7 @@ export function UsageStatsCard() {
                     className="w-full rounded-t bg-purple-500/60 transition-all hover:bg-purple-400"
                     style={{ height: `${Math.max(heightPct, 5)}%`, minHeight: '4px' }}
                   />
-                  <div className="mt-1 truncate text-center text-[10px] text-surface-subtle">
+                  <div className="mt-1 truncate text-center text-[10px] text-muted-foreground">
                     {new Date(day.date).toLocaleDateString('tr-TR', { weekday: 'short' })}
                   </div>
                 </div>

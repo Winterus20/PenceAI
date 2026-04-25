@@ -31,7 +31,7 @@ export function MemoryGraphControls({
       <Button
         variant="outline"
         size="icon"
-        className="h-9 w-9 rounded-full border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/[0.08] hover:text-white"
+        className="h-9 w-9 rounded-full border-border bg-muted text-foreground/70 hover:bg-accent hover:text-foreground"
         onClick={onZoomIn}
         title="Yakınlaştır"
       >
@@ -40,7 +40,7 @@ export function MemoryGraphControls({
       <Button
         variant="outline"
         size="icon"
-        className="h-9 w-9 rounded-full border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/[0.08] hover:text-white"
+        className="h-9 w-9 rounded-full border-border bg-muted text-foreground/70 hover:bg-accent hover:text-foreground"
         onClick={onZoomOut}
         title="Uzaklaştır"
       >
@@ -49,7 +49,7 @@ export function MemoryGraphControls({
       <Button
         variant="outline"
         size="icon"
-        className="h-9 w-9 rounded-full border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/[0.08] hover:text-white"
+        className="h-9 w-9 rounded-full border-border bg-muted text-foreground/70 hover:bg-accent hover:text-foreground"
         onClick={onReset}
         title="Sıfırla"
       >
@@ -58,7 +58,7 @@ export function MemoryGraphControls({
       <Button
         variant="outline"
         size="icon"
-        className="h-9 w-9 rounded-full border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/[0.08] hover:text-white"
+        className="h-9 w-9 rounded-full border-border bg-muted text-foreground/70 hover:bg-accent hover:text-foreground"
         onClick={onFitToScreen}
         title="Ekrana Sığdır"
       >
@@ -68,7 +68,7 @@ export function MemoryGraphControls({
         <Button
           variant="outline"
           size="icon"
-          className={`h-9 w-9 rounded-full border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/[0.08] hover:text-white ${
+          className={`h-9 w-9 rounded-full border-border bg-muted text-foreground/70 hover:bg-accent hover:text-foreground ${
             includePageRank ? 'ring-2 ring-blue-500/50' : ''
           }`}
           onClick={() => onIncludePageRankChange(!includePageRank)}
@@ -81,7 +81,7 @@ export function MemoryGraphControls({
         <Button
           variant="outline"
           size="icon"
-          className={`h-9 w-9 rounded-full border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/[0.08] hover:text-white ${
+          className={`h-9 w-9 rounded-full border-border bg-muted text-foreground/70 hover:bg-accent hover:text-foreground ${
             includeCommunities ? 'ring-2 ring-green-500/50' : ''
           }`}
           onClick={() => onIncludeCommunitiesChange(!includeCommunities)}

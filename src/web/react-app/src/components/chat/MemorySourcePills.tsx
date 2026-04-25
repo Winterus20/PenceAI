@@ -7,12 +7,12 @@ import type { MemorySource } from '@/store/agentStore';
 /* ─── Category Color Map ─── */
 
 const CATEGORY_COLORS: Record<string, string> = {
-  preference: 'bg-purple-500/15 text-purple-300 border-purple-500/20',
-  fact: 'bg-blue-500/15 text-blue-300 border-blue-500/20',
-  habit: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20',
-  project: 'bg-amber-500/15 text-amber-300 border-amber-500/20',
-  event: 'bg-red-500/15 text-red-300 border-red-500/20',
-  general: 'bg-slate-500/15 text-slate-300 border-slate-500/20',
+  preference: 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-500/20',
+  fact: 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/20',
+  habit: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/20',
+  project: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/20',
+  event: 'bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/20',
+  general: 'bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/20',
 };
 
 function getCategoryStyle(category?: string): string {
@@ -73,7 +73,7 @@ const SourcePill: React.FC<{
           >
             <div className={cn(
               'mt-1 px-2.5 py-2 rounded-lg text-[11px] leading-relaxed border',
-              'bg-black/30 backdrop-blur-sm',
+              'bg-muted/30 backdrop-blur-sm',
               categoryStyle,
             )}>
               <p className="text-foreground/80 whitespace-pre-wrap">{source.content}</p>
@@ -139,7 +139,7 @@ export const MemorySourcePills: React.FC<MemorySourcePillsProps> = React.memo(
             <button
               type="button"
               onClick={() => setShowAll(true)}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-muted-foreground/50 hover:text-muted-foreground/80 bg-white/[0.03] border border-white/8 hover:bg-white/[0.06] transition-all"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-muted-foreground/50 hover:text-muted-foreground/80 bg-muted/20 border border-border/30 hover:bg-muted/40 transition-all"
             >
               +{hiddenCount} daha
               <ChevronDown size={8} />

@@ -19,7 +19,7 @@ export function MemoryGraphLegend({ metadata }: MemoryGraphLegendProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   return (
-    <div className="absolute bottom-0 left-4 z-10 max-h-[80vh] overflow-y-auto rounded-2xl border border-white/6 bg-black/40 p-4 backdrop-blur-sm">
+    <div className="absolute bottom-0 left-4 z-10 max-h-[80vh] overflow-y-auto rounded-2xl border border-border/40 bg-card/80 p-4 backdrop-blur-md shadow-lg">
       {/* Collapsible Header */}
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
@@ -27,9 +27,9 @@ export function MemoryGraphLegend({ metadata }: MemoryGraphLegendProps) {
       >
         <div className="mb-3 text-caption font-medium">GRAFİK LEJANTI</div>
         {isCollapsed ? (
-          <ChevronDown className="h-4 w-4 text-white/68" />
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
         ) : (
-          <ChevronUp className="h-4 w-4 text-white/68" />
+          <ChevronUp className="h-4 w-4 text-muted-foreground" />
         )}
       </button>
 
@@ -45,7 +45,7 @@ export function MemoryGraphLegend({ metadata }: MemoryGraphLegendProps) {
             {Object.entries(CATEGORY_COLORS).map(([cat, color]) => (
               <div key={cat} className="flex items-center gap-2">
                 <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: color }} />
-                <span className="capitalize text-white/68">{cat}</span>
+                <span className="capitalize text-muted-foreground">{cat}</span>
               </div>
             ))}
           </div>
@@ -54,7 +54,7 @@ export function MemoryGraphLegend({ metadata }: MemoryGraphLegendProps) {
             {Object.entries(ENTITY_TYPE_COLORS).map(([type, color]) => (
               <div key={type} className="flex items-center gap-2">
                 <div className="h-3 w-3 rounded-full" style={{ backgroundColor: color }} />
-                <span className="text-white/68">
+                <span className="text-muted-foreground">
                   {ENTITY_ICONS[type] || '•'} {type}
                 </span>
               </div>
@@ -64,63 +64,63 @@ export function MemoryGraphLegend({ metadata }: MemoryGraphLegendProps) {
           {/* Metadata section - shows when enriched data is available */}
           {metadata && (
             <>
-              <div className="my-3 border-t border-white/10 pt-3">
+              <div className="my-3 border-t border-border/30 pt-3">
                 <div className="mb-2 text-caption font-medium">GRAF METRİKLERİ</div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="text-white/68">Toplam Düğüm:</span>
-                    <span className="text-white">{metadata.totalNodes}</span>
+                    <span className="text-muted-foreground">Toplam Düğüm:</span>
+                    <span className="text-foreground">{metadata.totalNodes}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-white/68">Toplam Kenar:</span>
-                    <span className="text-white">{metadata.totalEdges}</span>
+                    <span className="text-muted-foreground">Toplam Kenar:</span>
+                    <span className="text-foreground">{metadata.totalEdges}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-white/68">Topluluklar:</span>
-                    <span className="text-white">{metadata.communityCount}</span>
+                    <span className="text-muted-foreground">Topluluklar:</span>
+                    <span className="text-foreground">{metadata.communityCount}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-white/68">Ort. PageRank:</span>
-                    <span className="text-white">{metadata.avgPageRank.toFixed(3)}</span>
+                    <span className="text-muted-foreground">Ort. PageRank:</span>
+                    <span className="text-foreground">{metadata.avgPageRank.toFixed(3)}</span>
                   </div>
                 </div>
               </div>
 
               {metadata.includePageRank && (
-                <div className="mb-3 border-t border-white/10 pt-3">
+                <div className="mb-3 border-t border-border/30 pt-3">
                   <div className="mb-2 text-caption font-medium">PAGERANK SKORU</div>
                   <div className="flex items-center gap-2">
                     <div className="h-4 w-4 rounded-full bg-blue-500 opacity-40" />
-                    <span className="text-xs text-white/68">Düşük (0)</span>
+                    <span className="text-xs text-muted-foreground">Düşük (0)</span>
                   </div>
                   <div className="mt-1 flex items-center gap-2">
                     <div className="h-4 w-4 rounded-full bg-blue-500 opacity-100" />
-                    <span className="text-xs text-white/68">Yüksek (1)</span>
+                    <span className="text-xs text-muted-foreground">Yüksek (1)</span>
                   </div>
                 </div>
               )}
 
               {metadata.includeCommunities && metadata.communityCount > 0 && (
-                <div className="mb-3 border-t border-white/10 pt-3">
+                <div className="mb-3 border-t border-border/30 pt-3">
                   <div className="mb-2 text-caption font-medium">TOPLULUKLAR</div>
-                  <div className="text-xs text-white/68">
+                  <div className="text-xs text-muted-foreground">
                     <span>{metadata.communityCount} topluluk tespit edildi</span>
                   </div>
-                  <div className="mt-2 text-xs text-white/40">
+                  <div className="mt-2 text-xs text-muted-foreground/50">
                     <span>Düğümler topluluk renklerine göre boyanmıştır</span>
                   </div>
                 </div>
               )}
 
-              <div className="border-t border-white/10 pt-3">
+              <div className="border-t border-border/30 pt-3">
                 <div className="mb-2 text-caption font-medium">KENAR AĞIRLIĞI</div>
                 <div className="flex items-center gap-2">
                   <div className="h-0.5 w-8 bg-gray-400" />
-                  <span className="text-xs text-white/68">Zayıf (0)</span>
+                  <span className="text-xs text-muted-foreground">Zayıf (0)</span>
                 </div>
                 <div className="mt-1 flex items-center gap-2">
                   <div className="h-1 w-8 bg-gray-400" />
-                  <span className="text-xs text-white/68">Güçlü (1)</span>
+                  <span className="text-xs text-muted-foreground">Güçlü (1)</span>
                 </div>
               </div>
             </>

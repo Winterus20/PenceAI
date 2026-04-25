@@ -267,29 +267,33 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
         logger.info(`[Worker] ✅ SubAgent Raporu Tamamlandı: "${fixationTopic}"`);
     });
 
-    // 3. Telescopic Compaction
+    // 3. Telescopic Compaction — Çok seviyeli (Level 1→2→3) merge destekli
     taskQueue.registerHandler('telescopic_compaction_scan', async (payload, signal) => {
         if (signal.aborted) return;
         logger.info(`[Worker] 🗜️ Telescopic Compaction scan started.`);
-        // To implement correctly, we would need to fetch active conversations 
-        // that have large uncompacted histories and compact them.
-        // For now, we stub this out as requested.
-        const conversations = memory.getRecentConversations(20);
+
+        const { TelescopicCompactor } = await import('../../memory/telescopicCompactor.js');
+        const compactor = new TelescopicCompactor(memory.getDatabase(), llm);
+
+        // Aktif konuşmaları tara ve mesaj eşiğini geçenleri sıkıştır
+        const conversations = memory.getRecentConversations(30);
+        let compactedCount = 0;
+
         for (const conv of conversations) {
             if (signal.aborted) break;
             const msgCount = Number(conv.message_count ?? 0);
-            if (msgCount > 30) {
+            // 40+ mesajı olan konuşmaları sıkıştır (Level 1 threshold ile hizalı)
+            if (msgCount > 40) {
                 logger.info(`[Worker] 🗜️ Compacting conversation ${conv.id} (${msgCount} messages)...`);
                 try {
-                    // Call TelescopicCompactor (which we can import)
-                    const { TelescopicCompactor } = await import('../../memory/telescopicCompactor.js');
-                    const compactor = new TelescopicCompactor(memory.getDatabase(), llm);
-                    await compactor.compactSession(conv.id);
+                    const didCompact = await compactor.compactSession(conv.id);
+                    if (didCompact) compactedCount++;
                 } catch (err) {
                     logger.warn({ err }, `[Worker] ❌ Failed to compact conversation ${conv.id}`);
                 }
             }
         }
-        logger.info(`[Worker] ✅ Telescopic Compaction scan finished.`);
+
+        logger.info(`[Worker] ✅ Telescopic Compaction scan finished. ${compactedCount} conversations compacted.`);
     });
 }

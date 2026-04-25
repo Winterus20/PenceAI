@@ -144,8 +144,8 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
         isSelected
           ? 'border-purple-500/50 bg-purple-500/10'
           : isActive
-          ? 'border-foreground/40 bg-white/[0.07]'
-          : 'border-border/60 bg-white/[0.03] hover:bg-white/[0.06]'
+          ? 'border-foreground/40 bg-muted'
+          : 'border-border/60 bg-muted/30 hover:bg-muted/60'
       }`}
       onDoubleClick={handleDoubleClick}
       onMouseEnter={() => setIsHovered(true)}
@@ -163,7 +163,7 @@ export const ConversationListItem: React.FC<ConversationListItemProps> = ({
             isSelected
               ? 'bg-purple-500 border-purple-500 text-white'
               : isHovered
-              ? 'border-foreground/40 bg-white/[0.05] hover:border-foreground/60'
+              ? 'border-foreground/40 bg-muted/50 hover:border-foreground/60'
               : 'border-transparent'
           }`}
         >

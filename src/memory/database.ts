@@ -48,7 +48,7 @@ export class PenceDatabase {
   private embeddingDimensions: number;
 
   /** En son migration versiyonu. Her yeni migration'da artırın. */
-  private static readonly LATEST_SCHEMA_VERSION = 21;
+  private static readonly LATEST_SCHEMA_VERSION = 22;
 
   constructor(dbPath: string, embeddingDimensions: number = 1536) {
     // data dizinini oluştur
@@ -151,8 +151,13 @@ export class PenceDatabase {
         enabled INTEGER DEFAULT 1,
         last_run DATETIME,
         next_run DATETIME,
+        timer_type TEXT DEFAULT 'one_time',  -- 'one_time' veya 'cron'
+        conversation_id TEXT,                -- Hangi konuşmaya ait
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+      CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_enabled ON scheduled_tasks(enabled);
+      -- timer_type/conversation_id index'leri initSchema sonunda try/catch ile oluşturulur
+      -- (mevcut DB'lerde kolon migrate() tarafından eklenene kadar yok)
 
       -- KinBot Mimarisi: Telescopic Compacting Özetleri (Faz 1)
       CREATE TABLE IF NOT EXISTS telescopic_summaries (
@@ -362,6 +367,15 @@ export class PenceDatabase {
     `);
 
     this.migrate();
+
+    // scheduled_tasks index'leri — migrate()'den sonra dene (kolonlar henüz yoksa sessizce atla)
+    try {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_timer_type ON scheduled_tasks(timer_type)');
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_conversation ON scheduled_tasks(conversation_id)');
+    } catch (err) {
+      // Kolonlar henüz yoksa — bir sonraki başlangıçta tekrar dene
+      logger.debug({ err }, '[Database] scheduled_tasks index oluşturma atlandı (kolonlar henüz yok olabilir)');
+    }
   }
 
   private getSchemaVersion(): number {
@@ -998,6 +1012,21 @@ export class PenceDatabase {
         logger.error({ err: err }, '[Database] ❌ GraphRAG Claims migration failed:');
       }
     }
+
+    // ========== Scheduled Tasks Timer Type Migration ==========
+
+    const scheduledTasksInfo = this.db.prepare("PRAGMA table_info(scheduled_tasks)").all() as Array<{ name: string }>;
+    if (scheduledTasksInfo.length > 0 && !scheduledTasksInfo.some((col) => col.name === 'timer_type')) {
+      logger.info('[Database] 🚀 Migrating: Adding timer_type and conversation_id columns to scheduled_tasks');
+      try {
+        this.db.exec("ALTER TABLE scheduled_tasks ADD COLUMN timer_type TEXT DEFAULT 'one_time'");
+        this.db.exec('ALTER TABLE scheduled_tasks ADD COLUMN conversation_id TEXT');
+        logger.info('[Database] ✅ scheduled_tasks timer_type/conversation_id kolonları eklendi');
+      } catch (err) {
+        logger.error({ err: err }, '[Database] ❌ Migration failed (scheduled_tasks timer_type):');
+      }
+    }
+
 
     // ========== LLM Prompt Cache Migration ==========
 

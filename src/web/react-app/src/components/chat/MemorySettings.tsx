@@ -3,7 +3,7 @@ import { Sparkles } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { fieldClassName } from '@/styles/dialog';
 
-const sectionClassName = 'section-surface rounded-xl border-surface';
+const sectionClassName = 'section-surface rounded-xl border-border';
 const labelClassName = 'space-y-2 text-sm text-surface-strong';
 
 const SettingsSection = ({ title, description, icon, children }: { title: string; description: string; icon: React.ReactNode; children: React.ReactNode }) => (
@@ -17,7 +17,7 @@ const SettingsSection = ({ title, description, icon, children }: { title: string
         <p className="max-w-2xl text-sm leading-6 text-surface-strong">{description}</p>
       </div>
     </div>
-    <div className="space-y-4 border-t border-surface px-5 py-5 sm:px-6">{children}</div>
+    <div className="space-y-4 border-t border-border/30 px-5 py-5 sm:px-6">{children}</div>
   </section>
 );
 

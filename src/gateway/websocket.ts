@@ -15,6 +15,7 @@ import { MessageRouter } from '../router/index.js';
 import type { SemanticRouter } from '../router/semantic.js';
 import type { BackgroundWorker } from '../autonomous/index.js';
 import { logger, runWithTraceId } from '../utils/logger.js';
+import { globalEventBus } from '../utils/index.js';
 import { logRingBuffer } from '../utils/logRingBuffer.js';
 import { processAttachments, type WebSocketAttachment } from './attachmentProcessor.js';
 
@@ -49,10 +50,17 @@ const WebSocketConfirmResponseMessageSchema = z.object({
   approved: z.boolean(),
 });
 
+const WebSocketPromptHumanResponseMessageSchema = z.object({
+  type: z.literal('prompt_human_response'),
+  promptId: z.string().min(1),
+  answer: z.string(),
+});
+
 const WebSocketMessageSchema = z.union([
   WebSocketChatMessageSchema,
   WebSocketSetThinkingMessageSchema,
   WebSocketConfirmResponseMessageSchema,
+  WebSocketPromptHumanResponseMessageSchema,
 ]);
 
 /**
@@ -94,7 +102,13 @@ interface WebSocketConfirmResponseMessage {
   approved: boolean;
 }
 
-type WebSocketMessage = WebSocketChatMessage | WebSocketSetThinkingMessage | WebSocketConfirmResponseMessage | Record<string, unknown>;
+interface WebSocketPromptHumanResponseMessage {
+  type: 'prompt_human_response';
+  promptId: string;
+  answer: string;
+}
+
+type WebSocketMessage = WebSocketChatMessage | WebSocketSetThinkingMessage | WebSocketConfirmResponseMessage | WebSocketPromptHumanResponseMessage | Record<string, unknown>;
 
 export interface WebSocketDeps {
     memory: MemoryManager;
@@ -134,6 +148,181 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
       wss.clients.forEach((client) => {
         if ((client as WebSocket).readyState === WebSocket.OPEN) {
           client.send(payload);
+        }
+      });
+    });
+
+    // --- Agent Wakeup (Cron tetiklendiğinde agent gerçekten görevi yürütür) ---
+    globalEventBus.on('agent_wakeup', async (data) => {
+      // Top-level try/catch — async EventEmitter handler'da yakalanmayan reddedilmiş promise sessizce kaybolur
+      let convId = 'unknown';
+      let reason = 'unknown';
+      try {
+      const wakeupData = data as {
+        conversationId: string; reason: string; timerId: string;
+        timerType: string; cronExpression?: string;
+      };
+      convId = wakeupData.conversationId;
+      reason = wakeupData.reason;
+      const { timerId, timerType, cronExpression } = wakeupData;
+
+      logger.info(`[Gateway] 🤖 Agent wakeup tetiklendi (timer: ${timerId}, type: ${timerType}) — görev: ${reason}`);
+
+      // İlgili konuşmadaki istemcilere mesaj gönderme yardımcısı
+      const sendToConvClients = (payload: string) => {
+        wss.clients.forEach((client) => {
+          const wsConv = client as WebSocket & { lastActiveConversationId?: string | null };
+          const convMatch = !convId || convId === 'system' ||
+              wsConv.lastActiveConversationId === convId ||
+              wsConv.lastActiveConversationId === undefined;
+          if (wsConv.readyState === WebSocket.OPEN && convMatch) {
+            client.send(payload);
+          }
+        });
+      };
+
+      // Kullanıcıya "agent çalışıyor" bildirimi gönder
+      sendToConvClients(JSON.stringify({
+        type: 'response',
+        content: timerType === 'cron'
+          ? `🔄 **Zamanlanmış görev tetiklendi** (${cronExpression}) — çalışıyorum...`
+          : `⏰ **Zamanlayıcı tetiklendi** — çalışıyorum...`,
+        conversationId: convId,
+      }));
+
+      // Streaming callback — token'ları batch'li gönder (normal chat handler ile aynı debounce mantığı)
+      let wakeupTokenBatch: string[] = [];
+      let wakeupBatchTimer: ReturnType<typeof setTimeout> | null = null;
+      const flushWakeupBatch = () => {
+        if (wakeupTokenBatch.length === 0) return;
+        const batch = wakeupTokenBatch;
+        wakeupTokenBatch = [];
+        wakeupBatchTimer = null;
+        sendToConvClients(JSON.stringify({ type: 'token_batch', tokens: batch }));
+      };
+
+      const onEvent = (event: { type: string; data: Record<string, unknown> }) => {
+        if (event.type === 'token') {
+          const token = String(event.data.content ?? '');
+          wakeupTokenBatch.push(token);
+          if (wakeupTokenBatch.length >= TOKEN_BATCH_MAX_SIZE) {
+            if (wakeupBatchTimer) { clearTimeout(wakeupBatchTimer); wakeupBatchTimer = null; }
+            flushWakeupBatch();
+          } else if (!wakeupBatchTimer) {
+            wakeupBatchTimer = setTimeout(flushWakeupBatch, TOKEN_BATCH_INTERVAL_MS);
+          }
+        } else {
+          // Non-token event — önce kalan token'ları flush et
+          if (wakeupBatchTimer) { clearTimeout(wakeupBatchTimer); wakeupBatchTimer = null; }
+          flushWakeupBatch();
+          if (event.type === 'clear_stream') {
+            sendToConvClients(JSON.stringify({ type: 'clear_stream' }));
+          } else if (event.type === 'replace_stream') {
+            sendToConvClients(JSON.stringify({ type: 'replace_stream', content: String(event.data.content ?? '') }));
+          } else if (event.type === 'metrics') {
+            sendToConvClients(JSON.stringify({ type: 'metrics', data: event.data }));
+          }
+        }
+      };
+
+      // Otonom görev onayı — zamanlanmış görevlerde kullanıcı onayı vermiş sayılır
+      const autoConfirmCallback: ConfirmCallback = async (info) => {
+        logger.info(`[Gateway] 🤖 Otonom görev onayı (otomatik): ${info.toolName} — ${info.operation} ${info.path}`);
+        return true;
+      };
+
+      // Mevcut konuşmayı bul — conversation context'i yeniden kullan
+      let channelId = convId;
+      if (convId && convId !== 'system') {
+        const ctx = memory.getConversationContext(convId);
+        if (ctx?.channelId) {
+          channelId = ctx.channelId;
+        }
+      }
+
+      // Agent'ı uyandır — reason'ı bir kullanıcı mesajı olarak yürüt (mevcut konuşma bağlamıyla)
+      const wakeupMessage = MessageRouter.createWebMessage(
+        reason,
+        'Sistem',
+        channelId,
+      );
+
+      const { response } = await agent.processMessage(wakeupMessage, onEvent, autoConfirmCallback);
+
+      // Kalan token'ları flush et — response gelmeden önce tüm token'lar gönderilmiş olsun
+      if (wakeupBatchTimer) { clearTimeout(wakeupBatchTimer); wakeupBatchTimer = null; }
+      flushWakeupBatch();
+
+      // Agent yanıtını kullanıcıya gönder
+      sendToConvClients(JSON.stringify({
+        type: 'response',
+        content: response,
+        conversationId: convId,
+      }));
+
+      logger.info(`[Gateway] ✅ Agent wakeup görevi tamamlandı (timer: ${timerId})`);
+      } catch (err) {
+        logger.error({ err }, '[Gateway] ❌ Agent wakeup handler hatası');
+        // Hata mesajını istemcilere gönder
+        try {
+          wss.clients.forEach((client) => {
+            const wsConv = client as WebSocket & { lastActiveConversationId?: string | null };
+            const convMatch = !convId || convId === 'unknown' || convId === 'system' ||
+                wsConv.lastActiveConversationId === convId ||
+                wsConv.lastActiveConversationId === undefined;
+            if (wsConv.readyState === WebSocket.OPEN && convMatch) {
+              client.send(JSON.stringify({
+                type: 'response',
+                content: `⚠️ Zamanlanmış görev yürütülemedi: ${reason}`,
+                conversationId: convId === 'unknown' ? undefined : convId,
+              }));
+            }
+          });
+        } catch { /* son çare — sessiz */ }
+      }
+    });
+
+    // --- Spontaneous Message Broadcasting (sistem mesajları için — agent yürütme gerektirmeyen) ---
+    // Gizlilik: conversationId belirliyse sadece o konuşmadaki istemcilere gönder
+    globalEventBus.on('spontaneous_message', (data) => {
+      const payload = JSON.stringify({
+        type: 'response',
+        content: data.content,
+        conversationId: data.conversationId,
+      });
+      wss.clients.forEach((client) => {
+        const wsConv = client as WebSocket & { lastActiveConversationId?: string | null };
+        const convMatch = !data.conversationId ||
+            wsConv.lastActiveConversationId === data.conversationId ||
+            wsConv.lastActiveConversationId === undefined;
+        if (wsConv.readyState === WebSocket.OPEN && convMatch) {
+          client.send(payload);
+        }
+      });
+    });
+
+    // --- Prompt Human Request Broadcasting (agent → kullanıcı soru) ---
+    // Sadece ilgili conversationId'ye sahip istemcilere gönder (gizlilik)
+    globalEventBus.on('prompt_human_request', (data) => {
+      const payload = JSON.stringify({
+        type: 'prompt_human_request',
+        promptId: data.promptId,
+        conversationId: data.conversationId,
+        question: data.question,
+      });
+      wss.clients.forEach((client) => {
+        const wsConv = client as WebSocket & { lastActiveConversationId?: string | null; expectedPromptHumanIds?: Set<string> };
+        // Gizlilik: conversationId belirliyse sadece o konuşmadaki istemcilere gönder
+        // lastActiveConversationId henüz tanımsızsa (taze bağlantı) — muhtemelen hedef kullanıcıdır, gönder
+        const convMatch = !data.conversationId ||
+            wsConv.lastActiveConversationId === data.conversationId ||
+            wsConv.lastActiveConversationId === undefined;
+        if (wsConv.readyState === WebSocket.OPEN && convMatch) {
+          client.send(payload);
+          // Bu bağlantıya gönderilen promptId'yi takip et — yanıtı doğrula
+          if (wsConv.expectedPromptHumanIds) {
+            wsConv.expectedPromptHumanIds.add(data.promptId);
+          }
         }
       });
     });
@@ -204,6 +393,11 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
         // --- Per-connection onay bekleme haritası ---
         const pendingConfirmations = new Map<string, { resolve: (approved: boolean) => void }>();
         let confirmCounter = 0;
+
+        // --- Per-connection prompt_human yanıt takibi ---
+        const expectedPromptHumanIds = new Set<string>();
+        // ws objesine de bağla ki broadcast handler erişebilsin
+        (ws as WebSocket & { expectedPromptHumanIds?: Set<string> }).expectedPromptHumanIds = expectedPromptHumanIds;
 
         /**
          * WS üzerinden kullanıcıdan onay isteyen callback.
@@ -354,6 +548,7 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                     }
                 }
                 lastActiveConversationId = convId;
+                (ws as WebSocket & { lastActiveConversationId?: string | null }).lastActiveConversationId = convId;
 
                 broadcastStats();
             } catch (err: unknown) {
@@ -411,6 +606,19 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                         pending.resolve(!!data.approved);
                         logger.info(`[Gateway] 🔐 Onay yanıtı: ${data.id} → ${data.approved ? '✅ onaylandı' : '❌ reddedildi'}`);
                     }
+                } else if (data.type === 'prompt_human_response' && data.promptId) {
+                    // prompt_human aracından gelen yanıtı eventBus üzerinden ilet
+                    // Güvenlik: sadece bu bağlantıya gönderilen sorulara yanıt kabul et
+                    if (!expectedPromptHumanIds.has(data.promptId)) {
+                        logger.warn(`[Gateway] ⛔ Bilinmeyen prompt_human_response: ${data.promptId}`);
+                        return;
+                    }
+                    expectedPromptHumanIds.delete(data.promptId);
+                    globalEventBus.emit('prompt_human_response', {
+                        promptId: data.promptId,
+                        answer: data.answer ?? '',
+                    });
+                    logger.info(`[Gateway] 💬 Prompt human yanıtı: ${data.promptId}`);
                 }
             } catch (err) {
                 logger.error({ err }, '[Gateway] WS mesaj hatası');
@@ -433,6 +641,7 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
                 pending.resolve(false);
             }
             pendingConfirmations.clear();
+            expectedPromptHumanIds.clear();
             logger.info(`[Gateway] 🔌 WebSocket bağlantısı kapandı — ${connId}`);
         });
     });

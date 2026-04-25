@@ -230,7 +230,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           >
             <div className="glass-panel rounded-2xl overflow-hidden shadow-2xl">
               {/* Search input */}
-              <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/[0.06]">
+              <div className="flex items-center gap-3 px-4 py-3.5 border-b border-border/30">
                 <Search size={16} className="text-muted-foreground/60 flex-shrink-0" />
                 <input
                   ref={inputRef}
@@ -244,7 +244,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   placeholder="Komut ara veya yaz..."
                   className="flex-1 bg-transparent border-0 outline-none text-[15px] text-foreground/90 placeholder:text-muted-foreground/50"
                 />
-                <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/60 bg-white/5 border border-white/10 rounded">
+                <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/60 bg-muted/30 border border-border/20 rounded"
+                >
                   ESC
                 </kbd>
               </div>
@@ -274,8 +275,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                           className={cn(
                             'w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors duration-100',
                             isSelected
-                              ? 'bg-white/[0.06] text-foreground'
-                              : 'text-foreground/70 hover:bg-white/[0.03]',
+                              ? 'bg-muted text-foreground'
+                              : 'text-foreground/70 hover:bg-muted/50',
                           )}
                           onClick={() => {
                             cmd.action();
@@ -286,7 +287,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                           <span
                             className={cn(
                               'flex-shrink-0 p-1.5 rounded-lg transition-colors',
-                              isSelected ? 'bg-purple-500/20 text-purple-300' : 'bg-white/5 text-muted-foreground/60',
+                              isSelected ? 'bg-purple-500/20 text-purple-300 dark:text-purple-300 text-purple-600' : 'bg-muted/30 text-muted-foreground/60',
                             )}
                           >
                             {cmd.icon}
@@ -310,18 +311,18 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               </div>
 
               {/* Footer hint */}
-              <div className="px-4 py-2.5 border-t border-white/[0.06] flex items-center gap-4 text-[10px] text-muted-foreground/40">
+              <div className="px-4 py-2.5 border-t border-border/30 flex items-center gap-4 text-[10px] text-muted-foreground/40">
                 <span className="flex items-center gap-1">
-                  <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded text-[9px]">↑↓</kbd>
+                  <kbd className="px-1 py-0.5 bg-muted/30 border border-border/20 rounded text-[9px]">↑↓</kbd>
                   gezin
                 </span>
                 <span className="flex items-center gap-1">
-                  <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded text-[9px]">↵</kbd>
+                  <kbd className="px-1 py-0.5 bg-muted/30 border border-border/20 rounded text-[9px]">↵</kbd>
                   seç
                 </span>
                 <span className="flex items-center gap-1">
                   <Command size={9} />
-                  <kbd className="px-1 py-0.5 bg-white/5 border border-white/10 rounded text-[9px]">K</kbd>
+                  <kbd className="px-1 py-0.5 bg-muted/30 border border-border/20 rounded text-[9px]">K</kbd>
                   aç/kapat
                 </span>
               </div>

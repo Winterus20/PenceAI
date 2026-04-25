@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, Save, Settings2 } from 'lucide-react';
+import { Save, Settings2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -12,7 +12,6 @@ import { LLMSettings } from './LLMSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { MemorySettings } from './MemorySettings';
 import { UsageStatsCard } from '@/components/settings/UsageStatsCard';
-import { ObservabilityDialog } from './ObservabilityDialog';
 import { metaBadgeClassName } from '@/styles/dialog';
 import { SkeletonSettingsDialog } from '@/components/ui/skeleton';
 import { useSettings } from '@/hooks/queries/useSettings';
@@ -80,7 +79,6 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
   const [form, setForm] = useState<SettingsForm>(emptyForm);
   const [statusText, setStatusText] = useState<string>('');
   const [newSensitivePath, setNewSensitivePath] = useState<string>('');
-  const [observabilityOpen, setObservabilityOpen] = useState(false);
 
   // Query hooks
   const { data: settings, isLoading: settingsLoading } = useSettings();
@@ -201,7 +199,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
 
   const content = (
     <div className="glass-panel flex h-full w-full flex-col overflow-hidden text-foreground">
-      <div className="border-b border-surface bg-surface-sm px-6 py-5 sm:px-7 sm:py-6">
+      <div className="border-b border-border/30 bg-card px-6 py-5 sm:px-7 sm:py-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
             <div className="flex items-center gap-3 text-[1.7rem] font-semibold tracking-[-0.03em] text-foreground sm:text-[1.9rem]">
@@ -210,7 +208,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
               </span>
               Ayarlar
             </div>
-            <p className="max-w-3xl text-sm leading-6 text-surface-subtle sm:text-[15px]">
+            <p className="max-w-3xl text-sm leading-6 text-muted-foreground sm:text-[15px]">
               Model seçimi, servis anahtarları ve çalışma davranışlarını düzenleyin.
             </p>
           </div>
@@ -218,23 +216,14 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
             <span className={metaBadgeClassName}>{form.defaultLLMProvider || 'Sağlayıcı yok'}</span>
             <span className={metaBadgeClassName}>{form.defaultLLMModel || 'Model yok'}</span>
             <span className={metaBadgeClassName}>{providers.length} sağlayıcı</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setObservabilityOpen(true)}
-              className="h-6 gap-1.5 rounded-full bg-blue-500/15 px-3 text-xs text-blue-400 hover:bg-blue-500/25 hover:text-blue-300"
-            >
-              <Activity className="h-3.5 w-3.5" />
-              Observability
-            </Button>
-          </div>
+           </div>
         </div>
       </div>
 
       {settingsLoading || providersLoading || pathsLoading ? (
         <SkeletonSettingsDialog />
       ) : (
-        <div className="subtle-scrollbar min-h-0 flex-1 overflow-y-auto bg-gradient-to-b from-surface-xs to-transparent">
+        <div className="subtle-scrollbar min-h-0 flex-1 overflow-y-auto bg-gradient-to-b from-muted/5 to-transparent">
           <div className="grid gap-5 px-6 py-6 sm:px-7 xl:grid-cols-[1.12fr_0.88fr]">
             <LLMSettings
               form={form}
@@ -266,7 +255,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
         </div>
       )}
 
-      <div className="flex flex-col gap-4 border-t border-surface bg-surface px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+      <div className="flex flex-col gap-4 border-t border-border/30 bg-muted/10 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
         <div className="max-w-3xl text-sm leading-6 text-surface-strong">
           {statusText || 'Kaydettiğiniz değişiklikler anında uygulanır. LLM provider/model değişiklikleri yeniden başlatma gerektirir.'}
         </div>
@@ -293,7 +282,6 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
           {content}
         </DialogContent>
       </Dialog>
-      <ObservabilityDialog open={observabilityOpen} onOpenChange={setObservabilityOpen} />
     </>
   );
 };

@@ -6,36 +6,15 @@
 
 import { useQuery } from '@tanstack/react-query';
 import {
-  getObservabilitySummary,
-  getRecentTraces,
   getProviderStats,
   getErrorStats,
 } from '@/services/observabilityService';
 
 export const observabilityKeys = {
   all: ['observability'] as const,
-  summary: () => [...observabilityKeys.all, 'summary'] as const,
-  traces: (limit: number) => [...observabilityKeys.all, 'traces', limit] as const,
   providerStats: () => [...observabilityKeys.all, 'provider-stats'] as const,
   errorStats: () => [...observabilityKeys.all, 'error-stats'] as const,
 };
-
-export function useObservabilitySummary(enabled: boolean = true) {
-  return useQuery({
-    queryKey: observabilityKeys.summary(),
-    queryFn: getObservabilitySummary,
-    enabled,
-    staleTime: 60_000,
-  });
-}
-
-export function useRecentTraces(limit: number = 50) {
-  return useQuery({
-    queryKey: observabilityKeys.traces(limit),
-    queryFn: () => getRecentTraces(limit),
-    staleTime: 30_000,
-  });
-}
 
 export function useProviderStats() {
   return useQuery({

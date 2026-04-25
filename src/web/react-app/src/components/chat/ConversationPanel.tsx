@@ -160,7 +160,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
     return (
       <React.Fragment key={conversation.id}>
         <div
-          className={`group w-full rounded-lg transition-colors ${activeConversationId === conversation.id ? 'bg-white/10' : 'hover:bg-white/5'} ${isBranch ? 'pl-4 border-l border-border/20 ml-3' : ''}`}
+          className={`group w-full rounded-lg transition-colors ${activeConversationId === conversation.id ? 'bg-muted' : 'hover:bg-muted/50'} ${isBranch ? 'pl-4 border-l border-border/20 ml-3' : ''}`}
         >
           <div className="flex items-center justify-between gap-2 p-2 px-3">
             {isEditing ? (
@@ -175,7 +175,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
                   }}
                   onBlur={() => handleSaveRename(conversation.id)}
                   autoFocus
-                  className="flex-1 h-7 px-2 text-sm bg-white/10 border border-white/20 rounded text-foreground focus:outline-none focus:ring-1 focus:ring-white/30"
+                  className="flex-1 h-7 px-2 text-sm bg-muted border border-border rounded text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
             ) : (
@@ -185,7 +185,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); toggleExpand(conversation.id); }}
-                      className="flex-shrink-0 p-0.5 rounded hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                      className="flex-shrink-0 p-0.5 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
                       aria-label={isExpanded ? 'Alt dalları gizle' : 'Alt dalları göster'}
                     >
                       {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -210,7 +210,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/10"
+                      className="h-6 w-6 rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/50"
                     >
                       <MoreVertical className="h-3.5 w-3.5" />
                     </Button>
@@ -257,18 +257,18 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
       <div className="flex items-center justify-between p-3">
         <div className="flex items-center gap-2">
           {onToggleSidebar && (
-            <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground md:flex hidden" onClick={onToggleSidebar} title="Menüyü Küçült">
+            <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-muted/50 rounded-lg text-muted-foreground hover:text-foreground md:flex hidden" onClick={onToggleSidebar} title="Menüyü Küçült">
               <PanelLeftClose size={18} />
             </Button>
           )}
-          <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground" onClick={() => {
+          <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-muted/50 rounded-lg text-muted-foreground hover:text-foreground" onClick={() => {
             const el = document.getElementById('search-input');
             if (el) el.focus();
           }} title="Konuşma Ara">
             <Search size={18} />
           </Button>
         </div>
-        <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-white/5 rounded-lg text-muted-foreground hover:text-foreground" onClick={onNewChat} title="Yeni Sohbet">
+        <Button variant="ghost" size="icon" className="h-10 w-10 hover:bg-muted/50 rounded-lg text-muted-foreground hover:text-foreground" onClick={onNewChat} title="Yeni Sohbet">
           <Plus size={18} />
         </Button>
       </div>
@@ -278,7 +278,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground group-focus-within:text-foreground" />
           <input
             id="search-input"
-            className="h-9 w-full rounded-xl bg-white/5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:bg-white/10 focus:outline-none focus:ring-1 focus:ring-white/20 transition-all"
+            className="h-9 w-full rounded-xl bg-muted/50 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:bg-muted focus:outline-none focus:ring-1 focus:ring-ring transition-all"
             placeholder="Konuşma ara..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -333,7 +333,7 @@ export const ConversationPanel: React.FC<ConversationPanelProps> = ({
       )}
 
       {/* Alt Bölge - Menü */}
-      <div className="mt-auto border-t border-border/40 bg-white/[0.02] p-3">
+      <div className="mt-auto border-t border-border/40 bg-muted/20 p-3">
         <SidebarMenu setActiveView={setActiveView} />
       </div>
     </div>

@@ -19,7 +19,7 @@ interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
  */
 const Skeleton = React.forwardRef<HTMLDivElement, SkeletonProps>(
   ({ className, variant = 'default', ...props }, ref) => {
-    const baseClassName = 'animate-pulse rounded-xl bg-white/8';
+    const baseClassName = 'animate-pulse rounded-xl bg-muted';
     
     const variantClassNames = {
       default: 'h-11 w-full',
@@ -98,9 +98,9 @@ const SkeletonLLMSettings = React.forwardRef<
   return (
     <div ref={ref} className={cn('space-y-6', className)} {...props}>
       {/* Kimlik ve Model Section */}
-      <section className="section-surface rounded-[26px] border-white/6">
+      <section className="section-surface rounded-[26px] border-border/30">
         <SkeletonSectionHeader />
-        <div className="space-y-4 border-t border-white/6 px-5 py-5 sm:px-6">
+        <div className="space-y-4 border-t border-border/30 px-5 py-5 sm:px-6">
           {/* İki sütunlu grid */}
           <div className="grid gap-4 md:grid-cols-2">
             <SkeletonField labelWidth="w-28" />
@@ -114,9 +114,9 @@ const SkeletonLLMSettings = React.forwardRef<
       </section>
 
       {/* API Anahtarları Section */}
-      <section className="section-surface rounded-[26px] border-white/6">
+      <section className="section-surface rounded-[26px] border-border/30">
         <SkeletonSectionHeader />
-        <div className="space-y-4 border-t border-white/6 px-5 py-5 sm:px-6">
+        <div className="space-y-4 border-t border-border/30 px-5 py-5 sm:px-6">
           <div className="grid gap-4 md:grid-cols-2">
             <SkeletonField labelWidth="w-28" />
             <SkeletonField labelWidth="w-32" />
@@ -137,9 +137,9 @@ const SkeletonLLMSettings = React.forwardRef<
       </section>
 
       {/* Gelişmiş Model Ayarları Section */}
-      <section className="section-surface rounded-[26px] border-white/6">
+      <section className="section-surface rounded-[26px] border-border/30">
         <SkeletonSectionHeader />
-        <div className="space-y-4 border-t border-white/6 px-5 py-5 sm:px-6">
+        <div className="space-y-4 border-t border-border/30 px-5 py-5 sm:px-6">
           <div className="grid gap-4 md:grid-cols-2">
             <SkeletonField labelWidth="w-28" />
             <SkeletonField labelWidth="w-24" />
@@ -165,14 +165,14 @@ const SkeletonSecuritySettings = React.forwardRef<
   return (
     <div ref={ref} className={cn('space-y-6', className)} {...props}>
       {/* Embedding ve Runtime Section */}
-      <section className="section-surface rounded-[26px] border-white/6">
+      <section className="section-surface rounded-[26px] border-border/30">
         <SkeletonSectionHeader />
-        <div className="space-y-4 border-t border-white/6 px-5 py-5 sm:px-6">
+        <div className="space-y-4 border-t border-border/30 px-5 py-5 sm:px-6">
           <SkeletonField labelWidth="w-32" />
           <SkeletonField labelWidth="w-28" />
           <SkeletonField labelWidth="w-24" />
           {/* Checkbox skeleton */}
-          <div className="section-surface flex items-start gap-3 rounded-[22px] border-white/6 px-4 py-4">
+          <div className="section-surface flex items-start gap-3 rounded-[22px] border-border/30 px-4 py-4">
             <Skeleton className="h-4 w-4 rounded" />
             <div className="space-y-2">
               <Skeleton className="h-4 w-40" />
@@ -183,9 +183,9 @@ const SkeletonSecuritySettings = React.forwardRef<
       </section>
 
       {/* Hassas Dizinler Section */}
-      <section className="section-surface rounded-[26px] border-white/6">
+      <section className="section-surface rounded-[26px] border-border/30">
         <SkeletonSectionHeader />
-        <div className="space-y-4 border-t border-white/6 px-5 py-5 sm:px-6">
+        <div className="space-y-4 border-t border-border/30 px-5 py-5 sm:px-6">
           <div className="flex gap-2">
             <Skeleton className="h-11 flex-1" />
             <Skeleton className="h-11 w-11 rounded-2xl" />
@@ -209,9 +209,9 @@ const SkeletonMemorySettings = React.forwardRef<
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => {
   return (
-    <section ref={ref} className={cn('section-surface rounded-[26px] border-white/6', className)} {...props}>
+    <section ref={ref} className={cn('section-surface rounded-[26px] border-border/30', className)} {...props}>
       <SkeletonSectionHeader />
-      <div className="border-t border-white/6 px-5 py-5 sm:px-6">
+      <div className="border-t border-border/30 px-5 py-5 sm:px-6">
         <div className="grid gap-4 sm:grid-cols-3">
           <SkeletonField labelWidth="w-32" />
           <SkeletonField labelWidth="w-36" />
@@ -240,7 +240,7 @@ const SkeletonSettingsDialog = React.forwardRef<
       {...props}
     >
       {/* Header */}
-      <div className="border-b border-white/6 bg-white/[0.015] px-6 py-5 sm:px-7 sm:py-6">
+      <div className="border-b border-border/30 bg-muted/10 px-6 py-5 sm:px-7 sm:py-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-3">
             <div className="flex items-center gap-3">
@@ -258,7 +258,7 @@ const SkeletonSettingsDialog = React.forwardRef<
       </div>
 
       {/* Content */}
-      <div className="subtle-scrollbar min-h-0 flex-1 overflow-y-auto bg-gradient-to-b from-white/[0.01] to-transparent">
+      <div className="subtle-scrollbar min-h-0 flex-1 overflow-y-auto bg-gradient-to-b from-muted/5 to-transparent">
         <div className="grid gap-5 px-6 py-6 sm:px-7 xl:grid-cols-[1.12fr_0.88fr]">
           <SkeletonLLMSettings />
           <div className="space-y-6">
@@ -269,7 +269,7 @@ const SkeletonSettingsDialog = React.forwardRef<
       </div>
 
       {/* Footer */}
-      <div className="flex flex-col gap-4 border-t border-white/6 bg-white/[0.02] px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
+      <div className="flex flex-col gap-4 border-t border-border/30 bg-muted/20 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
         <Skeleton className="h-4 w-80" />
         <Skeleton className="h-11 w-48 rounded-2xl" />
       </div>
