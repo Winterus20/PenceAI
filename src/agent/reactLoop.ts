@@ -96,8 +96,11 @@ export class ReActLoop {
 
             // MCP araç durumunu logla
             const mcpTools = currentToolDefinitions.filter(t => t.name.startsWith('mcp:'));
+            logger.info(`[Agent] Total tools available: ${currentToolDefinitions.length} (Built-in: ${currentToolDefinitions.length - mcpTools.length}, MCP: ${mcpTools.length})`);
             if (mcpTools.length > 0) {
-                logger.debug(`[Agent] MCP tools active: ${mcpTools.map(t => t.name).join(', ')}`);
+                logger.info(`[Agent] Active MCP tools: ${mcpTools.map(t => t.name).join(', ')}`);
+            } else {
+                logger.warn(`[Agent] No MCP tools found in currentToolDefinitions!`);
             }
 
             const chatOptions = {
@@ -150,14 +153,29 @@ export class ReActLoop {
                 logger.info(`[Agent] ⏱️ LLM call (iterasyon ${iterations}): ${llmCallDuration}ms | ${currentProvider}/${currentModel} | ${promptTokens} input + ${completionTokens} output = ${totalTokens} tokens | $${callCost.toFixed(4)}`);
             }
 
-            // <think> etiketlerini içerikten temizle (güvenlik için her durumda)
+            // <think> ve <plan> etiketlerini ayıkla
+            const thinkingContent = llmResponse.thinkingContent;
+            const planMatch = (llmResponse.content || '').match(/<plan>([\s\S]*?)<\/plan>/i);
+            const extractedPlan = planMatch ? planMatch[1].trim() : null;
+
             const cleanContent = (llmResponse.content || '')
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')
                 .replace(/<think>[\s\S]*/g, '')
+                .replace(/<plan>[\s\S]*?<\/plan>/gi, '') // Plan etiketlerini temizle
                 .trim();
 
-            // Gerçek düşünme içeriği (reasoning_split: true ile gelir, thinking: true ise)
-            const thinkingContent = llmResponse.thinkingContent;
+            // Eğer plan varsa ve düşünme içeriği boşsa planı düşünme alanına gönder
+            let effectiveThinking = thinkingContent || extractedPlan;
+            if (effectiveThinking) {
+                // Etiketleri temizle (bazı modeller düşünme içeriğine de etiket koyabilir)
+                effectiveThinking = effectiveThinking
+                    .replace(/<plan>/gi, '')
+                    .replace(/<\/plan>/gi, '')
+                    .replace(/<think>/gi, '')
+                    .replace(/<\/think>/gi, '')
+                    .trim();
+                onEvent?.({ type: 'thinking', data: { content: effectiveThinking } });
+            }
 
             // Fallback: Model tool_calls array yerine content içerisine direkt JSON veya fonksiyon formatı döndürdüyse
             if ((!llmResponse.toolCalls || llmResponse.toolCalls.length === 0) && cleanContent) {
@@ -173,10 +191,17 @@ export class ReActLoop {
                     llmResponse.content = strippedContent;
                     logger.warn(`[Agent] ⚠️ Fallback parser: ${fallbackResult.calls.length} araç çağrısı yakalandı — ${fallbackResult.calls.map(tc => tc.name).join(', ')}`);
                     
+                    // UI içeriğini güncelle (Fallback durumunda)
                     uiContent = this.joinUIContent(uiContent, strippedContent);
                     onEvent?.({ type: 'replace_stream', data: { content: uiContent } });
                 }
             }
+
+            // UI içeriğini güncelle ve etiketleri temizle
+            uiContent = this.joinUIContent(uiContent, cleanContent);
+            
+            // Streaming sırasında etiketler gözükmüş olabilir, replace_stream ile temizle
+            onEvent?.({ type: 'replace_stream', data: { content: uiContent } });
 
             // Araç çağrısı varsa
             if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
@@ -191,26 +216,18 @@ export class ReActLoop {
                     });
                     // Tüm araç çağrıları filtrelendiyse normal yanıt olarak devam et
                     if (llmResponse.toolCalls.length === 0) {
-                        lastDbContent = llmResponse.content || cleanContent || '';
+                        lastDbContent = cleanContent;
                         uiContent = this.joinUIContent(uiContent, lastDbContent);
-                        if (thinkingContent) {
-                            onEvent?.({ type: 'thinking', data: { content: thinkingContent } });
-                        }
                         break;
                     }
-                }
-
-                // Gerçek düşünme içeriği varsa frontend'e gönder
-                if (thinkingContent) {
-                    onEvent?.({ type: 'thinking', data: { content: thinkingContent } });
                 }
 
                 logger.debug(`[Agent] 🔧 ${llmResponse.toolCalls.length} araç çağrılıyor...`);
 
                 // Asistan mesajını ekle — düşünme içeriği LLM geçmişi için <think> ile saklanır
-                const historyContent = thinkingContent
-                    ? `<think>${thinkingContent}</think>\n${llmResponse.content || ''}`
-                    : (llmResponse.content || '');
+                const historyContent = effectiveThinking
+                    ? `<think>${effectiveThinking}</think>\n${cleanContent}`
+                    : cleanContent;
                 const assistantMessage: LLMMessage = {
                     role: 'assistant',
                     content: historyContent,
@@ -229,13 +246,10 @@ export class ReActLoop {
                 };
                 workingMessages.push(toolMessage);
 
-                // UI içeriğini güncelle
-                uiContent = this.joinUIContent(uiContent, llmResponse.content || '');
-
                 // Araç sonuçlarını veritabanına kaydet (temiz içerikle, düşünme olmadan)
                 memory.addMessage(conversationId, {
                     role: 'assistant',
-                    content: llmResponse.content || '',
+                    content: cleanContent,
                     timestamp: new Date(),
                     toolCalls: llmResponse.toolCalls,
                 });
@@ -312,12 +326,8 @@ export class ReActLoop {
             }
 
             // Araç çağrısı yok — son yanıt
-            lastDbContent = llmResponse.content || cleanContent;
-            uiContent = this.joinUIContent(uiContent, lastDbContent);
-            // Son yanıt için de düşünme içeriğini gönder (varsa)
-            if (thinkingContent) {
-                onEvent?.({ type: 'thinking', data: { content: thinkingContent } });
-            }
+            lastDbContent = cleanContent;
+            // joinUIContent çağrılmıyor çünkü uiContent zaten loop içinde joinUIContent(uiContent, cleanContent) ile güncellendi
             break;
         }
 

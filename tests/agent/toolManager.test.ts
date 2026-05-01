@@ -249,26 +249,34 @@ describe('ToolManager', () => {
             expect(result.length).toBe(10);
         });
 
-        it('prunes MCP tools when over limit', () => {
-            const builtinTools: LLMToolDefinition[] = Array.from({ length: 15 }, (_, i) => ({
-                name: `builtin${i}`,
-                description: `desc${i}`,
-                parameters: {},
-            }));
-            const mcpTools: LLMToolDefinition[] = Array.from({ length: 15 }, (_, i) => ({
-                name: `mcp:server:tool${i}`,
-                description: `mcp desc${i}`,
-                parameters: {},
-            }));
-            const allTools = [...builtinTools, ...mcpTools];
-            const tm = new ToolManager(false);
-            const result = (tm as any).pruneExcessTools(allTools);
+        it('prunes built-in tools to preserve all MCP tools when total exceeds limit', () => {
+            const originalMax = (ToolManager as any).MAX_TOOLS_IN_CONTEXT;
+            (ToolManager as any).MAX_TOOLS_IN_CONTEXT = 20;
 
-            expect(result.length).toBe(20);
-            const builtinCount = result.filter(t => !t.name.startsWith('mcp:')).length;
-            const mcpCount = result.filter(t => t.name.startsWith('mcp:')).length;
-            expect(builtinCount).toBe(15);
-            expect(mcpCount).toBe(5);
+            try {
+                const builtinTools: LLMToolDefinition[] = Array.from({ length: 15 }, (_, i) => ({
+                    name: `builtin${i}`,
+                    description: `desc${i}`,
+                    parameters: {},
+                }));
+                const mcpTools: LLMToolDefinition[] = Array.from({ length: 15 }, (_, i) => ({
+                    name: `mcp:server:tool${i}`,
+                    description: `mcp desc${i}`,
+                    parameters: {},
+                }));
+                const allTools = [...builtinTools, ...mcpTools];
+                const tm = new ToolManager(false);
+                const result = (tm as any).pruneExcessTools(allTools);
+
+                expect(result.length).toBe(20);
+                const builtinCount = result.filter(t => !t.name.startsWith('mcp:')).length;
+                const mcpCount = result.filter(t => t.name.startsWith('mcp:')).length;
+                // MCP tools prioritized: all 15 MCP kept, only 5 of 15 built-ins fit
+                expect(builtinCount).toBe(5);
+                expect(mcpCount).toBe(15);
+            } finally {
+                (ToolManager as any).MAX_TOOLS_IN_CONTEXT = originalMax;
+            }
         });
     });
 

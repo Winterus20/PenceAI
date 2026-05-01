@@ -34,33 +34,7 @@ import {
 import { createTransport, connectClient, disconnectClient } from './transport.js';
 import { MCPSecurityManager } from './security.js';
 import { logger } from '../../utils/logger.js';
-
-/**
- * JSON schema properties nesnesinden tüm description alanlarını recursive olarak kaldırır.
- * LLM token optimizasyonu icin kullanilir.
- */
-function stripDescriptions(schema: Record<string, unknown> | undefined): Record<string, unknown> {
-  if (!schema || typeof schema !== 'object') return {};
-
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(schema)) {
-    if (key === 'description') continue;
-    if (key === 'properties' && typeof value === 'object' && value !== null) {
-      const strippedProps: Record<string, unknown> = {};
-      for (const [propKey, propValue] of Object.entries(value as Record<string, unknown>)) {
-        if (typeof propValue === 'object' && propValue !== null) {
-          strippedProps[propKey] = stripDescriptions(propValue as Record<string, unknown>);
-        } else {
-          strippedProps[propKey] = propValue;
-        }
-      }
-      result[key] = strippedProps;
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
-}
+import { stripDescriptions } from './utils.js';
 
 // ============================================================
 // Server Entry — Tek bir MCP server'ın runtime durumu
@@ -586,7 +560,7 @@ export class MCPClientManager {
         tools.push({
           name: namespacedName,
           description: tool.description ?? `MCP tool from ${entry.config.name}: ${tool.name}`,
-          llmDescription: `${tool.name}: ${entry.config.name}`,
+          llmDescription: tool.description || `${tool.name} (${entry.config.name})`,
           parameters: inputSchema,
           llmParameters: {
             type: 'object',
@@ -616,7 +590,7 @@ export class MCPClientManager {
       return {
         name: namespacedName,
         description: tool.description ?? `MCP tool from ${serverName}: ${tool.name}`,
-        llmDescription: `${tool.name}: ${serverName}`,
+        llmDescription: tool.description || `${tool.name} (${serverName})`,
         parameters: inputSchema,
         llmParameters: {
           type: 'object',
@@ -701,10 +675,16 @@ export class MCPClientManager {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     try {
-      // Timeout wrapper
+      // Timeout wrapper — swallow late completions to prevent unhandled rejections
       const toolCallPromise = entry.client.callTool({
         name: toolName,
         arguments: args,
+      }).catch((err) => {
+        if (timeoutId !== undefined) {
+          logger.debug({ error: err }, `[MCP:client] Tool call completed after timeout, ignoring`);
+          return undefined as unknown as CallToolResult;
+        }
+        throw err;
       });
 
       const timeoutPromise = new Promise<never>((_, reject) => {

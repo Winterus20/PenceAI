@@ -24,7 +24,7 @@ export class ToolManager {
     private _lastConfirmCallback?: ConfirmCallback;
     private _lastMergeFn?: ((old: string, new_: string) => Promise<string>);
     private _lastMemory?: MemoryManager;
-    private static readonly MAX_TOOLS_IN_CONTEXT = 20;
+    private static MAX_TOOLS_IN_CONTEXT = 10000; // Effectively unlimited
 
     private _sessionTotalToolTime = 0;
     private _sessionToolCallCount = 0;
@@ -329,18 +329,26 @@ export class ToolManager {
         const maxTools = ToolManager.MAX_TOOLS_IN_CONTEXT;
         if (tools.length <= maxTools) return tools;
 
-        const builtin = tools.filter(t => !t.name.startsWith('mcp:'));
+        // Prioritize MCP tools
         const mcp = tools.filter(t => t.name.startsWith('mcp:'));
+        const builtin = tools.filter(t => !t.name.startsWith('mcp:'));
 
-        const keepCount = Math.max(0, maxTools - builtin.length);
-        const prunedMcp = mcp.slice(0, keepCount);
-
-        if (mcp.length > keepCount) {
-            const removed = mcp.slice(keepCount).map(t => t.name);
-            logger.warn(`[ToolManager] ⚠️ Tool count (${tools.length}) exceeds limit (${maxTools}), pruning: ${removed.join(', ')}`);
+        if (mcp.length > maxTools) {
+            const prunedMcp = mcp.slice(0, maxTools);
+            const removed = mcp.slice(maxTools).map(t => t.name);
+            logger.warn(`[ToolManager] ⚠️ MCP tools count (${mcp.length}) exceeds total limit (${maxTools}), pruning some MCP tools: ${removed.join(', ')}`);
+            return prunedMcp;
         }
 
-        return [...builtin, ...prunedMcp];
+        const keepBuiltinCount = maxTools - mcp.length;
+        const prunedBuiltin = builtin.slice(0, keepBuiltinCount);
+        
+        if (builtin.length > keepBuiltinCount) {
+            const removed = builtin.slice(keepBuiltinCount).map(t => t.name);
+            logger.warn(`[ToolManager] ⚠️ Total tool count (${tools.length}) exceeds limit (${maxTools}), pruning some built-in tools to keep all MCP tools: ${removed.join(', ')}`);
+        }
+
+        return [...prunedBuiltin, ...mcp];
     }
 
     private registerMCPTools(registry: ReturnType<typeof getUnifiedToolRegistry>): void {

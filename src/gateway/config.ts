@@ -8,6 +8,27 @@ dotenv.config();
 
 const PROJECT_ROOT = process.cwd();
 
+/**
+ * Ortam değişkeni string değerlerini güvenli bir şekilde boolean'a çevirir.
+ * 'false', 'FALSE', '0', 'no', '' → false
+ * 'true', 'TRUE', '1', 'yes' → true
+ * z.coerce.boolean()'ın non-empty string'i true kabul etme hatasını önler.
+ */
+function booleanFromEnv(defaultValue: boolean) {
+  return z.preprocess(
+    (val) => {
+      if (typeof val === 'boolean') return val;
+      if (typeof val === 'string') {
+        const lower = val.trim().toLowerCase();
+        if (lower === 'true' || lower === '1' || lower === 'yes' || lower === 'on') return true;
+        if (lower === 'false' || lower === '0' || lower === 'no' || lower === 'off' || lower === '') return false;
+      }
+      return defaultValue;
+    },
+    z.boolean().default(defaultValue),
+  );
+}
+
 const validLLMProviders = ['openai', 'anthropic', 'ollama', 'minimax', 'github', 'groq', 'mistral', 'nvidia'] as const;
 const validEmbeddingProviders = ['minimax', 'openai', 'voyage', 'none'] as const;
 
@@ -29,8 +50,8 @@ const ConfigSchema = z.object({
   mistralApiKey: z.string().optional(),
   nvidiaApiKey: z.string().optional(),
   ollamaBaseUrl: z.string().default('http://localhost:11434'),
-  enableOllamaTools: z.coerce.boolean().default(false),
-  enableNvidiaTools: z.coerce.boolean().default(false),
+  enableOllamaTools: booleanFromEnv(false),
+  enableNvidiaTools: booleanFromEnv(false),
 
   // Embedding
   embeddingProvider: z.enum(validEmbeddingProviders).catch('openai').default('openai'),
@@ -48,10 +69,10 @@ const ConfigSchema = z.object({
     (val) => (typeof val === 'string' && val ? val.split(',').map(s => s.trim()) : []),
     z.array(z.string()).default([])
   ),
-  whatsappEnabled: z.coerce.boolean().default(false),
+  whatsappEnabled: booleanFromEnv(false),
 
   // Security
-  allowShellExecution: z.coerce.boolean().default(false),
+  allowShellExecution: booleanFromEnv(false),
   shellTimeout: z.coerce.number().min(5000).max(300000).catch(30000).default(30000),
   fsRootDir: z.string().optional(),
   dashboardPassword: z.string().optional(),
@@ -132,6 +153,17 @@ const ConfigSchema = z.object({
   insightMinConfidence: z.coerce.number().min(0).max(1).default(0.5),
   insightDynamicTTL: z.coerce.boolean().default(true),
   insightDefaultTTLDays: z.coerce.number().min(1).max(365).default(30),
+
+  // Memory Consolidation
+  memoryConsolidationEnabled: booleanFromEnv(true),
+  memoryConsolidationThreshold: z.coerce.number().min(5).max(100).default(20),
+
+  // MCP
+  enableMcp: booleanFromEnv(false),
+  mcpServers: z.string().optional(),
+  mcpTimeout: z.coerce.number().min(1000).max(300000).catch(30000).default(30000),
+  mcpMaxConcurrent: z.coerce.number().min(1).max(50).catch(5).default(5),
+  mcpLogging: booleanFromEnv(true),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema> & {
@@ -230,6 +262,17 @@ export function loadConfig(): AppConfig {
         insightMinConfidence: process.env.INSIGHT_MIN_CONFIDENCE,
         insightDynamicTTL: process.env.INSIGHT_DYNAMIC_TTL,
         insightDefaultTTLDays: process.env.INSIGHT_DEFAULT_TTL_DAYS,
+
+        // Memory Consolidation
+        memoryConsolidationEnabled: process.env.MEMORY_CONSOLIDATION_ENABLED,
+        memoryConsolidationThreshold: process.env.MEMORY_CONSOLIDATION_THRESHOLD,
+
+        // MCP
+        enableMcp: process.env.ENABLE_MCP,
+        mcpServers: process.env.MCP_SERVERS,
+        mcpTimeout: process.env.MCP_TIMEOUT,
+        mcpMaxConcurrent: process.env.MCP_MAX_CONCURRENT,
+        mcpLogging: process.env.MCP_LOGGING,
     };
 
     const parsed = ConfigSchema.safeParse(rawConfig);
