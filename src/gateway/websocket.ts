@@ -7,6 +7,8 @@ import type { WebSocketServer} from 'ws';
 import { WebSocket } from 'ws';
 import { z } from 'zod';
 import type { ConfirmCallback } from '../agent/tools.js';
+import { createScopedAutoConfirmCallback } from '../agent/autonomousConfirm.js';
+import { withWakeupLock } from './wakeupLock.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { AgentRuntime } from '../agent/runtime.js';
 import { getConfig } from './config.js';
@@ -154,7 +156,6 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
 
     // --- Agent Wakeup (Cron tetiklendiğinde agent gerçekten görevi yürütür) ---
     globalEventBus.on('agent_wakeup', async (data) => {
-      // Top-level try/catch — async EventEmitter handler'da yakalanmayan reddedilmiş promise sessizce kaybolur
       let convId = 'unknown';
       let reason = 'unknown';
       try {
@@ -164,6 +165,8 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
       };
       convId = wakeupData.conversationId;
       reason = wakeupData.reason;
+
+      await withWakeupLock(convId || 'system', async () => {
       const { timerId, timerType, cronExpression } = wakeupData;
 
       logger.info(`[Gateway] 🤖 Agent wakeup tetiklendi (timer: ${timerId}, type: ${timerType}) — görev: ${reason}`);
@@ -225,11 +228,10 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
         }
       };
 
-      // Otonom görev onayı — zamanlanmış görevlerde kullanıcı onayı vermiş sayılır
-      const autoConfirmCallback: ConfirmCallback = async (info) => {
-        logger.info(`[Gateway] 🤖 Otonom görev onayı (otomatik): ${info.toolName} — ${info.operation} ${info.path}`);
-        return true;
-      };
+      // Otonom görev onayı — whitelist dışı tool'lar reddedilir
+      const autoConfirmCallback: ConfirmCallback = createScopedAutoConfirmCallback(
+        getConfig().autonomousAutoApproveTools,
+      );
 
       // Mevcut konuşmayı bul — conversation context'i yeniden kullan
       let channelId = convId;
@@ -261,6 +263,7 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
       }));
 
       logger.info(`[Gateway] ✅ Agent wakeup görevi tamamlandı (timer: ${timerId})`);
+      });
       } catch (err) {
         logger.error({ err }, '[Gateway] ❌ Agent wakeup handler hatası');
         // Hata mesajını istemcilere gönder
@@ -278,7 +281,9 @@ export function setupWebSocket(wss: WebSocketServer, deps: WebSocketDeps): void 
               }));
             }
           });
-        } catch { /* son çare — sessiz */ }
+        } catch (err) {
+          logger.warn({ err, convId, reason }, '[WebSocket] Scheduled task failure broadcast failed');
+        }
       }
     });
 

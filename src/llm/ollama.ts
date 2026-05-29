@@ -191,7 +191,8 @@ export class OllamaProvider extends LLMProvider {
         let hasToolCalls = false;
         let tokensEmitted = false; // Token gönderilip gönderilmediğini takip et
         const toolCallsCollected: ToolCall[] = [];
-        const reader = res.body!.getReader();
+        if (!res.body) throw new LLMError('Ollama: response body is null');
+        const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
 
@@ -207,10 +208,8 @@ export class OllamaProvider extends LLMProvider {
                     const data = JSON.parse(line) as OllamaResponse;
                     if (data.message?.content) {
                         content += data.message.content;
-                        if (!hasToolCalls) {
-                            onToken(data.message.content);
-                            tokensEmitted = true;
-                        }
+                        onToken(data.message.content);
+                        tokensEmitted = true;
                     }
                     if (data.message?.tool_calls) {
                         if (!hasToolCalls && tokensEmitted) {

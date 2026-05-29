@@ -8,7 +8,8 @@
 import type { MCPServerCatalogEntry } from './marketplace-types.js';
 import type { MCPServerConfig } from './types.js';
 import { logger } from '../../utils/logger.js';
-import { readFileSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { validateRegistryCommand, sanitizeRegistryUrl } from './command-validator.js';
 
@@ -54,7 +55,7 @@ const PROJECT_ROOT = process.cwd();
  *
  * @returns MCPServerCatalogEntry array'i
  */
-export function loadLocalCatalog(): MCPServerCatalogEntry[] {
+export async function loadLocalCatalog(): Promise<MCPServerCatalogEntry[]> {
   try {
     // __dirname compiled JS dosyasının dizinini gösterir (dist/agent/mcp veya src/agent/mcp)
     // JSON dosyası aynı dizinde olmalı
@@ -72,7 +73,7 @@ export function loadLocalCatalog(): MCPServerCatalogEntry[] {
     }
     
     logger.info({ catalogPath }, '[MCP:marketplace] Loading catalog from');
-    const raw = readFileSync(catalogPath, 'utf-8');
+    const raw = await readFile(catalogPath, 'utf-8');
     const data = JSON.parse(raw);
     const servers = (data.servers ?? []) as MCPServerCatalogEntry[];
     logger.info(`[MCP:marketplace] Loaded ${servers.length} servers from catalog`);
@@ -90,15 +91,14 @@ export function loadLocalCatalog(): MCPServerCatalogEntry[] {
  * @returns MCPServerCatalogEntry array'i (hata durumunda boş array)
  */
 export async function fetchFromRegistry(): Promise<MCPServerCatalogEntry[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    
     const response = await fetch('https://registry.modelcontextprotocol.io/v0/servers', {
       signal: controller.signal,
     });
-    clearTimeout(timeout);
-    
+
     if (!response.ok) {
       logger.warn(`[MCP:marketplace] Registry API returned ${response.status}`);
       return [];
@@ -109,7 +109,7 @@ export async function fetchFromRegistry(): Promise<MCPServerCatalogEntry[]> {
     const registryServers = (data.servers ?? []).map((s: RegistryServerResponse) => {
       const server = s.server;
       if (!server) return null;
-      
+
       // Remote URL'den command ve args oluştur
       const remote = server.remotes?.[0];
       // GÜVENLİ: Command allowlist kontrolü
@@ -118,7 +118,7 @@ export async function fetchFromRegistry(): Promise<MCPServerCatalogEntry[]> {
       );
       // GÜVENLİ: URL sanitization
       const args = remote?.url ? ['-X', 'POST', sanitizeRegistryUrl(remote.url)] : [];
-      
+
       return {
         name: server.name || 'unknown',
         description: server.description || '',
@@ -136,12 +136,14 @@ export async function fetchFromRegistry(): Promise<MCPServerCatalogEntry[]> {
         installCount: undefined,
       } as MCPServerCatalogEntry;
     }).filter(Boolean) as MCPServerCatalogEntry[];
-    
+
     return registryServers;
   } catch (error) {
     // Ağ hatası veya timeout — sessizce boş dön
     logger.debug('[MCP:marketplace] Registry unavailable, using local catalog only');
     return [];
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -159,7 +161,7 @@ export async function getMarketplaceCatalog(): Promise<MCPServerCatalogEntry[]> 
   }
 
   try {
-    const local = loadLocalCatalog();
+    const local = await loadLocalCatalog();
 
     // Registry'den çekmeyi dene, başarısız olursa local ile devam et
     let registry: MCPServerCatalogEntry[] = [];

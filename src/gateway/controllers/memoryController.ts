@@ -1,6 +1,7 @@
-import type { Router } from 'express';
+import type { Router, NextFunction } from 'express';
 import express from 'express';
 import { logger } from '../../utils/logger.js';
+import { AppError } from '../../errors/AppError.js';
 import type { MemoryManager } from '../../memory/manager.js';
 import type { MessageRouter } from '../../router/index.js';
 import { PageRankScorer } from '../../memory/graphRAG/PageRankScorer.js';
@@ -15,6 +16,10 @@ import {
   UsageStatsQuerySchema, MemoryGraphQuerySchema,
   InsightIdParamSchema, UpdateInsightSchema, InsightFeedbackSchema, SearchInsightsQuerySchema,
 } from '../middleware/validate.js';
+
+function forwardError(error: unknown, next: NextFunction): void {
+  next(error instanceof Error ? error : new AppError(String(error), 500));
+}
 
 export function createMemoryController(memory: MemoryManager, router: MessageRouter, broadcastStats: () => void): Router {
   const expressRouter = express.Router();
@@ -39,7 +44,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       res.json(messages);
   });
 
-  expressRouter.post('/conversations/:id/fork', validateParams(ConversationIdParamSchema), validateBody(ForkConversationSchema), (req, res) => {
+  expressRouter.post('/conversations/:id/fork', validateParams(ConversationIdParamSchema), validateBody(ForkConversationSchema), (req, res, next) => {
     const id = req.params.id as string;
     const { forkFromMessageId } = req.body;
 
@@ -52,23 +57,24 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
         return res.status(404).json({ error: err.message });
       }
       logger.error({ err }, '[API] Fork conversation failed');
-      return res.status(500).json({ error: 'Fork failed' });
+      forwardError(error, next);
+      return;
     }
   });
 
-  expressRouter.get('/conversations/:id/branches', validateParams(ConversationIdParamSchema), (req, res) => {
+  expressRouter.get('/conversations/:id/branches', validateParams(ConversationIdParamSchema), (req, res, next) => {
     const id = req.params.id as string;
     try {
       const branches = memory.getChildBranches(id);
       return res.json(branches);
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      logger.error({ err }, '[API] Get branches failed');
-      return res.status(500).json({ error: 'Failed to get branches' });
+      logger.error({ err: error }, '[API] Get branches failed');
+      forwardError(error, next);
+      return;
     }
   });
 
-  expressRouter.get('/conversations/:id/branch-info', validateParams(ConversationIdParamSchema), (req, res) => {
+  expressRouter.get('/conversations/:id/branch-info', validateParams(ConversationIdParamSchema), (req, res, next) => {
     const id = req.params.id as string;
     try {
       const info = memory.getConversationBranchInfo(id);
@@ -79,11 +85,12 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
         return res.status(404).json({ error: err.message });
       }
       logger.error({ err }, '[API] Get branch info failed');
-      return res.status(500).json({ error: 'Failed to get branch info' });
+      forwardError(error, next);
+      return;
     }
   });
 
-  expressRouter.patch('/conversations/:id', validateParams(ConversationIdParamSchema), validateBody(UpdateConversationSchema), (req, res) => {
+  expressRouter.patch('/conversations/:id', validateParams(ConversationIdParamSchema), validateBody(UpdateConversationSchema), (req, res, next) => {
     const id = req.params.id as string;
     const { title } = req.body;
 
@@ -91,12 +98,11 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       memory.updateConversationTitle(id, title.trim(), true);
       res.json({ success: true, title: title.trim() });
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      res.status(500).json({ error: err.message });
+      forwardError(error, next);
     }
   });
 
-  expressRouter.delete('/conversations/:id', validateParams(ConversationIdParamSchema), validateBody(DeleteConversationSchema), (req, res) => {
+  expressRouter.delete('/conversations/:id', validateParams(ConversationIdParamSchema), validateBody(DeleteConversationSchema), (req, res, next) => {
     const id = req.params.id as string;
     const { deleteBranches } = req.body;
 
@@ -123,11 +129,12 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
         return res.status(404).json({ error: err.message });
       }
       logger.error({ err }, '[API] Delete conversation failed');
-      return res.status(500).json({ error: 'Delete failed' });
+      forwardError(error, next);
+      return;
     }
   });
 
-  expressRouter.delete('/conversations', validateBody(DeleteConversationsSchema), (req, res) => {
+  expressRouter.delete('/conversations', validateBody(DeleteConversationsSchema), (req, res, next) => {
     const { ids } = req.body;
 
     try {
@@ -140,8 +147,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
         results
       });
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      res.status(500).json({ error: err.message });
+      forwardError(error, next);
     }
   });
 
@@ -150,7 +156,7 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       res.json(memories);
   });
 
-  expressRouter.post('/memories', validateBody(CreateMemorySchema), async (req, res) => {
+  expressRouter.post('/memories', validateBody(CreateMemorySchema), async (req, res, next) => {
     const { content, category, importance } = req.body;
     try {
       const added = await memory.addMemory(content, category || 'general', importance || 5);
@@ -160,12 +166,11 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       const memoryRow = db.prepare(`SELECT * FROM memories WHERE id = ?`).get(added.id);
       res.json({ success: true, memory: memoryRow ?? { id: added.id }, isUpdate: added.isUpdate });
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      res.status(500).json({ error: err.message });
+      forwardError(error, next);
     }
   });
 
-  expressRouter.put('/memories/:id', validateParams(MemoryIdParamSchema), validateBody(UpdateMemorySchema), async (req, res) => {
+  expressRouter.put('/memories/:id', validateParams(MemoryIdParamSchema), validateBody(UpdateMemorySchema), async (req, res, next) => {
       const id = Number(req.params.id);
       const { content, category, importance } = req.body;
 
@@ -177,23 +182,21 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
               res.status(404).json({ error: 'Bellek bulunamadı veya güncellenemedi' });
           }
       } catch (error: unknown) {
-          const err = error instanceof Error ? error : new Error(String(error));
-          res.status(500).json({ error: err.message });
+          forwardError(error, next);
       }
   });
 
-  expressRouter.get('/memories/search', validateQuery(SearchMemoriesQuerySchema), (req, res) => {
+  expressRouter.get('/memories/search', validateQuery(SearchMemoriesQuerySchema), (req, res, next) => {
       const q = (req.query as Record<string, string>).q;
       try {
           const results = memory.searchMemories((q || '').trim(), 20);
           res.json(results);
       } catch (error: unknown) {
-          const err = error instanceof Error ? error : new Error(String(error));
-          res.status(500).json({ error: err.message });
+          forwardError(error, next);
       }
   });
 
-  expressRouter.delete('/memories/:id', validateParams(MemoryIdParamSchema), (req, res) => {
+  expressRouter.delete('/memories/:id', validateParams(MemoryIdParamSchema), (req, res, next) => {
       const id = Number(req.params.id);
       try {
           const deleted = memory.deleteMemory(id);
@@ -204,12 +207,11 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
               res.status(404).json({ error: 'Bellek bulunamadı' });
           }
       } catch (error: unknown) {
-          const err = error instanceof Error ? error : new Error(String(error));
-          res.status(500).json({ error: err.message });
+          forwardError(error, next);
       }
   });
 
-  expressRouter.get('/memory-graph', validateQuery(MemoryGraphQuerySchema), (req, res) => {
+  expressRouter.get('/memory-graph', validateQuery(MemoryGraphQuerySchema), (req, res, next) => {
       try {
           const parsedQuery = req.query as Record<string, string | undefined>;
           const graphLimit = Number(parsedQuery.limit) || 100;
@@ -324,12 +326,11 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
               },
           });
       } catch (error: unknown) {
-          const err = error instanceof Error ? error : new Error(String(error));
-          res.status(500).json({ error: err.message });
+          forwardError(error, next);
       }
   });
 
-  expressRouter.get('/usage/stats', validateQuery(UsageStatsQuerySchema), (req, res) => {
+  expressRouter.get('/usage/stats', validateQuery(UsageStatsQuerySchema), (req, res, next) => {
     try {
       const parsedQuery = req.query as Record<string, string | undefined>;
       const period = parsedQuery.period ?? 'week';
@@ -344,27 +345,25 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
         dailyUsage,
       });
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      logger.error({ err }, '[API] Token usage stats error:');
-      res.status(500).json({ error: 'Token usage stats alınamadı' });
+      logger.error({ err: error }, '[API] Token usage stats error:');
+      forwardError(error, next);
     }
   });
 
   // ============ Insight Engine API ============
 
-  expressRouter.get('/insights', (req, res) => {
+  expressRouter.get('/insights', (req, res, next) => {
     try {
       const engine = memory.getInsightEngine();
       const insights = engine.getActiveInsights();
       res.json({ success: true, insights });
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      logger.error({ err }, '[API] Get insights error:');
-      res.status(500).json({ error: 'Insight listesi alınamadı' });
+      logger.error({ err: error }, '[API] Get insights error:');
+      forwardError(error, next);
     }
   });
 
-  expressRouter.get('/insights/search', validateQuery(SearchInsightsQuerySchema), async (req, res) => {
+  expressRouter.get('/insights/search', validateQuery(SearchInsightsQuerySchema), async (req, res, next) => {
     try {
       const engine = memory.getInsightEngine();
       const { q, minConfidence, limit } = req.query as Record<string, unknown>;
@@ -377,13 +376,12 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       const sliced = insights.slice(0, Number(limit) || 20);
       res.json({ success: true, insights: sliced });
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      logger.error({ err }, '[API] Search insights error:');
-      res.status(500).json({ error: 'Insight araması başarısız' });
+      logger.error({ err: error }, '[API] Search insights error:');
+      forwardError(error, next);
     }
   });
 
-  expressRouter.patch('/insights/:id', validateParams(InsightIdParamSchema), validateBody(UpdateInsightSchema), (req, res, _next) => {
+  expressRouter.patch('/insights/:id', validateParams(InsightIdParamSchema), validateBody(UpdateInsightSchema), (req, res, next) => {
     try {
       const engine = memory.getInsightEngine();
       const id = Number(req.params.id);
@@ -401,13 +399,12 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       }
       res.json({ success: true });
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      logger.error({ err }, '[API] Update insight error:');
-      res.status(500).json({ error: 'Insight güncellenemedi' });
+      logger.error({ err: error }, '[API] Update insight error:');
+      forwardError(error, next);
     }
   });
 
-  expressRouter.post('/insights/:id/feedback', validateParams(InsightIdParamSchema), validateBody(InsightFeedbackSchema), (req, res) => {
+  expressRouter.post('/insights/:id/feedback', validateParams(InsightIdParamSchema), validateBody(InsightFeedbackSchema), (req, res, next) => {
     try {
       const engine = memory.getInsightEngine();
       const id = Number(req.params.id);
@@ -415,21 +412,19 @@ export function createMemoryController(memory: MemoryManager, router: MessageRou
       engine.applyFeedback(id, isPositive);
       res.json({ success: true });
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      logger.error({ err }, '[API] Insight feedback error:');
-      res.status(500).json({ error: 'Insight feedback uygulanamadı' });
+      logger.error({ err: error }, '[API] Insight feedback error:');
+      forwardError(error, next);
     }
   });
 
-  expressRouter.post('/insights/prune', (_req, res) => {
+  expressRouter.post('/insights/prune', (_req, res, next) => {
     try {
       const engine = memory.getInsightEngine();
       const result = engine.prune();
       res.json({ success: true, result });
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      logger.error({ err }, '[API] Insight prune error:');
-      res.status(500).json({ error: 'Insight prune başarısız' });
+      logger.error({ err: error }, '[API] Insight prune error:');
+      forwardError(error, next);
     }
   });
 

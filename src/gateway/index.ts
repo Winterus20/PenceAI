@@ -21,11 +21,11 @@ import { initializeMCP, shutdownMCP } from '../agent/mcp/runtime.js';
 import { initMCPPersistence } from './services/mcpService.js';
 import { metricsCollector } from '../observability/metricsCollector.js';
 
-import { TaskQueue, BackgroundWorker, TaskPriority } from '../autonomous/index.js';
+import { TaskQueue, BackgroundWorker, TaskPriority, TaskSweeper } from '../autonomous/index.js';
 import { FeedbackManager } from '../autonomous/urgeFilter.js';
 import { SubAgentManager } from '../autonomous/curiosityEngine.js';
 import { SemanticRouter } from '../router/semantic.js';
-import { logger, runWithTraceId } from '../utils/index.js';
+import { logger, runWithTraceId, updateLogLevel } from '../utils/index.js';
 import { registerRoutes } from './routes.js';
 import { errorHandler } from './errorHandler.js';
 import { setupWebSocket } from './websocket.js';
@@ -40,6 +40,7 @@ import {
 } from './bootstrap.js';
 
 import { DiscordChannel } from './channels/discord.js';
+import { APP_VERSION } from '../version.js';
 
 // GraphRAG imports
 import { GraphCache } from '../memory/graphRAG/GraphCache.js';
@@ -51,6 +52,15 @@ import { GraphRAGEngine } from '../memory/graphRAG/GraphRAGEngine.js';
 
 import { GraphWorker } from '../memory/graphRAG/GraphWorker.js';
 import { GraphRAGConfigManager, DEFAULT_GRAPH_RAG_CONFIG } from '../memory/graphRAG/config.js';
+
+let llmCachePurgeTimer: ReturnType<typeof setInterval> | null = null;
+
+function clearLlmCachePurgeTimer(): void {
+    if (llmCachePurgeTimer) {
+        clearInterval(llmCachePurgeTimer);
+        llmCachePurgeTimer = null;
+    }
+}
 
 // ═══════════════════════════════════════════════════════════
 //  Bootstrap Helpers
@@ -109,14 +119,19 @@ function bootstrapLLM(db: Database.Database): LLMProvider {
 async function main() {
     logger.info(`
   ╔══════════════════════════════════════╗
-  ║         🐾  PençeAI  v0.1.0         ║
+  ║         🐾  PençeAI  v${APP_VERSION.padEnd(6)}         ║
   ║   Self-Hosted AI Agent Platform      ║
   ╚══════════════════════════════════════╝
   `);
 
     // 1. Konfigürasyon
     const config = loadConfig();
-    logger.info(`[Gateway] ⚙️  Port: ${config.port} | Provider: ${config.defaultLLMProvider} | Model: ${config.defaultLLMModel}`);
+    updateLogLevel(config.logLevel);
+    logger.info(`[Gateway] ⚙️  Port: ${config.port} | Host: ${config.host} | Provider: ${config.defaultLLMProvider} | Model: ${config.defaultLLMModel}`);
+
+    if (!config.dashboardPassword && config.nodeEnv !== 'production') {
+        logger.warn('[Gateway] ⚠️  DASHBOARD_PASSWORD tanımlı değil — REST/WebSocket kimlik doğrulaması devre dışı (yalnızca development/test)');
+    }
 
     // 2. Veritabanı
     const { database, memory, embeddingProvider } = await bootstrapDatabase();
@@ -260,6 +275,7 @@ async function main() {
     // 4.6 Autonomous Worker (With SQLite Checkpointing)
     const taskQueue = new TaskQueue(database.getDb());
     const autonomousWorker = new BackgroundWorker(taskQueue);
+    const taskSweeper = new TaskSweeper(taskQueue, () => autonomousWorker.getActiveTaskId());
     logger.info(`[Gateway] ⚙️ Autonomous Background Worker and Persistent Priority Queue initialized`);
 
     const { AutonomousScheduler } = await import('../autonomous/scheduler.js');
@@ -282,6 +298,7 @@ async function main() {
     agent.setTaskQueue(taskQueue);
 
     taskQueue.loadPendingTasks();
+    taskSweeper.start();
 
     // Uygulama başladığında ilk tik çalışsın
     taskQueue.enqueue({ id: `auto_tick_${Date.now()}`, type: 'autonomous_tick', priority: TaskPriority.P3_NORMAL, payload: {}, addedAt: Date.now() + 5000 });
@@ -305,11 +322,31 @@ async function main() {
     }));
     app.use(cors({
       origin: (origin, callback) => {
-        const isDev = process.env.NODE_ENV !== 'production';
-        if (!origin || (isDev && (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')))) {
+        // Origin olmayan istekler (curl, server-to-server) — izin ver
+        if (!origin) return callback(null, true);
+
+        const isDev = getConfig().nodeEnv !== 'production';
+        if (isDev) {
+          // Development: localhost izinli
+          if (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+            return callback(null, true);
+          }
+        }
+
+        // Production: sadece kendi frontend origin'ine izin ver
+        const config = getConfig();
+        const allowedOrigins = [
+          `http://${config.host}:${config.port}`,
+          `https://${config.host}:${config.port}`,
+          `http://localhost:${config.port}`,
+          `http://127.0.0.1:${config.port}`,
+        ];
+        if (allowedOrigins.includes(origin)) {
           return callback(null, true);
         }
-        callback(null, true); // production'da da aynı origin'e izin ver
+
+        logger.warn({ origin }, '[Gateway] CORS reddedildi');
+        callback(new Error('CORS policy violation'));
       },
     }));
     app.use(rateLimit({
@@ -358,6 +395,7 @@ async function main() {
                 if (response && response.trim() !== '') {
                     await router.sendResponse(message.channelType, message.channelId, {
                         content: response,
+                        replyToId: message.id,
                     });
                 }
             });
@@ -366,6 +404,7 @@ async function main() {
             logger.error({ err }, `[Gateway] Mesaj işleme hatası`);
             await router.sendResponse(message.channelType, message.channelId, {
                 content: `⚠️ Hata: ${errMsg}`,
+                replyToId: message.id,
             });
         }
     });
@@ -415,7 +454,7 @@ async function main() {
     // LLM Cache periodic purge — expired entries every 30 minutes
     if (config.llmCacheEnabled) {
         const LLM_CACHE_PURGE_INTERVAL_MS = 30 * 60 * 1000;
-        const llmCachePurgeTimer = setInterval(() => {
+        llmCachePurgeTimer = setInterval(() => {
             try {
                 // Create a lightweight cache service just for purge (shares the same DB)
                 const purgeCache = new LLMCacheService(database.getDb(), {
@@ -455,6 +494,8 @@ async function main() {
             logger.error({ err }, '[Gateway] ❌ Sunucu hatası');
         }
         autonomousWorker.stop();
+        taskSweeper.stop();
+        clearLlmCachePurgeTimer();
         database.close();
         process.exit(1);
     });
@@ -464,6 +505,7 @@ async function main() {
         logger.info('\n[Gateway] 🛑 Kapatılıyor...');
         if (statsDebounceTimer) clearTimeout(statsDebounceTimer);
         clearInterval(decayTimer);
+        clearLlmCachePurgeTimer();
         
         // Stop GraphRAG worker
         try {
@@ -477,6 +519,7 @@ async function main() {
         
         
         autonomousScheduler.stop();
+        taskSweeper.stop();
         autonomousWorker.stop();
         try {
             await router.disconnectAll();

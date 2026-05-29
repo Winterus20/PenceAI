@@ -4,6 +4,7 @@
 
 import type Database from 'better-sqlite3';
 import type { Insight, InsightQueryResult } from './types.js';
+import { escapeFtsQuery } from '../types.js';
 import { logger } from '../../utils/logger.js';
 
 export class InsightRetrieval {
@@ -20,8 +21,12 @@ export class InsightRetrieval {
       return [];
     }
 
-    // FTS ile arama
-    const ftsQuery = keywords.map(k => `"${k}"`).join(' OR ');
+    // FTS ile arama — özel karakterleri escape et
+    const ftsQuery = escapeFtsQuery(keywords.join(' '), true);
+    if (!ftsQuery) {
+      return [];
+    }
+
     const rows = this.db.prepare(`
       SELECT i.*
       FROM insights i

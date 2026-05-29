@@ -5,43 +5,20 @@
  * validate eder ve runtime options'ları sağlar.
  */
 
-import { z } from 'zod';
-import type { MCPServerConfig, MCPRuntimeOptions} from './types.js';
-import { MCPServerConfigSchema, DEFAULT_MCP_RUNTIME_OPTIONS } from './types.js';
+import type { MCPServerConfig, MCPRuntimeOptions } from './types.js';
+import { DEFAULT_MCP_RUNTIME_OPTIONS, MCPServerConfigSchema } from './types.js';
 import { isCommandSafe } from './command-validator.js';
+import { getConfig } from '../../gateway/config.js';
 import { logger } from '../../utils/logger.js';
-
-// ============================================================
-// Environment Variable Schema
-// ============================================================
-
-/**
- * MCP ile ilgili tüm environment variable'larının Zod şeması.
- */
-const MCPEnvSchema = z.object({
-  /** MCP'yi etkinleştir */
-  ENABLE_MCP: z.string().transform((val) => val.toLowerCase() === 'true').default('false'),
-
-  /** MCP server'ları (JSON array string) */
-  MCP_SERVERS: z.string().optional(),
-
-  /** Varsayılan timeout (ms) */
-  MCP_TIMEOUT: z.string().optional(),
-
-  /** Maksimum paralel araç çağrısı */
-  MCP_MAX_CONCURRENT: z.string().optional(),
-
-  /** MCP logging */
-  MCP_LOGGING: z.string().transform((val) => val.toLowerCase() === 'true').default('true'),
-});
 
 // ============================================================
 // Config Parser
 // ============================================================
 
 /**
- * Environment variable'larından MCP config'lerini parse eder.
- * 
+ * Merkezi config'den MCP config'lerini parse eder.
+ * NEVER read process.env directly — AGENTS.md kuralına uygun.
+ *
  * @returns Parse edilmiş server config'leri ve runtime options
  */
 export function parseMCPConfig(): {
@@ -49,31 +26,11 @@ export function parseMCPConfig(): {
   servers: MCPServerConfig[];
   runtimeOptions: MCPRuntimeOptions;
 } {
-  const env = {
-    ENABLE_MCP: process.env.ENABLE_MCP ?? 'false',
-    MCP_SERVERS: process.env.MCP_SERVERS,
-    MCP_TIMEOUT: process.env.MCP_TIMEOUT,
-    MCP_MAX_CONCURRENT: process.env.MCP_MAX_CONCURRENT,
-    MCP_LOGGING: process.env.MCP_LOGGING ?? 'true',
-  };
-
-  // Environment validation
-  const parsedEnv = MCPEnvSchema.safeParse(env);
-  if (!parsedEnv.success) {
-    logger.error({ errors: parsedEnv.error.errors }, '[MCP] ❌ Environment validation başarısız, defaults kullanılıyor:');
-    // Validation başarısızsa MCP'yi devre dışı bırak
-    return {
-      enabled: false,
-      servers: [],
-      runtimeOptions: { ...DEFAULT_MCP_RUNTIME_OPTIONS, enabled: false },
-    };
-  }
-
-  const { ENABLE_MCP, MCP_SERVERS, MCP_TIMEOUT, MCP_MAX_CONCURRENT, MCP_LOGGING } = parsedEnv.data;
+  const config = getConfig();
 
   // MCP disabled ise boş config dön
-  if (!ENABLE_MCP) {
-    logger.info('[MCP] ℹ️  MCP devre dışı (ENABLE_MCP=false)');
+  if (!config.enableMcp) {
+    logger.info('[MCP] ℹ️  MCP devre dışı (enableMcp=false)');
     return {
       enabled: false,
       servers: [],
@@ -82,14 +39,14 @@ export function parseMCPConfig(): {
   }
 
   // Server config'lerini parse et
-  const servers = parseServerConfigs(MCP_SERVERS);
+  const servers = parseServerConfigs(config.mcpServers);
 
   // Runtime options
   const runtimeOptions: MCPRuntimeOptions = {
     enabled: true,
-    defaultTimeout: parseInt(MCP_TIMEOUT ?? '30000', 10) || DEFAULT_MCP_RUNTIME_OPTIONS.defaultTimeout,
-    maxConcurrentCalls: parseInt(MCP_MAX_CONCURRENT ?? '5', 10) || DEFAULT_MCP_RUNTIME_OPTIONS.maxConcurrentCalls,
-    enableLogging: MCP_LOGGING,
+    defaultTimeout: config.mcpTimeout,
+    maxConcurrentCalls: config.mcpMaxConcurrent,
+    enableLogging: config.mcpLogging,
   };
 
   logger.info(`[MCP] ✅ MCP etkin — ${servers.length} server yapılandırıldı`);
@@ -137,11 +94,12 @@ function parseServerConfigs(jsonString: string | undefined): MCPServerConfig[] {
 
     const config = result.data;
 
-    // Güvenlik kontrolü — komut allowlist
-    if (!isCommandSafe(config.command)) {
+    // Güvenlik kontrolü — komut allowlist veya geçerli SSE URL
+    const isHttpUrl = config.command.startsWith('http://') || config.command.startsWith('https://');
+    if (!isCommandSafe(config.command) && !isHttpUrl) {
       logger.error(
         { command: config.command, serverName: config.name },
-        `[MCP] ❌ Server "${config.name}" — komut allowlist'te değil: ${config.command}`,
+        `[MCP] ❌ Server "${config.name}" — komut allowlist'te değil ve geçerli URL değil: ${config.command}`,
       );
       continue;
     }
@@ -158,9 +116,10 @@ function parseServerConfigs(jsonString: string | undefined): MCPServerConfig[] {
 
 /**
  * MCP'nin etkin olup olmadığını kontrol eder.
+ * NEVER read process.env directly — AGENTS.md kuralına uygun.
  */
 export function isMCPEnabled(): boolean {
-  return (process.env.ENABLE_MCP ?? 'false').toLowerCase() === 'true';
+  return getConfig().enableMcp;
 }
 
 /**

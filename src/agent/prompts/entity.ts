@@ -2,17 +2,31 @@
  * Entity extraction prompt'u — bellek içeriğinden varlıkları çıkarır
  * ve mevcut belleklerle ilişki kurar. Artık merkezi User Node etrafında toplanıyor.
  */
+/**
+ * Prompt injection riskini azaltmak için kullanıcı adını sanitize eder.
+ */
+function sanitizePromptInput(name: string): string {
+    return name
+        .replace(/[\x00-\x1F\x7F]/g, '')
+        .replace(/[{}'"]/g, '')
+        .replace(/\r?\n/g, ' ')
+        .trim()
+        .substring(0, 100);
+}
+
 export function buildEntityExtractionPrompt(
     existingEntities: string[],
     relatedMemories: Array<{ id: number; content: string }>,
     userName: string = 'Kullanıcı',
 ): string {
+    const safeName = sanitizePromptInput(userName);
     let prompt = `Aşağıdaki bellek kaydını analiz et. İçindeki varlıkları (entity) çıkar ve varolan belleklerle ilişkilerini belirle.
 
-## ZORUNLU KURAL: Merkezi Kullanıcı
-Bilgiler her ne şekilde yazılmış olursa olsun (gizli özneyle bile olsa), bu anılar ana kullanıcımız olan '${userName}' ile ilgilidir.
-HER ZAMAN '${userName}' adında bir "person" entity çıkar.
-Daha sonra cümlede geçen eylemi, kavramı veya projeyi ayrı bir entity olarak çıkar ve bunları '${userName}' ile güçlü bir şekilde (related_to, part_of, supports) bağla! (Örn: "Piyano çalmayı sever" -> [Entity: Yiğit Emre], [Entity: Piyano] -> İkisi arasında 'related_to' veya 'supports' ilişkisi kur).
+## ZORUNLU KURAL: Merkezi Kullanıcı ve Diğer Kişileri Ayır
+- Bu anılar ÖNCELİKLİ OLARAK ana kullanıcımız olan '${safeName}' ile ilgilidir. HER ZAMAN '${safeName}' adında bir "person" entity çıkar.
+- Cümledeki eylem, kavram veya projeyi ayrı entity olarak çıkar ve bunları '${safeName}' ile güçlü bir şekilde (related_to, part_of, supports) bağla!
+- ÖNEMLİ: Eğer bellek içeriğinde '${safeName}' dışında başka bir kişinin adı geçiyorsa (örn: "Emma Grace Frost gotik tarz sever"), bu kişiyi de ayrı "person" entity olarak çıkar. Ancak bu kişiyi '${safeName}' ile doğrudan ilişkilendirme — onlar FARKLI kişilerdir.
+- Sadece '${safeName}' hakkındaki olguları '${safeName}' entity'sine bağla. Başka kişilerin tercihleri/özellikleri onların kendi entity'lerinde kalmalı.
 
 ## Entity Türleri
 - person: Kişi adları (sadece spesifik kişiler)
@@ -51,7 +65,8 @@ SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
 }
 
 ## Kurallar
-- ZORUNLU: HER ZAMAN ana kullanıcıyı (${userName}) bir Entity olarak çıkar ve çıkarılan diğer tüm olguları (Entity) onunla ilişkilendir!
+- ZORUNLU: HER ZAMAN ana kullanıcıyı (${safeName}) bir Entity olarak çıkar.
+- '${safeName}' hakkındaki olguları onunla ilişkilendir. Ancak bellekte '${safeName}' dışında bir kişi adı geçiyorsa, bu kişiyi AYRI entity olarak çıkar ve onu '${safeName}' ile ilişkilendirme.
 - Sadece somut ve spesifik olguları çıkar ("iş", "bugün", "soru", "şey" gibi soyut/genel kelimeleri asla Entity olarak çıkarma).
 - Entity isimleri tutarlı olsun (mevcut varlıkların yazılışını kullan)
 - İlişkiler SADECE yukarıdaki mevcut belleklerle kurulabilir, bellek listesinde olmayan ID'leri kullanma.

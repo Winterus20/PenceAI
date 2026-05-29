@@ -5,6 +5,8 @@ import { LLMError } from '../errors/LLMError.js';
 /**
  * Mistral AI LLM Provider — OpenAI-uyumlu API kullanır.
  * OpenAIProvider'ı extend ederek kod tekrarını önler.
+ *
+ * Mistral'ın kendi API'sindeki tüm modeller native tool calling destekler.
  */
 export class MistralProvider extends OpenAIProvider {
     readonly name = 'mistral';
@@ -24,6 +26,19 @@ export class MistralProvider extends OpenAIProvider {
         // === Diğer ===
         'open-mistral-nemo',          // Mistral Nemo 12B (v24.07) — çok dilli open source
     ];
+
+    /**
+     * Mistral'ın kendi API'sindeki modeller native tool calling destekler.
+     * Ancak open-mistral-nemo (v24.07, eski open-source) function calling
+     * dokümantasyonunda listelenmemiş — conservative olarak strict mode'a giriyor.
+     *
+     * Kaynak: https://docs.mistral.ai/capabilities/function_calling/
+     */
+    protected getStrictModels(): ReadonlySet<string> {
+        return new Set([
+            'open-mistral-nemo',  // Eski open-source model, function calling dokümantasyonunda yok
+        ]);
+    }
 
     constructor() {
         const config = getConfig();

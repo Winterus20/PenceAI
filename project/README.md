@@ -1,7 +1,7 @@
 # PenceAI Proje Haritası (İndeks)
 
-> **Son Güncelleme:** 25 Nisan 2026
-> **Versiyon:** 1.9.2
+> **Son Güncelleme:** 28 Mayıs 2026
+> **Versiyon:** 0.2.0
 > **Lisans:** MIT
 
 ---

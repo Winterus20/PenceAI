@@ -49,11 +49,15 @@ export const MessageStream: React.FC<MessageStreamProps> = ({
 }) => {
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const virtuosoRef = useRef<HTMLDivElement>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => () => clearTimeout(copyTimerRef.current), []);
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+    clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopiedId(null), 2000);
   };
 
   const handleFeedback = (messageId: string, type: 'positive' | 'negative') => {

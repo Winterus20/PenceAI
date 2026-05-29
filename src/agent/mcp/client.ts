@@ -34,6 +34,7 @@ import {
 import { createTransport, connectClient, disconnectClient } from './transport.js';
 import { MCPSecurityManager } from './security.js';
 import { logger } from '../../utils/logger.js';
+import { APP_VERSION } from '../../version.js';
 import { stripDescriptions } from './utils.js';
 
 // ============================================================
@@ -299,7 +300,7 @@ export class MCPClientManager {
       client: new Client(
         {
           name: 'penceai',
-          version: '0.1.0',
+          version: APP_VERSION,
         },
         {
           capabilities: {
@@ -425,7 +426,7 @@ export class MCPClientManager {
           // Entry silinmişse, config'i hatırlayarak tekrar planla
           this.servers.set(serverName, {
             config,
-            client: new Client({ name: 'penceai', version: '0.1.0' }),
+            client: new Client({ name: 'penceai', version: APP_VERSION }),
             transport: null,
             status: 'error',
             tools: [],

@@ -21,6 +21,9 @@ export const EXTRACTION_CATEGORIES = `## Kategori Tanımları (Karıştırma)
 - event: ÖNEMLİ YAŞAM OLAYLARI (nadiren değişir, yaşam değiştirici)
   Örnek: "2024'te taşındı", "Mezun oldu", "İş değiştirdi"
 
+- skill: Teknik BECERİLER ve uzmanlık alanları (programlama dilleri, araçlar, framework'ler)
+  Örnek: "Puppeteer kullanabiliyor", "Python ve Django biliyor", "React'te uzman"
+
 - other: Yukarıdaki kategorilere uymayan (çok nadir kullan)`;
 
 export const EXTRACTION_IMPORTANCE_SCORING = `## Importance Skorlama Rehberi
@@ -52,7 +55,13 @@ Yeni bilgiyi mevcut belleklerle karşılaştır. 3 durum var:
    Karar: "Django kullanıyor" (EKLE — Python zaten var)
    NOT: Mevcut belleği GÜNCELLEME, sadece yeni kısmı ekle
 
-ÖNEMLİ: Mesajın sonundaki "Bellekte Zaten Kayıtlı Bilgiler" listesindeki bilgilerin TEKRARLARINI, YENİDEN İFADELERİNİ veya ALT KÜMELERİNİ çıkarma. Mevcut bir bilgiyle aynı anlama gelen ama farklı kelimelerle yazılmış bilgileri ATLA.`;
+ÖNEMLİ: Mesajın sonundaki "Bellekte Zaten Kayıtlı Bilgiler" listesindeki bilgilerin TEKRARLARINI, YENİDEN İFADELERİNİ veya ALT KÜMELERİNİ çıkarma. Mevcut bir bilgiyle aynı anlama gelen ama farklı kelimelerle yazılmış bilgileri ATLA.
+
+## KİMLİK AYIRICI — Kullanıcı mı, Başkası mı?
+- Çıkaracağın bilgi KESİNLİKLE kullanıcı hakkında olmalı. Başka birinin tercihi, özelliği veya durumu KAYDEDİLMEZ.
+- Eğer konuşmada "Arkadaşım X sever", "Discord'daki Y'nin adı Z", "Kardeşim W yapıyor" gibi ifadeler varsa bunlar KULLANICI bilgisi değildir. KAYDETME.
+- Kullanıcı kendi adından, yaşadığı yerden, kendi tercihlerinden bahsediyorsa kaydet. Başkasından bahsediyorsa KAYDETME.
+- "Kullanıcının adı Winterus" ve "Emma Grace Frost isimli başka bir kullanıcı" — bunlar farklı kişilerdir. İkincisi kullanıcı hakkında değilse kaydetme.`;
 
 export const EXTRACTION_EXAMPLES = `## Örnekler
 
@@ -75,6 +84,6 @@ Kullanıcı: "Python kullanıyorum"
 
 export const EXTRACTION_RESPONSE_FORMAT = `## Yanıt Formatı
 SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
-[{"content": "bilgi metni", "category": "preference|fact|habit|project|event|other", "importance": 1-10}]
+[{"content": "bilgi metni", "category": "preference|fact|skill|habit|project|event|other", "importance": 1-10}]
 
 Bilgi yoksa: []`;

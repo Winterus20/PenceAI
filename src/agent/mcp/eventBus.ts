@@ -34,6 +34,12 @@ export type MCPEventType = keyof MCPEvents;
 export type MCPEventPayload<T extends MCPEventType> = MCPEvents[T];
 
 export class MCPEventBus extends EventEmitter {
+  constructor() {
+    super();
+    // Node.js default 10 listener limitini aşmak için
+    this.setMaxListeners(100);
+  }
+
   emit<T extends MCPEventType>(event: T, payload: MCPEventPayload<T>): boolean {
     return super.emit(event, payload);
   }

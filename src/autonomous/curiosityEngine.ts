@@ -131,6 +131,7 @@ export class SubAgentManager {
     private config: SubAgentConfig;
     private db: Database.Database;
     private activeTasks: Map<string, ResearchTask> = new Map();
+    private inflightTopics: Set<string> = new Set();
     private dailyTaskCount: number = 0;
     private lastTaskDate: string = '';
     private lastTaskTime: number = 0;
@@ -174,23 +175,16 @@ export class SubAgentManager {
             return null;
         }
 
-        // Concurrent task limit
-        if (this.activeTasks.size >= this.config.maxConcurrentTasks) {
+        // Concurrent limit + duplicate — atomik slot rezervasyonu (TOCTOU önleme)
+        const topicKey = fixation.topic.toLowerCase();
+        if (!this._tryReserveTaskSlot(topicKey)) {
             logger.info(
-                `[SubAgent] Max concurrent tasks reached (${this.config.maxConcurrentTasks}). ` +
-                `Skipping fixation: "${fixation.topic}"`
+                `[SubAgent] Task slot unavailable (limit/duplicate/in-flight). Skipping: "${fixation.topic}"`
             );
             return null;
         }
 
-        // Duplicate kontrolü — aynı konuda aktif görev var mı?
-        for (const [, task] of this.activeTasks) {
-            if (task.fixation.toLowerCase() === fixation.topic.toLowerCase()) {
-                logger.debug(`[SubAgent] Duplicate fixation detected: "${fixation.topic}"`);
-                return null;
-            }
-        }
-
+        try {
         const task: ResearchTask = {
             id: `subagent_research_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             fixation: fixation.topic,
@@ -206,7 +200,6 @@ export class SubAgentManager {
         this.dailyTaskCount++;
         this.lastTaskTime = Date.now();
 
-        // DB'ye kaydet
         this._persistTask(task);
 
         logger.info(
@@ -215,6 +208,26 @@ export class SubAgentManager {
         );
 
         return task;
+        } finally {
+            this.inflightTopics.delete(topicKey);
+        }
+    }
+
+    /** Eşzamanlı createTask çağrılarında TOCTOU'yu önlemek için atomik slot rezervasyonu. */
+    private _tryReserveTaskSlot(topicKey: string): boolean {
+        if (this.activeTasks.size >= this.config.maxConcurrentTasks) {
+            return false;
+        }
+        if (this.inflightTopics.has(topicKey)) {
+            return false;
+        }
+        for (const task of this.activeTasks.values()) {
+            if (task.fixation.toLowerCase() === topicKey) {
+                return false;
+            }
+        }
+        this.inflightTopics.add(topicKey);
+        return true;
     }
 
     // ═══════════════════════════════════════════════════════════

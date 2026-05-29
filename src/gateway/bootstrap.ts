@@ -6,6 +6,7 @@ import type { Duplex } from 'stream';
 import type { WebSocketServer } from 'ws';
 
 import { runWithTraceId, logger } from '../utils/logger.js';
+import { getConfig } from './config.js';
 
 function extractBasicPassword(authHeader?: string): string | null {
     if (!authHeader || !authHeader.startsWith('Basic ')) {
@@ -114,11 +115,14 @@ export function attachDashboardWebSocketUpgrade(
         return;
       }
   
-      // Dev modunda localhost bağlantıları için auth bypass (Vite proxy gibi)
+      // Dev modunda localhost bağlantıları için opsiyonel auth bypass (Vite proxy)
       const remoteAddress = req.socket.remoteAddress;
       const isLocalhost = remoteAddress === '127.0.0.1' || remoteAddress === '::1' || remoteAddress === '::ffff:127.0.0.1';
-  
-      if (!isLocalhost && !isDashboardRequestAuthorized(
+      const config = getConfig();
+      const isDev = config.nodeEnv !== 'production';
+      const allowLocalBypass = config.allowLocalhostWsBypass;
+
+      if (!(isDev && isLocalhost && allowLocalBypass) && !isDashboardRequestAuthorized(
         dashboardPassword,
         req.headers.authorization,
         req.headers['sec-websocket-protocol'],

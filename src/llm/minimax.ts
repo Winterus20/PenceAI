@@ -278,10 +278,8 @@ export class MiniMaxProvider extends LLMProvider {
                 const filtered = processChunkText(delta.content);
                 if (filtered) {
                     content += filtered;
-                    if (!hasToolCalls) {
-                        onToken(filtered);
-                        tokensEmitted = true;
-                    }
+                    onToken(filtered);
+                    tokensEmitted = true;
                 }
             }
             // Düşünme içeriğini topla (reasoning_split: true ise reasoning_details alanında gelir)
@@ -311,7 +309,7 @@ export class MiniMaxProvider extends LLMProvider {
             if (!insideThink) {
                 // Normal metin kaldı (kısmi tag kontrolünden dolayı bekletilmiş olabilir)
                 content += thinkBuffer;
-                if (!hasToolCalls) onToken(thinkBuffer);
+                onToken(thinkBuffer);
             }
             // insideThink === true ise kapatılmamış <think> bloğu var, sessizce at
             thinkBuffer = '';

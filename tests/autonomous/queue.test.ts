@@ -185,7 +185,11 @@ describe('TaskQueue', () => {
                     payload TEXT NOT NULL,
                     status TEXT NOT NULL,
                     added_at TEXT NOT NULL,
-                    updated_at TEXT
+                    updated_at TEXT,
+                    lease_expires_at TEXT,
+                    retry_count INTEGER DEFAULT 0,
+                    max_retries INTEGER DEFAULT 2,
+                    lease_token TEXT
                 )
             `);
 
@@ -208,7 +212,7 @@ describe('TaskQueue', () => {
             queue.registerHandler('test_type', executor);
             queue.loadPendingTasks();
 
-            // Only pending/running, not completed
+            // Only pending (running recovered to pending on load)
             expect(queue.length).toBe(2);
 
             // Should be sorted by priority
@@ -229,7 +233,11 @@ describe('TaskQueue', () => {
                     payload TEXT NOT NULL,
                     status TEXT NOT NULL,
                     added_at TEXT NOT NULL,
-                    updated_at TEXT
+                    updated_at TEXT,
+                    lease_expires_at TEXT,
+                    retry_count INTEGER DEFAULT 0,
+                    max_retries INTEGER DEFAULT 2,
+                    lease_token TEXT
                 )
             `);
 
@@ -256,7 +264,11 @@ describe('TaskQueue', () => {
                     payload TEXT NOT NULL,
                     status TEXT NOT NULL,
                     added_at TEXT NOT NULL,
-                    updated_at TEXT
+                    updated_at TEXT,
+                    lease_expires_at TEXT,
+                    retry_count INTEGER DEFAULT 0,
+                    max_retries INTEGER DEFAULT 2,
+                    lease_token TEXT
                 )
             `);
 

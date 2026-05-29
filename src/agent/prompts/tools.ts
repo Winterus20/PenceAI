@@ -9,14 +9,14 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
     const tools: LLMToolDefinition[] = [
         {
             name: 'readFile',
-            description: 'Belirtilen dosyayı okur ve içeriğini döndürür.',
-            llmDescription: 'Dosya oku',
+            description: 'Belirtilen dosyanın tam içeriğini okur ve döndürür. Dosya düzenleme öncesinde MUTLAKA içeriği okumak için kullanılır. Büyük dosyalarda (>500 satır) dikkatli kullan — gerekirse parça parça oku.',
+            llmDescription: 'Dosya oku (düzenlemeden ÖNCE okumayı unutma)',
             parameters: {
                 type: 'object',
                 properties: {
                     path: {
                         type: 'string',
-                        description: 'Okunacak dosyanın tam yolu',
+                        description: 'Okunacak dosyanın tam mutlak yolu veya proje köküne göre göreceli yol',
                     },
                 },
                 required: ['path'],
@@ -31,8 +31,8 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'editFile',
-            description: 'Mevcut bir dosyada belirli bir metin parçasını bulur ve değiştirir. writeFile yerine küçük düzenlemeler için kullanılır — dosyanın tamamını yeniden yazmaz. ⚠️ oldText olarak yeterince spesifik ve benzersiz bir metin parçası kullanın; yaygın satırlar (örn: sadece "}" veya "return") yanlış konumlarda eşleşebilir.',
-            llmDescription: 'Dosyada düzenleme yap (eski metni yeni metinle değiştir — spesifik/metinsel eşleşme kullan)',
+            description: 'Mevcut bir dosyada belirli bir metin parçasını bulur ve değiştirir. SADECE küçük, hedefli düzenlemeler için kullanılır (örn: bir fonksiyon ekleme, bir satır değiştirme). Dosyanın tamamını yeniden yazmak İÇİN KULLANMA — o durumda writeFile kullan. ⚠️ oldText olarak yeterince spesifik ve benzersiz bir metin parçası kullan; yaygın satırlar (örn: sadece "}" veya "return") yanlış konumlarda eşleşebilir. Eğer oldText dosyada bulunamazsa işlem başarısız olur, o yüzden readFile ile içeriği doğrula.',
+            llmDescription: 'Dosyada küçük düzenleme yap (spesifik metin değişimi)',
             parameters: {
                 type: 'object',
                 properties: {
@@ -42,7 +42,7 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                     },
                     oldText: {
                         type: 'string',
-                        description: 'Dosyada bulunacak ve değiştirilecek metin parçası',
+                        description: 'Dosyada bulunacak ve değiştirilecek KESİN metin parçası. Satır sonları ve boşluklar dahil olmalıdır.',
                     },
                     newText: {
                         type: 'string',
@@ -68,8 +68,8 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'appendFile',
-            description: 'Mevcut bir dosyanın sonuna içerik ekler. Dosya yoksa oluşturur. Log, not ekleme veya dosyaya satır ekleme için kullanılır.',
-            llmDescription: 'Dosyaya ekleme yap (sonuna ekle)',
+            description: 'Mevcut bir dosyanın sonuna içerik ekler. Dosya yoksa oluşturur. Log, not ekleme, yapılandırma dosyasına satır ekleme veya bir listeye öğe ekleme için idealdir. Dosyanın mevcut içeriğini okumadan sonuna ekleme yapılabilir.',
+            llmDescription: 'Dosyanın sonuna ekle (log, not, liste ekleme)',
             parameters: {
                 type: 'object',
                 properties: {
@@ -79,7 +79,7 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                     },
                     content: {
                         type: 'string',
-                        description: 'Dosyanın sonuna eklenecek içerik',
+                        description: 'Dosyanın sonuna eklenecek içerik. Yeni satır gerekiyorsa başa/tail’e \\n ekle.',
                     },
                 },
                 required: ['path', 'content'],
@@ -95,8 +95,8 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'searchFiles',
-            description: 'Glob kalıbı kullanarak dosya arar. Dosya ismine göre hızlıca dosya bulmak için kullanılır. Örn: "**/*.ts", "src/**/*.json"',
-            llmDescription: 'Dosya ara (glob kalıbı ile)',
+            description: 'Glob kalıbı kullanarak dosya ADINA göre arar. "src/**/*.ts" gibi kalıplarla hızlıca dosya bulmak için kullanılır. İÇERİK araması YAPMAZ — dosya içeriğinde arama yapmak için önce searchFiles ile dosyayı bul, sonra readFile ile içeriği oku.',
+            llmDescription: 'Dosya adına göre ara (glob kalıbı ile)',
             parameters: {
                 type: 'object',
                 properties: {
@@ -127,8 +127,8 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'writeFile',
-            description: 'Belirtilen dosyaya içerik yazar. Dosya yoksa oluşturur.',
-            llmDescription: 'Dosya yaz veya oluştur',
+            description: 'Belirtilen dosyaya içerik yazar. Dosya yoksa oluşturur, VARSA TAMAMEN ÜZERİNE YAZAR. SADECE yeni dosya oluşturma veya mevcut dosyanın tamamını değiştirme gerektiğinde kullan. Küçük düzenlemeler için editFile kullan. ÖNEMLİ: Mevcut bir dosyanın üzerine yazmadan önce readFile ile içeriğini okuduğundan emin ol ve kullanıcıya onay sor.',
+            llmDescription: 'Dosya yaz/oluştur (TAMAMEN üzerine yazar — dikkatli kullan)',
             parameters: {
                 type: 'object',
                 properties: {
@@ -138,7 +138,7 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
                     },
                     content: {
                         type: 'string',
-                        description: 'Dosyaya yazılacak içerik',
+                        description: 'Dosyaya yazılacak tam içerik',
                     },
                 },
                 required: ['path', 'content'],
@@ -154,8 +154,8 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'listDirectory',
-            description: 'Belirtilen dizindeki dosya ve klasörleri listeler.',
-            llmDescription: 'Dizin listele',
+            description: 'Belirtilen dizindeki dosya ve klasörleri listeler. Bir dosyanın nerede olduğunu anlamak veya proje yapısını keşfetmek için kullanılır. Dosya adı biliniyorsa searchFiles daha hızlıdır; dizin yapısını görmek istiyorsan listDirectory kullan.',
+            llmDescription: 'Dizin listele (proje yapısını keşfet)',
             parameters: {
                 type: 'object',
                 properties: {
@@ -176,14 +176,14 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'searchMemory',
-            description: 'Uzun vadeli bellekte arama yapar.',
-            llmDescription: 'Bellekte ara',
+            description: 'Uzun vadeli bellekte (kullanıcı hakkında kaydedilmiş bilgilerde) arama yapar. Kullanıcının geçmişte söylediği tercihleri, alışkanlıkları veya kişisel bilgileri bulmak için kullan. "Geçmişte X hakkında ne demiştin?" sorusunda kullan.',
+            llmDescription: 'Bellekte ara (kullanıcının geçmiş bilgileri)',
             parameters: {
                 type: 'object',
                 properties: {
                     query: {
                         type: 'string',
-                        description: 'Arama sorgusu',
+                        description: 'Arama sorgusu (doğal dilde)',
                     },
                 },
                 required: ['query'],
@@ -198,7 +198,7 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'deleteMemory',
-            description: 'Bellekten bir kaydı ID ile siler.',
+            description: 'Bellekten bir kaydı ID ile siler. Kullanıcı bir bilgiyi yanlış hatırladığını veya silinmesini istediğinde kullan. Silmeden önce searchMemory ile doğru ID\'yi bul.',
             llmDescription: 'Bellekten sil (ID ile)',
             parameters: {
                 type: 'object',
@@ -220,8 +220,8 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'saveMemory',
-            description: '[DENEYSEL] Kullanıcının açıkça istediği bilgileri uzun vadeli belleğe kaydeder.',
-            llmDescription: 'Belleğe kaydet (kullanıcı açıkça istediğinde)',
+            description: 'Kullanıcının açıkça istediği veya kalıcı olduğu kesin bilgileri uzun vadeli belleğe kaydeder. Kullanıcı "bunu hatırla", "unutma ki...", "tercihim şu" dediğinde kullan. Bilginin kalıcı ve kişisel olduğundan emin ol. Tekrarlanan geçici durumları kaydetme.',
+            llmDescription: 'Belleğe kaydet (kullanıcı açıkça istediğinde veya kalıcı bilgi)',
             parameters: {
                 type: 'object',
                 properties: {
@@ -256,8 +256,8 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'searchConversation',
-            description: 'Geçmiş konuşmalarda belirli bir konuyu veya mesajı arar.',
-            llmDescription: 'Geçmiş konuşmada ara (sadece kullanıcı geçmişe referans verirse)',
+            description: 'Geçmiş konuşmalarda belirli bir konuyu veya mesajı arar. Kullanıcı "geçen hafta X hakkında ne konuşmuştuk?" veya "daha önce Y demiştin" dediğinde kullan. Bellekten farklı olarak konuşma geçmişinin tamamında arama yapar.',
+            llmDescription: 'Geçmiş konuşmada ara (konuşma tarihçesinde)',
             parameters: {
                 type: 'object',
                 properties: {
@@ -278,8 +278,8 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'webTool',
-            description: 'Bir web sayfasının içeriğini okur ve metne dönüştürür.',
-            llmDescription: 'Web sayfası oku',
+            description: 'Bilinen spesifik bir URL\'nin içeriğini okur ve metne dönüştürür. Kullanıcı "şu sayfayı oku" veya "https://... adresindeki bilgiyi getir" dediğinde kullan. Belirsiz bir konuda genel arama yapmak için webSearch kullan.',
+            llmDescription: 'Belirli URL oku (spesifik web sayfası)',
             parameters: {
                 type: 'object',
                 properties: {
@@ -360,7 +360,7 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'cancel_timer',
-            description: 'Daha önce kurulmuş bir zamanlayıcıyı (wake_me_in veya wake_me_every) iptal eder.',
+            description: 'Daha önce kurulmuş bir zamanlayıcıyı (wake_me_in veya wake_me_every) iptal eder. Kullanıcı "zamanlayıcıyı iptal et" veya "alarmı kapat" dediğinde kullan. Önce list_timers ile ID\'yi bul.',
             llmDescription: 'Zamanlayıcı iptal et',
             parameters: {
                 type: 'object',
@@ -382,7 +382,7 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'list_timers',
-            description: 'Şu anda aktif olan tüm zamanlayıcıları (wake_me_in ve wake_me_every) listeler.',
+            description: 'Şu anda aktif olan tüm zamanlayıcıları (wake_me_in ve wake_me_every) listeler. Kullanıcı "zamanlayıcılarım neler?" veya "aktif alarm var mı?" dediğinde kullan.',
             llmDescription: 'Aktif zamanlayıcıları listele',
             parameters: {
                 type: 'object',
@@ -397,14 +397,14 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
         },
         {
             name: 'prompt_human',
-            description: 'Kullanıcıya proaktif olarak bir soru sorar ve yanıt bekler. Belirsiz bir durumda, kullanıcı tercihi gerektiğinde veya ek bilgiye ihtiyaç duyulduğunda kullanılır.',
+            description: 'Kullanıcıya proaktif olarak bir soru sorar ve yanıt bekler. Belirsiz bir durumda, kullanıcı tercihi gerektiğinde veya ek bilgiye ihtiyaç duyulduğunda kullanılır. Tahmin yürütmek yerine soru sormak daha iyiyse bu aracı kullan.',
             llmDescription: 'Kullanıcıya soru sor (yanıt bekle)',
             parameters: {
                 type: 'object',
                 properties: {
                     question: {
                         type: 'string',
-                        description: 'Kullanıcıya sorulacak soru',
+                        description: 'Kullanıcıya sorulacak net ve kısa soru',
                     },
                 },
                 required: ['question'],
@@ -423,14 +423,14 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
     if (config.allowShellExecution) {
         tools.push({
             name: 'executeShell',
-            description: 'Bir kabuk (PowerShell/CMD) komutu çalıştırır.',
-            llmDescription: 'Shell komutu çalıştır',
+            description: 'Bir kabuk (PowerShell/CMD) komutu çalıştırır. SADECE okuma/arama/listeleme komutları otomatik çalıştırılır. YAZMA, SİLME veya SİSTEM DEĞİŞİKLİĞİ gerektiren komutlar (rm, del, format, shutdown, regedit vb.) için KESİNLİKLE kullanıcı onayı al. Güvenli komutlar: ls, cat, find, grep (varsa), npm, node, python, echo, mkdir, touch.',
+            llmDescription: 'Shell komutu çalıştır (GÜVENLİ komutlar: ls, cat, npm, node vb.)',
             parameters: {
                 type: 'object',
                 properties: {
                     command: {
                         type: 'string',
-                        description: 'Çalıştırılacak tam komut satırı',
+                        description: 'Çalıştırılacak tam komut satırı. Path traversal (../../../) ve pipe içeren komutlar dikkatle kontrol edilmeli.',
                     },
                     cwd: {
                         type: 'string',
@@ -453,14 +453,14 @@ export function getBuiltinToolDefinitions(): LLMToolDefinition[] {
     // Web arama (Smart Search — Brave + DuckDuckGo + Wikipedia + HN + Reddit)
     tools.push({
         name: 'webSearch',
-        description: 'Web\'de arama yapar ve sonuçları döndürür. Birden fazla kaynak (Brave, DuckDuckGo, Wikipedia, Hacker News, Reddit) kullanır.',
-        llmDescription: 'Web\'de ara (çoklu kaynak)',
+        description: 'Web\'de arama yapar ve sonuçları döndürür. Birden fazla kaynak (Brave, DuckDuckGo, Wikipedia, Hacker News, Reddit) kullanır. Belirsiz veya güncel bir konuda bilgi toplamak, kullanıcının sorusunu doğrulamak için kullan. Spesifik bir URL okumak için webTool kullan.',
+        llmDescription: 'Web\'de ara (çoklu kaynak — genel bilgi toplama)',
         parameters: {
             type: 'object',
             properties: {
                 query: {
                     type: 'string',
-                    description: 'Arama sorgusu (doğal dilde veya anahtar kelimelerle)',
+                    description: 'Arama sorgusu (doğal dilde veya anahtar kelimelerle). Türkçe veya İngilizce olabilir.',
                 },
                 count: {
                     type: 'integer',

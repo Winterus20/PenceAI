@@ -71,9 +71,9 @@ export class MemoryExtractor {
 
     createMergeFn(userName: string = 'Kullanıcı'): (oldContent: string, newContent: string) => Promise<string> {
         return async (oldContent: string, newContent: string) => {
-            const prompt = `Yeni bilgi: ${newContent}\nEski bilgi: ${oldContent}\n\nEğer yeni bilgi eski bilgiyi geçersiz kılıyorsa (örn: artık eski şehirde yaşamıyor, hobisi değişmiş) sadece yeni bilgiyi tut. Eğer birbirini tamamlıyorsa ikisini mantıklı bir şekilde harmanla. Sadece nihai gerçeği yaz. Ek açıklama yapma. DİKKAT: Nihai birleştirilmiş bilgiyi oluştururken ASLA "Kullanıcı..." diye başlama, ilgili kişinin gerçek adını kullan (Örn: "${userName}..." veya "Ayşegül..."). Çıktının dili Yeni Bilgi'nin yazıldığı dilde olmalıdır.`;
+            const prompt = `Yeni bilgi: ${newContent}\nEski bilgi: ${oldContent}\n\nEğer yeni bilgi eski bilgiyi geçersiz kılıyorsa (örn: artık eski şehirde yaşamıyor, hobisi değişmiş) sadece yeni bilgiyi tut. Eğer birbirini tamamlıyorsa ikisini mantıklı bir şekilde harmanla. Sadece nihai gerçeği yaz. Ek açıklama yapma.\n\nKRİTİK GÜVENLİK KURALI — Kimlik Çelişkisi Kontrolü:\nEğer eski bilgi bir kişinin adını, kimliğini veya özel ismini içeriyorsa (örn: "Kullanıcının adı X", "Y isimli kişi", "Z sever") ve yeni bilgi FARKLI bir isim/kişi içeriyorsa, bunlar muhtemelen FARKLI kişilerdir. BU DURUMDA ASLA BİRLEŞTİRME — sadece eski bilgiyi olduğu gibi koru. Farklı kişilerin bilgilerini bir araya getirmek hatadır.\n\nDİKKAT: Nihai birleştirilmiş bilgiyi oluştururken ASLA "Kullanıcı..." diye başlama, ilgili kişinin gerçek adını kullan (Örn: "${userName}..." veya "Ayşegül..."). Çıktının dili Yeni Bilgi'nin yazıldığı dilde olmalıdır.`;
             const res = await this.llm.chat([{ role: 'user', content: prompt }], {
-                systemPrompt: 'Sen bir bellek yöneticisisin. Sana verilen bilgileri direktiflere göre birleştir. Sadece sonucu yaz. Asla genel "Kullanıcı" kelimesini kullanma.',
+                systemPrompt: 'Sen bir bellek yöneticisisin. Sana verilen bilgileri direktiflere göre birleştir. Sadece sonucu yaz. Asla genel "Kullanıcı" kelimesini kullanma. FARKLI KİŞİLERİN bilgilerini asla birleştirme.',
                 temperature: 0.1,
                 maxTokens: 500,
             });
@@ -97,6 +97,8 @@ export class MemoryExtractor {
     }
 
     pushExtractionContext(ctx: ExtractionContext): void {
+        // NOT: Kullanıcı değişimi kontrolü runtime katmanında yapılır.
+        // Burada sadece context biriktirilir; extraction interval'e göre çalışır.
         this.extractionCounter++;
         const interval = this.getAdaptiveInterval();
         this.pendingExtractionContext.push(ctx);
@@ -159,7 +161,10 @@ export class MemoryExtractor {
                 maxTokens: 1024,
             });
 
-            const memories = this.parseExtractionResponse(result.content).slice(0, 3);
+            let memories = this.parseExtractionResponse(result.content).slice(0, 3);
+            // Cross-memory çelişki kontrolü: Aynı batch'te çelişkili kimlik bilgileri varsa filtrele
+            memories = this.filterContradictoryMemories(memories, userName);
+
             if (memories.length > 0) {
                 const mergeFn = this.createMergeFn(userName);
 
@@ -217,7 +222,9 @@ export class MemoryExtractor {
                 maxTokens: 2048,
             });
 
-            const memories = this.parseExtractionResponse(result.content);
+            let memories = this.parseExtractionResponse(result.content);
+            memories = this.filterContradictoryMemories(memories, transcript.userName);
+
             if (memories.length > 0) {
                 const mergeFn = this.createMergeFn(transcript.userName);
 
@@ -257,7 +264,9 @@ export class MemoryExtractor {
                 maxTokens: 2048,
             });
 
-            const memories = this.parseExtractionResponse(result.content);
+            let memories = this.parseExtractionResponse(result.content);
+            memories = this.filterContradictoryMemories(memories, userName);
+
             if (memories.length > 0) {
                 const mergeFn = this.createMergeFn(userName);
                 for (const mem of memories) {
@@ -361,17 +370,108 @@ export class MemoryExtractor {
 
     /**
      * Çıkarılan bellekleri doğrular ve normalleştirir.
+     * Ayrıca test/sentetik/anlamsız içerikleri filtreler.
      */
     private validateExtractedMemories(parsed: unknown[]): Array<{ content: string; category: string; importance: number }> {
         if (!Array.isArray(parsed)) return [];
 
         return parsed.filter((item): item is Record<string, unknown> =>
             item !== null && typeof item === 'object' && typeof (item as Record<string, unknown>).content === 'string' && String((item as Record<string, unknown>).content).trim().length > 0
-        ).map((item) => ({
+        ).filter((item) => this.isContentQualityAcceptable(String(item.content)))
+        .map((item) => ({
             content: String(item.content).trim(),
-            category: ['preference', 'fact', 'habit', 'project', 'event', 'other'].includes(String(item.category)) ? String(item.category) : 'other',
+            category: ['preference', 'fact', 'skill', 'habit', 'project', 'event', 'other'].includes(String(item.category)) ? String(item.category) : 'other',
             importance: typeof item.importance === 'number' ? Math.min(10, Math.max(1, item.importance)) : 5,
         }));
+    }
+
+    /**
+     * Bellek içeriğinin kalite ve geçerlilik kontrolü.
+     * Test, sentetik, anlamsız ve tekrarlayan içerikleri reddeder.
+     */
+    private isContentQualityAcceptable(content: string): boolean {
+        const trimmed = content.trim();
+        if (trimmed.length < 5) return false;
+
+        // Test / sentetik / mock içerik tespiti
+        const testPatterns = /\b(test_|trigger_|synthetic|synthesized|mock|dummy|sample|lorem ipsum|placeholder)\b/i;
+        if (testPatterns.test(trimmed)) {
+            logger.debug({ content: trimmed.substring(0, 80) }, '[MemoryExtractor] Test/sentetik içerik reddedildi');
+            return false;
+        }
+
+        // Timestamp-only / ID-only içerik tespiti
+        if (/^\d{13,}$/.test(trimmed.replace(/\D/g, ''))) {
+            logger.debug({ content: trimmed.substring(0, 80) }, '[MemoryExtractor] Timestamp-only içerik reddedildi');
+            return false;
+        }
+
+        // Tautoloji / anlamsız tekrar tespiti (örn: "Winterus kullanıcısının adı")
+        const words = trimmed.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        const uniqueWords = new Set(words);
+        if (words.length > 0 && uniqueWords.size / words.length < 0.4) {
+            // Çok fazla tekrar eden kelime var
+            logger.debug({ content: trimmed.substring(0, 80) }, '[MemoryExtractor] Tautoloji / tekrar içerik reddedildi');
+            return false;
+        }
+
+        // "X'in adı X" veya "X kullanıcısının adı" gibi tautolojiler
+        const tautologyPatterns = /(\b\w+\b)\s+(?:kullanıcısının|adının|isminin)\s+(?:adı|ismi)\b/i;
+        if (tautologyPatterns.test(trimmed)) {
+            logger.debug({ content: trimmed.substring(0, 80) }, '[MemoryExtractor] Tautoloji içerik reddedildi');
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Aynı batch içindeki bellekler arasında kimlik/çelişki kontrolü yapar.
+     * Eğer birden fazla farklı isim/identite varsa, sadece kullanıcıya ait olanı tutar.
+     */
+    private filterContradictoryMemories(
+        memories: Array<{ content: string; category: string; importance: number }>,
+        userName: string,
+    ): Array<{ content: string; category: string; importance: number }> {
+        if (memories.length <= 1) return memories;
+
+        // İsim/identite içeren bellekleri tespit et
+        const identityPatterns = /\b(adı|ismi|name|kullanıcı|user|nick|nickname)\b/i;
+        const identityMemories = memories.filter(m => identityPatterns.test(m.content));
+
+        if (identityMemories.length <= 1) return memories;
+
+        // Her birinden potansiyel isimleri çıkar (büyük harfle başlayan kelimeler)
+        const extractPotentialNames = (content: string): string[] => {
+            const matches = content.match(/\b[A-ZÇĞİÖŞÜ][a-zçğıöşü]*(?:\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]*)*\b/g);
+            return matches ? matches.map(n => n.trim().toLowerCase()) : [];
+        };
+
+        const identityNames = identityMemories.map(m => ({
+            memory: m,
+            names: extractPotentialNames(m.content),
+        }));
+
+        // Kullanıcı adı ile eşleşen isimleri bul
+        const userNameLower = userName.toLowerCase();
+        const userMatchIndex = identityNames.findIndex(item =>
+            item.names.some(n => n === userNameLower || n.includes(userNameLower) || userNameLower.includes(n)),
+        );
+
+        if (identityMemories.length >= 2 && userMatchIndex >= 0) {
+            // Birden fazla identite var ve kullanıcı adı ile eşleşen var
+            const matched = identityNames[userMatchIndex];
+            if (!matched) return memories;
+            const kept = matched.memory;
+            const removed = identityMemories.filter((_, i) => i !== userMatchIndex);
+            logger.warn(
+                { kept: kept.content, removed: removed.map(m => m.content) },
+                '[MemoryExtractor] Cross-memory kimlik çelişkisi tespit edildi, eşleşmeyenler çıkarıldı',
+            );
+            return memories.filter(m => !removed.includes(m));
+        }
+
+        return memories;
     }
 
     /**
@@ -391,9 +491,11 @@ export class MemoryExtractor {
                 const parsed: unknown = JSON.parse(objStr);
                 if (parsed !== null && typeof parsed === 'object' && 'content' in parsed && typeof (parsed as Record<string, unknown>).content === 'string' && String((parsed as Record<string, unknown>).content).length > 0) {
                     const p = parsed as Record<string, unknown>;
+                    const content = String(p.content);
+                    if (!this.isContentQualityAcceptable(content)) continue;
                     results.push({
-                        content: String(p.content),
-                        category: ['preference', 'fact', 'habit', 'project', 'event', 'other'].includes(String(p.category)) ? String(p.category) : 'other',
+                        content,
+                        category: ['preference', 'fact', 'skill', 'habit', 'project', 'event', 'other'].includes(String(p.category)) ? String(p.category) : 'other',
                         importance: typeof p.importance === 'number' ? Math.min(10, Math.max(1, p.importance)) : 5,
                     });
                 }
@@ -407,6 +509,9 @@ export class MemoryExtractor {
     }
 
     private async getSimilarMemoriesForDedup(query: string, limit: number = 10): Promise<Array<{ id: number; content: string; similarity: number }>> {
+        if (!query || query.trim().length === 0) {
+            return [];
+        }
         try {
             const results = await this.memory.semanticSearch(query, limit);
             return results

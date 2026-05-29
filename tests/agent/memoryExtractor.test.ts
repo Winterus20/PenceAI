@@ -120,8 +120,8 @@ describe('MemoryExtractor', () => {
 
         it('clamps importance to 1-10 range', () => {
             const input = JSON.stringify([
-                { content: 'a', category: 'fact', importance: 15 },
-                { content: 'b', category: 'fact', importance: -3 },
+                { content: 'Test memory item one', category: 'fact', importance: 15 },
+                { content: 'Test memory item two', category: 'fact', importance: -3 },
             ]);
 
             const result = extractor.parseExtractionResponse(input);

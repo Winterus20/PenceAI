@@ -90,16 +90,30 @@ export class MemoryGraphManager {
     // ========== Entity Yönetimi ==========
 
     /**
-     * Entity upsert — normalized name + type çiftine göre.
+     * Entity upsert — normalized name'e göre (tip bağımsız).
+     * Aynı isim farklı tiple gelirse mevcut tip korunur, LLM'in farklı tipi reddedilir.
+     * Bu duplicate entity oluşmasını önler (örn: Bayonetta hem concept hem technology).
      */
     upsertEntity(name: string, type: string = 'concept'): number {
         const normalizedName = name.toLowerCase().trim().replace(/\s+/g, ' ');
 
+        // DEDUP: Sadece normalized_name'e göre ara — tip bağımsız
+        // Aynı isim farklı tiple gelirse mevcut tip korunur
         const existing = this.db.prepare(`
-            SELECT id FROM memory_entities WHERE normalized_name = ? AND type = ?
-        `).get(normalizedName, type) as { id: number } | undefined;
+            SELECT id, type FROM memory_entities WHERE normalized_name = ?
+        `).get(normalizedName) as { id: number; type: string } | undefined;
 
-        if (existing) return existing.id;
+        if (existing) {
+            // Mevcut entity bulundu, ID'sini döndür
+            // Tip farklıysa logla ama mevcut tipi koru (LLM'in tipini reddet)
+            if (existing.type !== type) {
+                logger.debug(
+                    { name: name.trim(), existingType: existing.type, rejectedType: type },
+                    '[MemoryGraph] Entity tip çakışması: mevcut tip korundu, yeni tip reddedildi'
+                );
+            }
+            return existing.id;
+        }
 
         const result = this.db.prepare(`
             INSERT INTO memory_entities (name, type, normalized_name) VALUES (?, ?, ?)
@@ -117,7 +131,7 @@ export class MemoryGraphManager {
                 INSERT OR IGNORE INTO memory_entity_links (memory_id, entity_id) VALUES (?, ?)
             `).run(memoryId, entityId);
         } catch (err) {
-            // Ignore duplicate link
+            logger.debug({ err, memoryId, entityId }, '[MemoryGraph] Duplicate or failed entity link ignored');
         }
     }
 
@@ -571,28 +585,36 @@ export class MemoryGraphManager {
     decayRelationships(): { checked: number; pruned: number } {
         const PRUNE_THRESHOLD = 0.3;
         const DEFAULT_BASE_RATE = 0.05;
-
-        const relations = this.db.prepare(`
-            SELECT id, confidence, decay_rate, access_count,
-                   COALESCE(last_accessed_at, created_at) as last_accessed_at
-            FROM memory_relations
-        `).all() as Array<{
-            id: number; confidence: number; decay_rate: number | null;
-            access_count: number | null; last_accessed_at: string;
-        }>;
+        const PAGE_SIZE = 500;
 
         let pruned = 0;
         let decayed = 0;
-        const nowMs = Date.now();
+        let checked = 0;
+        let lastId = -1;
 
         const deleteStmt = this.db.prepare(`DELETE FROM memory_relations WHERE id = ?`);
         const updateConfStmt = this.db.prepare(`UPDATE memory_relations SET confidence = ? WHERE id = ?`);
 
-        const BATCH_SIZE = 500;
-        for (let batchStart = 0; batchStart < relations.length; batchStart += BATCH_SIZE) {
-            const batch = relations.slice(batchStart, batchStart + BATCH_SIZE);
+        // Cursor-based pagination: tüm ilişkileri tek seferde belleğe yükleme
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            const relations = this.db.prepare(`
+                SELECT id, confidence, decay_rate, access_count,
+                       COALESCE(last_accessed_at, created_at) as last_accessed_at
+                FROM memory_relations
+                WHERE id > ?
+                ORDER BY id
+                LIMIT ?
+            `).all(lastId, PAGE_SIZE) as Array<{
+                id: number; confidence: number; decay_rate: number | null;
+                access_count: number | null; last_accessed_at: string;
+            }>;
+
+            if (relations.length === 0) break;
+
             this.db.transaction(() => {
-                for (const rel of batch) {
+                for (const rel of relations) {
+                    checked++;
                     const accessCount = rel.access_count ?? 0;
                     const baseRate = rel.decay_rate ?? DEFAULT_BASE_RATE;
                     const effectiveRate = baseRate / (1 + 0.1 * accessCount);
@@ -611,17 +633,20 @@ export class MemoryGraphManager {
                     }
                 }
             })();
+
+            // Cursor güncelle
+            lastId = relations[relations.length - 1]!.id;
         }
 
         if (pruned > 0) {
             this.cleanupOrphanEntities();
         }
 
-        if (pruned > 0 || relations.length > 50) {
-            logger.info(`[Memory] 📉 İlişki decay: ${pruned} temizlendi (${relations.length} ilişki kontrol edildi)`);
+        if (pruned > 0 || checked > 50) {
+            logger.info(`[Memory] 📉 İlişki decay: ${pruned} temizlendi (${checked} ilişki kontrol edildi)`);
         }
 
-        return { checked: relations.length, pruned };
+        return { checked, pruned };
     }
 
     /**

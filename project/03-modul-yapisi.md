@@ -404,7 +404,7 @@ Bilişsel bellek sistemi, bilgi yönetimi ve retrieval orchestration.
 
 | Dosya | Açıklama |
 |-------|----------|
-| [`database.ts`](src/memory/database.ts) | SQLite veritabanı bağlantısı, şema yönetimi (v19), sqlite-vec entegrasyonu |
+| [`database.ts`](src/memory/database.ts) | SQLite veritabanı bağlantısı, şema yönetimi (v24), sqlite-vec entegrasyonu |
 | [`graph.ts`](src/memory/graph.ts) | Bellek grafi yönetimi — entity, ilişki, proximity, Ebbinghaus stability |
 | [`ebbinghaus.ts`](src/memory/ebbinghaus.ts) | Ebbinghaus unutma eğrisi — saf matematik fonksiyonları |
 | [`embeddings.ts`](src/memory/embeddings.ts) | Embedding provider'ları — OpenAI, MiniMax, Voyage, retry mekanizması |
@@ -952,6 +952,84 @@ npm run graphrag:readiness           # GraphRAG hazırlık kontrolü
 npm run graphrag:go-full             # GraphRAG tam aktif moda geçme
 npm run graphrag:emergency-rollback  # Acil geri alma
 npm run graphrag:metrics             # GraphRAG metrikleri
+```
+
+---
+
+### 3.2. Insight Engine (`src/memory/insightEngine/`)
+
+Pattern tespiti, confidence skorlama ve dinamik insight üretimi. Belleklerden ve kullanıcı davranışlarından otomatik pattern çıkarımı yapar.
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`index.ts`](src/memory/insightEngine/index.ts) | InsightEngine facade — observe, process, retrieval, feedback, prune |
+| [`detector.ts`](src/memory/insightEngine/detector.ts) | PatternDetector — observation biriktirme ve pattern tespiti |
+| [`storage.ts`](src/memory/insightEngine/storage.ts) | InsightStorage — SQLite persistence, upsert, status yönetimi |
+| [`retrieval.ts`](src/memory/insightEngine/retrieval.ts) | InsightRetrieval — keyword extraction, relevance skorlama, FTS |
+| [`confidence.ts`](src/memory/insightEngine/confidence.ts) | Confidence hesaplama — frequency, recency, consistency, user affirmation, cross-session |
+| [`types.ts`](src/memory/insightEngine/types.ts) | Tip tanımları — Insight, Observation, DetectedPattern, InsightStatus |
+
+```typescript
+class InsightEngine {
+  observe(obs: Observation): void;
+  processObservations(userId): Promise<Insight[]>;
+  getRelevantInsights(query, minConfidence?): Promise<Insight[]>;
+  getHighConfidenceInsights(threshold?): Promise<Insight[]>;
+  updateInsightStatus(id, status): boolean;
+  applyFeedback(insightId, isPositive): void;
+  prune(): { pruned: number; suppressed: number };
+}
+```
+
+#### Confidence Boyutları
+
+```typescript
+interface ConfidenceDimensions {
+  frequency: number;
+  recency: number;
+  consistency: number;
+  userAffirmation: number;
+  crossSession: number;
+}
+```
+
+---
+
+### 3.3. Memory Wiki / Karpathy LLM Wiki (`src/memory/wiki/`)
+
+Karpathy'nin LLM OS konseptinden esinlenen bellek linting ve contradiction detection altyapısı.
+
+| Dosya | Açıklama |
+|-------|----------|
+| [`contradictionDetector.ts`](src/memory/wiki/contradictionDetector.ts) | Çift fazlı contradiction detection — Phase A (heuristic screening) + Phase B (LLM batch classification) |
+| [`lintPass.ts`](src/memory/wiki/lintPass.ts) | MemoryLintPass — tüm bellek çiftlerini tarama, dry-run/apply modları |
+| [`provenance.ts`](src/memory/wiki/provenance.ts) | Provenance tracking — bellek kaynağı, model, prompt hash |
+| [`types.ts`](src/memory/wiki/types.ts) | Tip tanımları — ContradictionCandidate, LintPassResult |
+| [`export.ts`](src/memory/wiki/export.ts) | Wiki dışa aktarma — bellekleri structured format'ta ihraç |
+
+---
+
+### 3.4. Teleskopik Compaction (`src/memory/telescopicCompactor.ts`)
+
+Çok seviyeli (Level 1→2→3) konuşma özetleme. Uzun konuşmaları hiyerarşik olarak sıkıştırır.
+
+```typescript
+class TelescopicCompactor {
+  async compactIfNeeded(conversationId, llm, threshold?): Promise<CompactResult>;
+  getTelescopicSummaries(conversationId): TelescopicSummary[];
+}
+```
+
+---
+
+### 11. Secret Redactor (`src/utils/secretRedactor.ts`)
+
+LLM yanıtları ve tool çıktılarında hassas bilgi maskeleme.
+
+```typescript
+export function redactSecrets(text: string): string;
+export function redactToolOutput(toolName: string, output: string): string;
+export function countSecretMatches(text: string): number;
 ```
 
 ---

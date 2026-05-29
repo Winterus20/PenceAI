@@ -96,6 +96,12 @@ BRAVE_SEARCH_API_KEY=
 25. **Context Compaction**: Token threshold aşıldığında otomatik bağlam sıkıştırma
 26. **Hook Execution Engine**: Tool call lifecycle'ında security, sanitization, budget guard
 27. **Error Module**: Hiyerarşik error sınıfları (AppError, LLMError, DatabaseError, vb.)
+28. **Insight Engine**: Pattern tespiti, confidence skorlama ve dinamik TTL — belleklerden otomatik insight çıkarımı
+29. **Memory Wiki (Karpathy LLM Wiki)**: Bellek linting, contradiction detection (2 fazlı), provenance tracking
+30. **Telescopic Compaction**: Çok seviyeli (L1→L3) konuşma özetleme — context window optimizasyonu
+31. **Secret Redactor**: LLM yanıt ve tool çıktılarında API key/password maskeleme
+32. **Hook Approval (Human-in-the-Loop)**: Hassas işlemler için kullanıcı onay mekanizması — WebSocket confirm_request/response
+33. **Cron Tools**: Zamanlanmış görev yönetimi — wake_me_in, wake_me_every, DB persist + rehydrate
 
 ### Kritik Import Kuralı
 
@@ -112,7 +118,7 @@ import { MemoryManager } from '../memory/manager';      // ❌ Yanlış
 
 ---
 
-> Bu doküman PenceAI projesinin tamamını anlamak için tek bir referans noktası olarak hazırlanmıştır. Son güncelleme: 25 Nisan 2026.
+> Bu doküman PenceAI projesinin tamamını anlamak için tek bir referans noktası olarak hazırlanmıştır. Son güncelleme: 28 Mayıs 2026.
 
 ---
 [← İçindekilere Dön](./README.md)

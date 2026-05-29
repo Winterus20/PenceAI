@@ -6,7 +6,7 @@ import { Copy, Check, ThumbsUp, ThumbsDown, RefreshCw, SquarePen, BrainCircuit, 
 import type { AttachmentItem, Message, MessageMetrics } from '@/store/agentStore';
 import type { ConversationBranchInfo } from '@/store/types';
 import { cn } from '@/lib/utils';
-import { stripThinkTags, formatTime, stripOuterBackticks } from '@/lib/utils';
+import { stripThinkTags, formatTime, stripOuterBackticks, stripEmptyCodeBlocks } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { MetricsPanel } from './MetricsPanel';
 import { ToolCallIndicator } from './ToolCallIndicator';
@@ -247,7 +247,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
         ) : null}
 
         {/* Tools — compact pill indicators */}
-        {!isUser && !isSystem && msg.toolCalls?.length && showTools ? (
+        {!isUser && !isSystem && msg.toolCalls && msg.toolCalls.length > 0 && showTools ? (
           <ToolCallIndicator toolCalls={msg.toolCalls} />
         ) : null}
 
@@ -265,12 +265,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
             "prose dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-muted/40 prose-pre:border prose-pre:border-border/20 prose-pre:rounded-xl prose-pre:p-4 hover:prose-a:text-foreground",
             isUser ? "prose-p:mb-0 text-left" : "prose-p:mb-4"
           )}>
-            {msg.content ? (
+            {msg.content?.trim() ? (
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
+                  pre({ children }) {
+                    // children bir code elementi içeriyorsa ve boşsa pre'yi render etme
+                    const child = children as React.ReactElement<{ children?: React.ReactNode }> | undefined;
+                    if (child?.props?.children) {
+                      const text = String(child.props.children).trim();
+                      if (!text) return null;
+                    }
+                    return <pre className="not-prose">{children}</pre>;
+                  },
                   code(props: React.ClassAttributes<HTMLElement> & React.HTMLAttributes<HTMLElement> & { inline?: boolean; className?: string }) {
                     const { inline, className, children } = props;
+                    const text = String(children || '').trim();
+                    if (!text) return null;
 
                     if (inline) {
                       return <code className="bg-card/70 px-1.5 py-0.5 text-sm rounded">{children}</code>;
@@ -280,7 +291,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({
                   },
                 }}
               >
-                {stripOuterBackticks(cleanContent)}
+                {stripEmptyCodeBlocks(stripOuterBackticks(cleanContent))}
               </ReactMarkdown>
             ) : (
               <span className="flex items-center gap-2 text-sm italic">

@@ -48,8 +48,8 @@ describe('reconsolidation pilot', () => {
         expect(decision).toMatchObject({
             pilotActive: true,
             eligible: false,
-            action: 'skip',
-            reason: 'episodic_memory_excluded',
+            action: 'insert_new',
+            reason: 'episodic_events_always_preserved',
             safetyReasons: ['memory_type_not_semantic'],
             preferredContent: 'existing',
             candidateContent: null,
@@ -78,8 +78,8 @@ describe('reconsolidation pilot', () => {
         expect(decision).toMatchObject({
             pilotActive: true,
             eligible: false,
-            action: 'skip',
-            reason: 'low_confidence_guard',
+            action: 'insert_new',
+            reason: 'low_confidence_preserve_both',
             safetyReasons: ['confidence_below_floor'],
             preferredContent: 'existing',
             candidateContent: null,
@@ -138,8 +138,8 @@ describe('reconsolidation pilot', () => {
         expect(decision).toMatchObject({
             pilotActive: true,
             eligible: true,
-            action: 'skip',
-            reason: 'conflict_guard_preserve_existing',
+            action: 'insert_new',
+            reason: 'conflict_guard_preserve_both',
             safetyReasons: ['structured_variance_conflict'],
             preferredContent: 'existing',
             candidateContent: null,

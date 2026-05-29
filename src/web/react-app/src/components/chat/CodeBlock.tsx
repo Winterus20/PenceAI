@@ -28,11 +28,15 @@ const customStyle: Record<string, React.CSSProperties> = {
 export const CodeBlock: React.FC<CodeBlockProps> = React.memo(({ children, className }) => {
   const [copied, setCopied] = React.useState(false);
   const codeText = React.useMemo(() => String(children).replace(/\n$/, ''), [children]);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  React.useEffect(() => () => clearTimeout(timerRef.current), []);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(codeText);
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => setCopied(false), 1500);
   };
 
   const language = className?.replace('language-', '') || 'text';

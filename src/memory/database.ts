@@ -24,7 +24,7 @@ export class PenceDatabase {
   private embeddingDimensions: number;
 
   /** En son migration versiyonu. Her yeni migration'da artırın. */
-  private static readonly LATEST_SCHEMA_VERSION = 24;
+  private static readonly LATEST_SCHEMA_VERSION = 25;
 
   constructor(dbPath: string, embeddingDimensions: number = 1536) {
     // data dizinini oluştur
@@ -722,12 +722,44 @@ export class PenceDatabase {
             payload TEXT NOT NULL,
             status TEXT DEFAULT 'pending',
             added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            lease_expires_at DATETIME,
+            retry_count INTEGER DEFAULT 0,
+            max_retries INTEGER DEFAULT 2,
+            lease_token TEXT
           );
+          CREATE INDEX IF NOT EXISTS idx_autonomous_tasks_status_lease ON autonomous_tasks(status, lease_expires_at);
         `);
         logger.info('[Database] ✅ autonomous_tasks tablosu oluşturuldu');
       } catch (err) {
         logger.error({ err: err }, '[Database] ❌ Migration failed (autonomous_tasks):');
+      }
+    }
+
+    // Schema v25: autonomous_tasks lease + retry columns (crash recovery)
+    const autonomousTableExists = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='autonomous_tasks'"
+    ).get();
+    if (autonomousTableExists) {
+      const autoCols = this.db.prepare('PRAGMA table_info(autonomous_tasks)').all() as Array<{ name: string }>;
+      if (!autoCols.some((col) => col.name === 'lease_expires_at')) {
+        logger.info('[Database] 🚀 Migrating v25: autonomous_tasks lease columns');
+        try {
+          this.db.exec(`
+            ALTER TABLE autonomous_tasks ADD COLUMN lease_expires_at DATETIME;
+            ALTER TABLE autonomous_tasks ADD COLUMN retry_count INTEGER DEFAULT 0;
+            ALTER TABLE autonomous_tasks ADD COLUMN max_retries INTEGER DEFAULT 2;
+            ALTER TABLE autonomous_tasks ADD COLUMN lease_token TEXT;
+            CREATE INDEX IF NOT EXISTS idx_autonomous_tasks_status_lease ON autonomous_tasks(status, lease_expires_at);
+          `);
+          this.db.exec(`
+            UPDATE autonomous_tasks SET retry_count = 0 WHERE retry_count IS NULL;
+            UPDATE autonomous_tasks SET max_retries = 2 WHERE max_retries IS NULL;
+          `);
+          logger.info('[Database] ✅ autonomous_tasks lease columns added');
+        } catch (err) {
+          logger.error({ err: err }, '[Database] ❌ Migration failed (autonomous_tasks lease):');
+        }
       }
     }
   
@@ -1139,7 +1171,20 @@ export class PenceDatabase {
       }
       const storedDim = parseInt(stored.value, 10);
       if (storedDim !== this.embeddingDimensions) {
-        logger.warn(`[Database] ⚠️ Embedding boyutu değişti: ${storedDim} → ${this.embeddingDimensions}. Eski embedding'ler siliniyor.`);
+        // Silmeden önce kaç kayıt etkileneceğini logla
+        const memEmbCount = (this.db.prepare("SELECT COUNT(*) as cnt FROM memory_embeddings").get() as { cnt: number }).cnt;
+        const msgEmbCount = (this.db.prepare("SELECT COUNT(*) as cnt FROM message_embeddings").get() as { cnt: number }).cnt;
+        logger.error(`[Database] ⚠️ EMBEDDING BOYUTU DEĞİŞTİ: ${storedDim} → ${this.embeddingDimensions}. ${memEmbCount} bellek + ${msgEmbCount} mesaj embedding'i silinecek. Bu işlem geri alınamaz!`);
+        // Eski embedding'leri yedek tabloya taşı (silmeden önce)
+        try {
+          this.db.exec(`CREATE TABLE IF NOT EXISTS memory_embeddings_backup AS SELECT * FROM memory_embeddings WHERE 0`);
+          this.db.exec(`CREATE TABLE IF NOT EXISTS message_embeddings_backup AS SELECT * FROM message_embeddings WHERE 0`);
+          this.db.exec(`INSERT INTO memory_embeddings_backup SELECT * FROM memory_embeddings`);
+          this.db.exec(`INSERT INTO message_embeddings_backup SELECT * FROM message_embeddings`);
+          logger.info(`[Database] Eski embedding'ler *_backup tablolarına yedeklendi.`);
+        } catch (backupErr) {
+          logger.warn({ err: backupErr }, '[Database] Embedding yedekleme başarısız (devam ediliyor):');
+        }
         this.db.prepare("DELETE FROM memory_embeddings").run();
         this.db.prepare("DELETE FROM message_embeddings").run();
         this.db.prepare("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'embedding_dimensions'").run(String(this.embeddingDimensions));

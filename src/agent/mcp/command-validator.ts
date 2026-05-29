@@ -6,6 +6,9 @@
  * komut allowlist'ini ve güvenlik kurallarını tanımlar.
  */
 import { z } from 'zod';
+import { DANGEROUS_COMMAND_PATTERNS } from '../securityPatterns.js';
+
+export { DANGEROUS_COMMAND_PATTERNS } from '../securityPatterns.js';
 
 // ============================================================
 // Merkezi Allowlist — Tüm MCP dosyaları bu listeden okur
@@ -29,34 +32,6 @@ export const STDIO_RUNTIMES = [
   'bun',
   'tsx',
 ] as const;
-
-/**
- * Tehlikeli komut pattern'leri — asla izin verilmez.
- * isCommandSafe() fonksiyonu tarafından kullanılır.
- */
-export const DANGEROUS_COMMAND_PATTERNS: RegExp[] = [
-  /rm\s+(-rf?|--recursive)/i,
-  /rm\s+-rf\s+\//i,
-  /del\s+\/f/i,
-  /format/i,
-  /mkfs/i,
-  /dd\s+if=/i,
-  /chmod\s+-r/i,
-  /chmod\s+-R\s+777\s+\//i,
-  /chown\s+-r/i,
-  /shutdown/i,
-  /reboot/i,
-  /init\s+[06]/i,
-  /:\(\)\s*\{/, // fork bomb
-  /eval\s+/i,
-  /\$\(/, // command substitution
-  /`/, // backtick
-  /curl\s+.*\|\s*(sh|bash|cmd|powershell|pwsh|zsh)/i,
-  /wget\s+.*\|\s*(sh|bash|cmd|powershell|pwsh|zsh)/i,
-  /chattr/i,
-  /iptables/i,
-  /fdisk/i,
-];
 
 // ============================================================
 // Zod Schemas
@@ -109,13 +84,12 @@ export function isCommandSafe(command: string): boolean {
 /**
  * Komutun bir stdio process olup olmadığını kontrol eder.
  * STDIO_RUNTIMES listesini kullanır.
+ * NOT: .js/.ts/.py uzantılı dosyalar command olarak verilemez;
+ * bunlar node/python aracılığıyla çalıştırılmalıdır.
  */
 export function isStdioRuntime(command: string): boolean {
   const baseCommand = command.split(/[\\/]/).pop()?.toLowerCase() ?? '';
-  return (STDIO_RUNTIMES as readonly string[]).includes(baseCommand)
-    || baseCommand.endsWith('.js')
-    || baseCommand.endsWith('.ts')
-    || baseCommand.endsWith('.py');
+  return (STDIO_RUNTIMES as readonly string[]).includes(baseCommand);
 }
 
 /**
@@ -135,9 +109,16 @@ export function sanitizeRegistryUrl(url: unknown): string {
     throw new Error(`URL shell meta karakterleri içeriyor: ${validated}`);
   }
   // URL-encoded shell chars kontrolü
-  const decoded = decodeURIComponent(validated);
-  if (/[;&$`|\\<>]/.test(decoded)) {
-    throw new Error(`URL encoded shell meta karakterleri içeriyor: ${validated}`);
+  try {
+    const decoded = decodeURIComponent(validated);
+    if (/[;&$`|\\<>]/.test(decoded)) {
+      throw new Error(`URL encoded shell meta karakterleri içeriyor: ${validated}`);
+    }
+  } catch (decodeErr) {
+    if (decodeErr instanceof URIError) {
+      throw new Error(`Geçersiz URL encoding: ${validated}`);
+    }
+    throw decodeErr;
   }
   return validated;
 }

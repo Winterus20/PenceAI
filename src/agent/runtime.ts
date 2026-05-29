@@ -75,6 +75,18 @@ constructor(llm: LLMProvider, memory: MemoryManager) {
      * GraphRAG motorunu dış bağımlılıklarla bağlar.
      * MemoryManager üzerinden erişilebilir bileşenlerle çağrılmalıdır.
      */
+    /**
+     * LLM Provider'ı runtime sırasında değiştir (hot-reload).
+     * Yeniden başlatma gerektirmeden model/provider güncellemesi yapar.
+     */
+    setLLM(llm: LLMProvider): void {
+        this.llm = llm;
+        // CompactEngine ve MemoryExtractor da LLM'e bağımlı — yeniden oluştur
+        this.compactEngine = new CompactEngine(this.llm);
+        this.memoryExtractor = new MemoryExtractor(this.llm, this.memory);
+        logger.info(`[Agent] LLM Provider hot-reloaded: ${llm.name} (model: ${llm.defaultModel})`);
+    }
+
     setGraphRAGComponents(engine: GraphRAGEngine): void {
         this.graphRAGManager.setEngine(engine);
         this.memory.setGraphRAGEngine(engine);

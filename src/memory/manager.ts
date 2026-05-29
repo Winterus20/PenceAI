@@ -19,7 +19,7 @@
  */
 
 // Ana sınıf
-export { MemoryManager, default as MemoryManagerDefault } from './manager/index.js';
+export { MemoryManager } from './manager/index.js';
 
 // Tip exports
 export type {

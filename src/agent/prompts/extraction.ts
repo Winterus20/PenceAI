@@ -12,14 +12,14 @@ import {
 export function buildLightExtractionPrompt(userName: string = 'Kullanıcı'): string {
     return `Aşağıdaki kullanıcı-asistan mesaj çiftini analiz et. SADECE kalıcı ve uzun vadeli bilgileri çıkar.
 
-## KAYDET — Sadece Bunları Çıkar
-- Kişisel kimlik bilgileri (isim, yaş, meslek, konum)
-- Kalıcı tercihler ve zevkler (yemek, müzik, teknoloji, dil, hobi)
-- Uzun vadeli projeler ve hedefler
-- Aile üyeleri, evcil hayvanlar, önemli ilişkiler (isim ve bağlam)
-- Teknik beceriler ve düzenli kullandığı teknolojiler
-- Kronik alışkanlıklar ve rutinler (çalışma saatleri vb.)
-- Hayat değiştiren olaylar (iş değişikliği, taşınma, mezuniyet)
+## KAYDET — Sadece Bunları Çıkar (SADECE KULLANICI HAKKINDA)
+- Kullanıcının KENDİ kişisel kimlik bilgileri (isim, yaş, meslek, konum)
+- Kullanıcının KENDİ kalıcı tercihleri ve zevkleri (yemek, müzik, teknoloji, dil, hobi)
+- Kullanıcının KENDİ uzun vadeli projeleri ve hedefleri
+- Kullanıcının KENDİ aile üyeleri, evcil hayvanları, önemli ilişkileri (isim ve bağlam)
+- Kullanıcının KENDİ teknik becerileri ve düzenli kullandığı teknolojiler
+- Kullanıcının KENDİ kronik alışkanlıkları ve rutinleri (çalışma saatleri vb.)
+- Kullanıcının KENDİ hayat değiştiren olayları (iş değişikliği, taşınma, mezuniyet)
 
 ## KAYDETME — Bunları Asla Çıkarma
 - Anlık duygular veya geçici durumlar ("bugün yorgunum", "canım sıkıldı")
@@ -30,6 +30,7 @@ export function buildLightExtractionPrompt(userName: string = 'Kullanıcı'): st
 - Teknik hata mesajları veya geçici debugging bilgileri
 - Anlık planlar ("yarın şunu yapacağım" gibi kısa vadeli)
 - Sadece "isim" beyanları (kullanıcının adı haricinde, bağlamsız özel isimler)
+- BAŞKALARI hakkında konuşulan bilgiler: "Arkadaşım X'i seviyor", "Discord'daki Y gotik tarz sever", "Kardeşim Z'yi beğeniyor" — bunlar kullanıcı hakkında değil, KAYDETME
 
 ${EXTRACTION_CATEGORIES}
 
@@ -45,7 +46,7 @@ ${EXTRACTION_EXAMPLES}
 - Her bilgiyi ÖZLÜ ve TEK bir cümle olarak yaz.
 - Bilgi kimin hakkındaysa, cümle o isimle başlayabilir VEYA gizli özne olabilir, ancak doğal bir dil kullan. ("Piyano çalmayı sever", "Yiğit Emre, Ayşegül ile tanıştı" gibi doğal ifadeler bırak)
 ZORUNLU KURAL: Yanıtın KESİNLİKLE geçerli bir raw JSON dizisi olmalıdır. Kod bloğu (\`\`\`json) KULLANMA. Açıklama metni, selamlama veya başka bir metin EKLEME. Doğrudan [ ile başla.
-Aşağıdaki formata uyormal)
+Aşağıdaki formata uy.
 - Direkt bilgiyi yaz, gereksiz betimleme yapma
 - DİKKAT: Bilgileri mutlaka diyaloğun konuşulduğu dilde (orijinal dilde) çıkar.
 
@@ -58,15 +59,15 @@ ${EXTRACTION_RESPONSE_FORMAT}`;
 export function buildDeepExtractionPrompt(userName: string = 'Kullanıcı'): string {
     return `Aşağıdaki konuşmanın tamamını analiz et. SADECE kullanıcı hakkında kalıcı ve uzun vadeli bilgileri çıkar.
 
-## KAYDET — Sadece Bunları Çıkar
-- Kişisel kimlik bilgileri (isim, yaş, meslek, konum)
-- Kalıcı tercihler ve zevkler
-- Uzun vadeli projeler, hedefler ve iş bilgileri
-- Aile üyeleri, evcil hayvanlar, önemli ilişkiler
-- Teknik beceriler ve ilgi alanları
-- Kronik alışkanlıklar ve rutinler
-- İletişim tercihleri
-- Hayat değiştiren olaylar (iş değişikliği, taşınma, mezuniyet, evlilik)
+## KAYDET — Sadece Bunları Çıkar (SADECE KULLANICI HAKKINDA)
+- Kullanıcının KENDİ kişisel kimlik bilgileri (isim, yaş, meslek, konum)
+- Kullanıcının KENDİ kalıcı tercihleri ve zevkleri
+- Kullanıcının KENDİ uzun vadeli projeleri, hedefleri ve iş bilgileri
+- Kullanıcının KENDİ aile üyeleri, evcil hayvanları, önemli ilişkileri
+- Kullanıcının KENDİ teknik becerileri ve ilgi alanları
+- Kullanıcının KENDİ kronik alışkanlıkları ve rutinleri
+- Kullanıcının KENDİ iletişim tercihleri
+- Kullanıcının KENDİ hayat değiştiren olayları (iş değişikliği, taşınma, mezuniyet, evlilik)
 
 ## KAYDETME — Bunları Asla Çıkarma
 - Konuşma akışı veya ne hakkında konuşulduğu
@@ -78,6 +79,7 @@ export function buildDeepExtractionPrompt(userName: string = 'Kullanıcı'): str
 - Asistanın verdiği yanıtlar veya öneriler
 - Kısa vadeli planlar (örn. yarınki toplantı)
 - Bağlamı olmayan tek kelimelik isimler
+- BAŞKALARI hakkında konuşulan bilgiler: "Arkadaşım X'i seviyor", "Discord'daki Y gotik tarz sever", "Kardeşim Z'yi beğeniyor" — bunlar kullanıcı hakkında değil, KAYDETME
 
 ${EXTRACTION_CATEGORIES}
 

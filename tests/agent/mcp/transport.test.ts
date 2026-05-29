@@ -1,133 +1,127 @@
 /**
  * Transport Security Tests
- * 
- * Tests for sanitizeProcessEnv and env validation in transport.ts
+ *
+ * MCP default-deny env allowlist and config env validation
  */
 
-// We need to test the internal functions, so we'll test via the exported behavior
-// Since sanitizeProcessEnv is not exported, we test the overall behavior
+import { describe, test, expect, beforeEach, afterAll } from '@jest/globals';
+import {
+  createTransport,
+  sanitizeMcpChildProcessEnv,
+  validateMcpServerConfigEnv,
+} from '../../../src/agent/mcp/transport.js';
+import { reloadConfig } from '../../../src/gateway/config.js';
 
 describe('Transport Security', () => {
-  const originalEnv = process.env;
+  const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    // Reset process.env for each test
-    process.env = { ...originalEnv };
+    process.env = { ...originalEnv, NODE_ENV: 'test' };
+    delete process.env.MCP_ALLOWED_ENV_VARS;
+    reloadConfig();
   });
 
   afterAll(() => {
-    // Restore original env
     process.env = originalEnv;
+    reloadConfig();
   });
 
-  describe('Environment Variable Sanitization', () => {
-    test('sensitive API keys should not be passed to child process', () => {
-      // Set up sensitive env vars
+  describe('MCP child process env allowlist (default-deny via mcpAllowedEnvVars)', () => {
+    test('only allowlisted vars are passed to child process', () => {
       process.env.OPENAI_API_KEY = 'sk-test123';
-      process.env.ANTHROPIC_API_KEY = 'sk-ant-test123';
-      process.env.GROQ_API_KEY = 'gsk-test123';
-      process.env.SAFE_VAR = 'safe-value';
-      
-      // The sanitizeProcessEnv function should filter out sensitive vars
-      // We verify this by checking that the transport module properly handles env
-      expect(process.env.OPENAI_API_KEY).toBe('sk-test123');
-      expect(process.env.SAFE_VAR).toBe('safe-value');
-    });
-
-    test('MCP_SERVERS should be blocked from child process', () => {
-      process.env.MCP_SERVERS = JSON.stringify([{ name: 'test' }]);
+      process.env.CUSTOM_APP_FLAG = 'enabled';
       process.env.PATH = '/usr/bin';
-      
-      expect(process.env.MCP_SERVERS).toBeDefined();
-      expect(process.env.PATH).toBe('/usr/bin');
-    });
-
-    test('tokens should be blocked from child process', () => {
-      process.env.GITHUB_TOKEN = 'ghp_test123';
-      process.env.ACCESS_TOKEN = 'access_test123';
-      process.env.REFRESH_TOKEN = 'refresh_test123';
       process.env.HOME = '/home/user';
-      
-      expect(process.env.GITHUB_TOKEN).toBeDefined();
-      expect(process.env.HOME).toBe('/home/user');
-    });
-
-    test('database URLs should be blocked from child process', () => {
-      process.env.DATABASE_URL = 'postgresql://localhost/test';
-      process.env.REDIS_URL = 'redis://localhost:6379';
-      process.env.NODE_ENV = 'test';
-      
-      expect(process.env.DATABASE_URL).toBeDefined();
-      expect(process.env.NODE_ENV).toBe('test');
-    });
-
-    test('passwords should be blocked from child process', () => {
-      process.env.DB_PASSWORD = 'secret123';
-      process.env.PWD = '/some/path';
-      process.env.USER = 'testuser';
-      
-      expect(process.env.DB_PASSWORD).toBeDefined();
-      expect(process.env.USER).toBe('testuser');
-    });
-
-    test('AWS credentials should be blocked from child process', () => {
-      process.env.AWS_SECRET_ACCESS_KEY = 'wJalrXUtnFEMI';
-      process.env.AWS_ACCESS_KEY_ID = 'AKIAIOSFODNN7';
       process.env.LANG = 'en_US.UTF-8';
-      
-      expect(process.env.AWS_SECRET_ACCESS_KEY).toBeDefined();
-      expect(process.env.LANG).toBe('en_US.UTF-8');
+
+      const sanitized = sanitizeMcpChildProcessEnv();
+
+      expect(sanitized.PATH).toBe('/usr/bin');
+      expect(sanitized.HOME).toBe('/home/user');
+      expect(sanitized.LANG).toBe('en_US.UTF-8');
+      expect(sanitized.OPENAI_API_KEY).toBeUndefined();
+      expect(sanitized.CUSTOM_APP_FLAG).toBeUndefined();
     });
 
-    test('private keys should be blocked from child process', () => {
-      process.env.PRIVATE_KEY = '-----BEGIN RSA PRIVATE KEY-----';
-      process.env.TERM = 'xterm-256color';
-      
-      expect(process.env.PRIVATE_KEY).toBeDefined();
-      expect(process.env.TERM).toBe('xterm-256color');
+    test('MCP_SERVERS and API keys are blocked from child process', () => {
+      process.env.MCP_SERVERS = JSON.stringify([{ name: 'test' }]);
+      process.env.GITHUB_TOKEN = 'ghp_test123';
+      process.env.PATH = '/usr/bin';
+
+      const sanitized = sanitizeMcpChildProcessEnv();
+
+      expect(sanitized.MCP_SERVERS).toBeUndefined();
+      expect(sanitized.GITHUB_TOKEN).toBeUndefined();
+      expect(sanitized.PATH).toBe('/usr/bin');
     });
 
-    test('credentials should be blocked from child process', () => {
-      process.env.CREDENTIAL = 'cred_value';
-      process.env.CRED = 'another_cred';
-      process.env.TMPDIR = '/tmp';
-      
-      expect(process.env.CREDENTIAL).toBeDefined();
-      expect(process.env.TMPDIR).toBe('/tmp');
+    test('Windows allowlist vars are included when set', () => {
+      process.env.USERPROFILE = 'C:\\Users\\test';
+      process.env.APPDATA = 'C:\\Users\\test\\AppData';
+      process.env.TEMP = 'C:\\Temp';
+      process.env.SYSTEMROOT = 'C:\\Windows';
+      process.env.COMSPEC = 'cmd.exe';
+      process.env.PATHEXT = '.EXE;.CMD';
+      process.env.OPENAI_API_KEY = 'sk-secret';
+
+      const sanitized = sanitizeMcpChildProcessEnv();
+
+      expect(sanitized.USERPROFILE).toBe('C:\\Users\\test');
+      expect(sanitized.APPDATA).toBe('C:\\Users\\test\\AppData');
+      expect(sanitized.TEMP).toBe('C:\\Temp');
+      expect(sanitized.SYSTEMROOT).toBe('C:\\Windows');
+      expect(sanitized.COMSPEC).toBe('cmd.exe');
+      expect(sanitized.PATHEXT).toBe('.EXE;.CMD');
+      expect(sanitized.OPENAI_API_KEY).toBeUndefined();
+    });
+
+    test('respects MCP_ALLOWED_ENV_VARS override', () => {
+      process.env.MCP_ALLOWED_ENV_VARS = 'CUSTOM_APP_FLAG,PATH';
+      reloadConfig();
+      process.env.CUSTOM_APP_FLAG = 'enabled';
+      process.env.HOME = '/home/user';
+
+      const sanitized = sanitizeMcpChildProcessEnv();
+
+      expect(sanitized.CUSTOM_APP_FLAG).toBe('enabled');
+      expect(sanitized.HOME).toBeUndefined();
     });
   });
 
-  describe('Config Env Validation', () => {
-    test('shell meta characters should be rejected in env values', () => {
+  describe('MCP config env validation (validateMcpServerConfigEnv)', () => {
+    test('rejects shell meta characters in env values', () => {
       const shellChars = [';', '|', '&', '$', '`', '\\'];
-      
+
       for (const char of shellChars) {
-        const value = `test${char}value`;
-        // The validation should reject these
-        expect(/[;|&$`\\]/.test(value)).toBe(true);
+        expect(() => validateMcpServerConfigEnv({ CUSTOM: `test${char}value` })).toThrow();
       }
     });
 
-    test('safe env values should pass validation', () => {
-      const safeValues = [
-        'simple-value',
-        'value_with_underscores',
-        'value.with.dots',
-        'value:with:colons',
-        '/path/to/something',
-        'value=with=equals',
-      ];
-      
-      for (const value of safeValues) {
-        expect(/[;|&$`\\]/.test(value)).toBe(false);
-      }
+    test('accepts safe env values', () => {
+      expect(() => validateMcpServerConfigEnv({
+        FOO: 'simple-value',
+        BAR: '/path/to/something',
+      })).not.toThrow();
     });
 
-    test('env value length should be limited', () => {
-      const maxLength = 10000;
-      const longValue = 'a'.repeat(maxLength + 1);
-      
-      expect(longValue.length).toBeGreaterThan(maxLength);
+    test('blocks critical system env keys like PATH and HOME', () => {
+      expect(() => validateMcpServerConfigEnv({ PATH: '/usr/bin' })).toThrow('blocked');
+      expect(() => validateMcpServerConfigEnv({ HOME: '/home/user' })).toThrow('blocked');
+    });
+
+    test('rejects env values exceeding max length', () => {
+      const longValue = 'a'.repeat(10001);
+      expect(() => validateMcpServerConfigEnv({ LONG: longValue })).toThrow();
+    });
+  });
+
+  describe('command allowlist (createTransport)', () => {
+    test('rejects commands outside stdio allowlist', async () => {
+      await expect(createTransport({
+        name: 'bad-server',
+        command: 'bash',
+        args: ['-c', 'echo hi'],
+      })).rejects.toThrow('Tanınmayan komut');
     });
   });
 });

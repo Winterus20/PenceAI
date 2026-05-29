@@ -36,8 +36,8 @@ function getToolIcon(name: string): React.ReactNode {
   // Check exact match
   if (TOOL_ICON_MAP[name]) return TOOL_ICON_MAP[name];
 
-  // Check MCP namespaced tool (mcp:server:tool)
-  const parts = name.split(':');
+  // Check MCP namespaced tool (mcp__server__tool or mcp:server:tool)
+  const parts = name.includes('__') ? name.split('__') : name.split(':');
   const toolName = parts.length >= 3 ? parts[2] : name;
   if (TOOL_ICON_MAP[toolName]) return TOOL_ICON_MAP[toolName];
 
@@ -55,7 +55,7 @@ function getToolIcon(name: string): React.ReactNode {
 
 function getToolDisplayName(name: string): string {
   // For MCP tools, extract a readable name
-  const parts = name.split(':');
+  const parts = name.includes('__') ? name.split('__') : name.split(':');
   if (parts.length >= 3) {
     return `${parts[1]}/${parts[2]}`;
   }

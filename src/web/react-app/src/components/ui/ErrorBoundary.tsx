@@ -4,12 +4,22 @@ import { Button } from './button';
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  onReset?: () => void;
 }
 
 interface State {
   hasError: boolean;
   error: Error | null;
   errorInfo: ErrorInfo | null;
+}
+
+function isChunkLoadError(error: Error | null): boolean {
+  if (!error) return false;
+  if (error.name === 'ChunkLoadError') return true;
+  const message = error.message.toLowerCase();
+  return message.includes('loading chunk')
+    || message.includes('failed to fetch dynamically imported module')
+    || message.includes('dynamically imported module');
 }
 
 /**
@@ -32,7 +42,6 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     this.setState({ errorInfo });
-    // Hata loglama - production'da bir hata izleme servisine gönderilebilir
     console.error('[ErrorBoundary] Yakalanan hata:', error);
     console.error('[ErrorBoundary] Bileşen yığını:', errorInfo.componentStack);
   }
@@ -43,6 +52,7 @@ export class ErrorBoundary extends Component<Props, State> {
       error: null,
       errorInfo: null,
     });
+    this.props.onReset?.();
   };
 
   render() {
@@ -51,15 +61,19 @@ export class ErrorBoundary extends Component<Props, State> {
         return this.props.fallback;
       }
 
+      const chunkLoadError = isChunkLoadError(this.state.error);
+
       return (
-        <div className="flex flex-col items-center justify-center min-h-screen p-8 bg-background text-foreground">
+        <div className="flex flex-col items-center justify-center min-h-[50vh] p-8 bg-background text-foreground">
           <div className="max-w-md w-full space-y-6 text-center">
             <div className="space-y-2">
               <h1 className="text-2xl font-bold text-destructive">
-                Bir şeyler yanlış gitti
+                {chunkLoadError ? 'Sayfa modülü yüklenemedi' : 'Bir şeyler yanlış gitti'}
               </h1>
               <p className="text-muted-foreground">
-                Beklenmeyen bir hata oluştu. Lütfen sayfayı yenilemeyi deneyin.
+                {chunkLoadError
+                  ? 'Uygulama güncellenmiş olabilir. Sayfayı yenileyerek devam edebilirsiniz.'
+                  : 'Beklenmeyen bir hata oluştu. Lütfen sayfayı yenilemeyi deneyin.'}
               </p>
             </div>
 
@@ -70,14 +84,16 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             <div className="flex gap-3 justify-center">
-              <Button onClick={this.handleReset} variant="default">
-                Tekrar Dene
-              </Button>
+              {!chunkLoadError && (
+                <Button onClick={this.handleReset} variant="default">
+                  Yeniden dene
+                </Button>
+              )}
               <Button
                 onClick={() => window.location.reload()}
-                variant="outline"
+                variant={chunkLoadError ? 'default' : 'outline'}
               >
-                Sayfayı Yenile
+                Sayfayı yenile
               </Button>
             </div>
           </div>

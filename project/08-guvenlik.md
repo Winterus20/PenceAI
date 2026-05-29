@@ -40,7 +40,16 @@ const ALLOWED_COMMANDS = ['npx', 'node', 'python', 'python3', 'curl'];
 - Basic HTTP Authentication
 - WebSocket protocol-based auth (`auth-{password}`)
 - Health endpoint muafiyeti
-- Geliştirme modunda localhost bağlantıları için auth bypass (Vite proxy desteği)
+- **Production (`NODE_ENV=production`):** `DASHBOARD_PASSWORD` zorunlu (min. 12 karakter); eksikse uygulama başlamaz
+- **Development/test:** Parola tanımlı değilse auth devre dışı (localhost-only varsayılan `HOST=127.0.0.1`)
+- Geliştirme modunda localhost WebSocket bypass: `ALLOW_LOCALHOST_WS_BYPASS` (varsayılan: dev=true, prod=false)
+
+### Otonom Görev Onayı (Cron / Wake)
+
+- Zamanlanmış görevlerde tool onayı **whitelist** ile sınırlıdır
+- Varsayılan auto-approve: `readFile`, `listDirectory`, `searchFiles`, `searchMemory`, `searchConversation`, `webSearch`, `list_timers`
+- `writeFile`, `executeShell`, MCP araçları ve whitelist dışı tüm tool'lar reddedilir
+- Özelleştirme: `AUTONOMOUS_AUTO_APPROVE_TOOLS` (virgülle ayrılmış)
 
 ### Shell Execution
 

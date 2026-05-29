@@ -11,6 +11,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { z } from 'zod';
 import type { MCPServerConfig, MCPEvent, MCPEventCallback } from './types.js';
 import { isStdioRuntime } from './command-validator.js';
+import { getConfig } from '../../gateway/config.js';
 import { logger } from '../../utils/logger.js';
 
 // ============================================================
@@ -51,66 +52,20 @@ export async function createTransport(
 }
 
 /**
- * Child process'e aktarılmaması gereken environment variable pattern'leri
- */
-const SENSITIVE_ENV_PATTERNS = [
-  'API_KEY', 'APIKEY', 'API_SECRET', 'SECRET_KEY',
-  'TOKEN', 'ACCESS_TOKEN', 'REFRESH_TOKEN', 'AUTH_TOKEN', 'BEARER',
-  'PASSWORD', 'PASSWD', 'PWD',
-  'DATABASE_URL', 'DB_URL', 'MONGO_URI', 'REDIS_URL', 'CONNECTION_STRING',
-  'AWS_SECRET', 'AWS_ACCESS_KEY', 'AZURE_CLIENT_SECRET', 'GCP_SERVICE_ACCOUNT',
-  'PRIVATE_KEY', 'SSH_KEY',
-  'MCP_SERVERS',
-  'CREDENTIAL', 'CRED',
-];
-
-/**
- * Child process'e aktarılması GÜVENLİ olan environment variable prefix'leri
- */
-const SAFE_ENV_PREFIXES = [
-  'NODE_',
-  'HOME',
-  'LANG',
-  'LC_',
-  'TERM',
-  'TMPDIR',
-  'TEMP',
-  'TMP',
-  'XDG_',
-  'DISPLAY',
-  'WAYLAND_DISPLAY',
-  'COLORTERM',
-  'EDITOR',
-  'PAGER',
-];
-
-/**
- * Process env'i sanitize eder — sadece güvenli değişkenleri döndürür
+ * Process env'i default-deny allowlist ile sanitize eder — yalnızca config'teki
+ * mcpAllowedEnvVars anahtarları child process'e aktarılır.
  */
 function sanitizeProcessEnv(): Record<string, string> {
+  const allowed = new Set(getConfig().mcpAllowedEnvVars.map((v) => v.toUpperCase()));
   const safeEnv: Record<string, string> = {};
-  
+
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
-    
-    const isSafePrefix = SAFE_ENV_PREFIXES.some(
-      prefix => key === prefix || key.startsWith(prefix)
-    );
-    
-    if (isSafePrefix) {
-      safeEnv[key] = value;
-      continue;
-    }
-    
-    const isSensitive = SENSITIVE_ENV_PATTERNS.some(
-      pattern => key.toUpperCase().includes(pattern)
-    );
-    
-    if (!isSensitive) {
+    if (allowed.has(key.toUpperCase())) {
       safeEnv[key] = value;
     }
   }
-  
+
   return safeEnv;
 }
 
@@ -322,4 +277,14 @@ export async function disconnectClient(
   } catch (error) {
     logger.warn({ error, serverName }, `[MCP:transport] Error closing transport from ${serverName}:`);
   }
+}
+
+/** Unit test helper — MCP child process env sanitization */
+export function sanitizeMcpChildProcessEnv(): Record<string, string> {
+  return sanitizeProcessEnv();
+}
+
+/** Unit test helper — MCP server config env validation */
+export function validateMcpServerConfigEnv(env: Record<string, string>): void {
+  validateConfigEnv(env);
 }

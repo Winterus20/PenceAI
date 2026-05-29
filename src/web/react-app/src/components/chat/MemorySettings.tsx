@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { fieldClassName } from '@/styles/dialog';
 
 const sectionClassName = 'section-surface rounded-xl border-border';
-const labelClassName = 'space-y-2 text-sm text-surface-strong';
+const labelClassName = 'space-y-2 text-sm text-foreground';
 
 const SettingsSection = ({ title, description, icon, children }: { title: string; description: string; icon: React.ReactNode; children: React.ReactNode }) => (
   <section className={sectionClassName}>
@@ -13,8 +13,8 @@ const SettingsSection = ({ title, description, icon, children }: { title: string
         {icon}
       </div>
       <div className="space-y-1.5">
-        <div className="text-sm font-medium tracking-[-0.01em] text-surface-emphasis">{title}</div>
-        <p className="max-w-2xl text-sm leading-6 text-surface-strong">{description}</p>
+        <div className="text-sm font-medium tracking-[-0.01em] text-foreground">{title}</div>
+        <p className="max-w-2xl text-sm leading-6 text-foreground">{description}</p>
       </div>
     </div>
     <div className="space-y-4 border-t border-border/30 px-5 py-5 sm:px-6">{children}</div>

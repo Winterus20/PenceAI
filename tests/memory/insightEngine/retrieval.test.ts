@@ -79,4 +79,10 @@ describe('InsightRetrieval', () => {
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results.every(r => r.insight.confidence >= 0.8)).toBe(true);
   });
+
+  it('should handle FTS special characters in query without throwing', async () => {
+    storage.upsertInsight(createPattern('C++ programlama tercihi'), 'default');
+    const results = await retrieval.getRelevantInsights('C++ (test) "quote"', 0.1, 5);
+    expect(Array.isArray(results)).toBe(true);
+  });
 });

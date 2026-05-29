@@ -32,6 +32,8 @@ export interface Attachment {
 export interface MessageResponse {
     content: string;
     attachments?: Attachment[];
+    /** Yanıt verilecek kaynak mesaj ID'si (Discord reply vb.) */
+    replyToId?: string;
     metadata?: Record<string, unknown>;
 }
 

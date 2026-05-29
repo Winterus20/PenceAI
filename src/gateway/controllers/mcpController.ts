@@ -1,6 +1,7 @@
-import type { Router } from 'express';
+import type { Router, NextFunction } from 'express';
 import express from 'express';
 import { logger } from '../../utils/logger.js';
+import { AppError } from '../../errors/AppError.js';
 import { MCPServerConfigSchema } from '../../agent/mcp/types.js';
 import {
   getMarketplace,
@@ -13,23 +14,27 @@ import {
   getServerStatus,
 } from '../services/mcpService.js';
 
+function forwardError(error: unknown, next: NextFunction): void {
+  next(error instanceof Error ? error : new AppError(String(error), 500));
+}
+
 export function createMCPController(): Router {
   const router = express.Router();
 
   // GET /api/mcp/marketplace — Marketplace catalog'unu getir
-  router.get('/marketplace', async (req, res) => {
+  router.get('/marketplace', async (req, res, next) => {
     try {
       const { query } = req.query;
       const catalog = await getMarketplace(query as string);
       res.json({ success: true, catalog });
     } catch (err) {
       logger.error({ err }, '[MCP:routes] Failed to fetch marketplace');
-      res.status(500).json({ success: false, error: 'Failed to fetch marketplace' });
+      forwardError(err, next);
     }
   });
 
   // GET /api/mcp/servers — Kurulu server'ları getir
-  router.get('/servers', (req, res) => {
+  router.get('/servers', (req, res, next) => {
     try {
       const servers = getInstalledServers();
       const summary = {
@@ -41,12 +46,12 @@ export function createMCPController(): Router {
       res.json({ success: true, servers, summary });
     } catch (error) {
       logger.error({ error }, '[MCP:routes] Failed to fetch servers');
-      res.status(500).json({ success: false, error: 'Failed to fetch servers' });
+      forwardError(error, next);
     }
   });
 
   // POST /api/mcp/servers — Yeni server kur
-  router.post('/servers', async (req, res) => {
+  router.post('/servers', async (req, res, next) => {
     try {
       const { name, description, command, args, env, cwd, timeout } = req.body;
       if (!name || !command) {
@@ -84,56 +89,58 @@ export function createMCPController(): Router {
       }
     } catch (error) {
       logger.error({ error }, '[MCP:routes] Failed to install server');
-      return res.status(500).json({ success: false, error: 'Failed to install server' });
+      forwardError(error, next);
+      return;
     }
   });
 
   // PATCH /api/mcp/servers/:name/toggle — Server'ı aktif/pasif et
-  router.patch('/servers/:name/toggle', async (req, res) => {
+  router.patch('/servers/:name/toggle', async (req, res, next) => {
     try {
       const { name } = req.params;
       const { action } = req.body;
       if (action === 'enable') {
         const result = await activateServer(name);
-        res.json(result);
+        return res.json(result);
       } else if (action === 'disable') {
         const result = await deactivateServer(name);
-        res.json(result);
+        return res.json(result);
       } else {
-        res.status(400).json({ success: false, error: 'action must be enable or disable' });
+        return res.status(400).json({ success: false, error: 'action must be enable or disable' });
       }
     } catch (error) {
       logger.error({ error }, '[MCP:routes] Failed to toggle server');
-      res.status(500).json({ success: false, error: 'Failed to toggle server' });
+      forwardError(error, next);
+      return;
     }
   });
 
   // DELETE /api/mcp/servers/:name — Server'ı kaldır
-  router.delete('/servers/:name', async (req, res) => {
+  router.delete('/servers/:name', async (req, res, next) => {
     try {
       const { name } = req.params;
       const result = await uninstallServer(name);
       res.json(result);
     } catch (error) {
       logger.error({ error }, '[MCP:routes] Failed to uninstall server');
-      res.status(500).json({ success: false, error: 'Failed to uninstall server' });
+      forwardError(error, next);
     }
   });
 
   // GET /api/mcp/servers/:name/tools — Server'ın araçlarını getir
-  router.get('/servers/:name/tools', (req, res) => {
+  router.get('/servers/:name/tools', (req, res, next) => {
     try {
       const { name } = req.params;
       const tools = getServerTools(name);
       res.json({ success: true, tools });
     } catch (error) {
       logger.error({ error }, '[MCP:routes] Failed to fetch tools');
-      res.status(500).json({ success: false, error: 'Failed to fetch tools' });
+      forwardError(error, next);
     }
   });
 
   // GET /api/mcp/servers/:name/status — Server durumunu getir
-  router.get('/servers/:name/status', (req, res) => {
+  router.get('/servers/:name/status', (req, res, next) => {
     try {
       const { name } = req.params;
       const server = getServerStatus(name);
@@ -144,7 +151,7 @@ export function createMCPController(): Router {
       }
     } catch (error) {
       logger.error({ error }, '[MCP:routes] Failed to fetch status');
-      res.status(500).json({ success: false, error: 'Failed to fetch status' });
+      forwardError(error, next);
     }
   });
 

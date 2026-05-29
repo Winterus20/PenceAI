@@ -99,6 +99,10 @@ export class MemoryManager {
   private spreadingActivationService: SpreadingActivationService;
   private insightEngine: InsightEngine;
 
+  getDb(): Database.Database {
+    return this.db;
+  }
+
   constructor(penceDb: PenceDatabase) {
     this.db = penceDb.getDb();
     try {

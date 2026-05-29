@@ -62,6 +62,8 @@ const CATEGORY_ALIASES: Record<string, string> = {
     profile: 'user_fact',
     preference: 'preference',
     preferences: 'preference',
+    skill: 'skill',
+    skills: 'skill',
     project_update: 'project',
     todo: 'task',
     reminder: 'task',
@@ -70,7 +72,7 @@ const CATEGORY_ALIASES: Record<string, string> = {
 const VOLATILE_CATEGORIES = new Set(['event', 'project', 'task']);
 
 function normalizeWhitespace(text: string): string {
-    return text.replace(/\s+/g, ' ').trim();
+    return (text || '').replace(/\s+/g, ' ').trim();
 }
 
 function normalizeCategory(category: string): string {
@@ -229,8 +231,8 @@ export function decideReconsolidationPilot(
         return buildDecision({
             pilotActive: true,
             eligible: false,
-            action: 'skip',
-            reason: 'episodic_memory_excluded',
+            action: 'insert_new',
+            reason: 'episodic_events_always_preserved',
             safetyReasons,
             preferredContent: 'existing',
             candidateContent: null,
@@ -242,8 +244,8 @@ export function decideReconsolidationPilot(
         return buildDecision({
             pilotActive: true,
             eligible: false,
-            action: 'skip',
-            reason: 'low_confidence_guard',
+            action: 'insert_new',
+            reason: 'low_confidence_preserve_both',
             safetyReasons,
             preferredContent: 'existing',
             candidateContent: null,
@@ -263,13 +265,26 @@ export function decideReconsolidationPilot(
         }, 'skip');
     }
 
+    if (guardrails.structuredVariance && semanticSimilarity >= 0.92) {
+        safetyReasons.push('structured_variance_update');
+        return buildDecision({
+            pilotActive: true,
+            eligible: true,
+            action: 'update',
+            reason: 'fact_update_detected',
+            safetyReasons,
+            preferredContent: 'incoming',
+            candidateContent: incomingContent,
+        }, 'commit_update');
+    }
+
     if (guardrails.structuredVariance && containmentRatio < guardrails.strictContainmentFloor && semanticSimilarity < guardrails.structuredVarianceSimilarityFloor) {
         safetyReasons.push('structured_variance_conflict');
         return buildDecision({
             pilotActive: true,
             eligible: true,
-            action: 'skip',
-            reason: 'conflict_guard_preserve_existing',
+            action: 'insert_new',
+            reason: 'conflict_guard_preserve_both',
             safetyReasons,
             preferredContent: 'existing',
             candidateContent: null,
@@ -291,7 +306,7 @@ export function decideReconsolidationPilot(
 
     if (semanticSimilarity >= guardrails.highSimilaritySemanticFloor || jaccardSimilarity >= guardrails.highSimilarityJaccardFloor) {
         safetyReasons.push('high_similarity_guard');
-        const preferredContent = incomingContent.length >= existingContent.length ? 'incoming' : 'existing';
+        const preferredContent = 'incoming'; 
         return buildDecision({
             pilotActive: true,
             eligible: true,
@@ -299,7 +314,7 @@ export function decideReconsolidationPilot(
             reason: 'high_similarity_guarded_update',
             safetyReasons,
             preferredContent,
-            candidateContent: preferredContent === 'incoming' ? incomingContent : existingContent,
+            candidateContent: incomingContent,
         }, 'commit_update');
     }
 

@@ -154,32 +154,32 @@ describe('decideReconsolidationPilot', () => {
         containmentRatio: 0.75,
     };
 
-    test('should skip for non-semantic memory types', () => {
+    test('should insert_new for non-semantic memory types', () => {
         const result = decideReconsolidationPilot({
             ...baseInput,
             memoryType: 'episodic',
         });
-        expect(result.action).toBe('skip');
-        expect(result.reason).toBe('episodic_memory_excluded');
+        expect(result.action).toBe('insert_new');
+        expect(result.reason).toBe('episodic_events_always_preserved');
         expect(result.proposalMode).toBe('skip');
     });
 
-    test('should skip when confidence is below floor', () => {
+    test('should insert_new when confidence is below floor', () => {
         const result = decideReconsolidationPilot({
             ...baseInput,
             confidence: 0.50,
         });
-        expect(result.action).toBe('skip');
-        expect(result.reason).toBe('low_confidence_guard');
+        expect(result.action).toBe('insert_new');
+        expect(result.reason).toBe('low_confidence_preserve_both');
     });
 
-    test('should skip when confidence is null', () => {
+    test('should insert_new when confidence is null', () => {
         const result = decideReconsolidationPilot({
             ...baseInput,
             confidence: null,
         });
-        expect(result.action).toBe('skip');
-        expect(result.reason).toBe('low_confidence_guard');
+        expect(result.action).toBe('insert_new');
+        expect(result.reason).toBe('low_confidence_preserve_both');
     });
 
     test('should skip for exact match with no new information', () => {
@@ -192,7 +192,22 @@ describe('decideReconsolidationPilot', () => {
         expect(result.reason).toBe('exact_match_no_rewrite');
     });
 
-    test('should skip on structured variance conflict with low containment', () => {
+    test('should update on structured variance with high similarity', () => {
+        const result = decideReconsolidationPilot({
+            ...baseInput,
+            existingContent: 'User is 21 years old',
+            incomingContent: 'User is 22 years old',
+            confidence: 0.90,
+            semanticSimilarity: 0.95,
+            jaccardSimilarity: 0.85,
+            containmentRatio: 0.80,
+        });
+        expect(result.action).toBe('update');
+        expect(result.reason).toBe('fact_update_detected');
+        expect(result.preferredContent).toBe('incoming');
+    });
+
+    test('should insert_new on structured variance conflict with low similarity', () => {
         const result = decideReconsolidationPilot({
             ...baseInput,
             existingContent: 'Meeting on 2024-01-15 at 3pm with team',
@@ -202,8 +217,8 @@ describe('decideReconsolidationPilot', () => {
             jaccardSimilarity: 0.40,
             containmentRatio: 0.50,
         });
-        expect(result.action).toBe('skip');
-        expect(result.reason).toBe('conflict_guard_preserve_existing');
+        expect(result.action).toBe('insert_new');
+        expect(result.reason).toBe('conflict_guard_preserve_both');
     });
 
     test('should commit update on high containment', () => {
@@ -296,7 +311,7 @@ describe('decideReconsolidationPilot', () => {
         expect(result.preferredContent).toBe('incoming');
     });
 
-    test('should prefer existing when longer on high similarity', () => {
+    test('should prefer incoming on high similarity', () => {
         const result = decideReconsolidationPilot({
             ...baseInput,
             existingContent: 'This is a much longer version with lots of details',
@@ -305,6 +320,6 @@ describe('decideReconsolidationPilot', () => {
             semanticSimilarity: 0.95,
             containmentRatio: 0.50,
         });
-        expect(result.preferredContent).toBe('existing');
+        expect(result.preferredContent).toBe('incoming');
     });
 });

@@ -44,11 +44,13 @@ export function computeNewStability(currentStability: number, currentRetention: 
 
 /**
  * Son erişimden bu yana geçen gün sayısını hesaplar.
- * SQLite'ın CURRENT_TIMESTAMP formatını dikkate alır (UTC, 'Z' eki olmadan).
+ * daysSince() fonksiyonunu kullanır — normalizeSqliteDate ile tutarlı.
  */
 export function daysSinceAccess(lastAccessedStr: string | null): number {
     if (!lastAccessedStr) return 0;
+    // datetime.ts'deki daysSince ile aynı mantık — normalizeSqliteDate kullanır
     const dateStr = lastAccessedStr.endsWith('Z') ? lastAccessedStr : lastAccessedStr.replace(' ', 'T') + 'Z';
     const lastMs = new Date(dateStr).getTime();
+    if (!Number.isFinite(lastMs)) return 0;
     return Math.max(0, (Date.now() - lastMs) / (1000 * 60 * 60 * 24));
 }

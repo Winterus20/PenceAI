@@ -80,7 +80,14 @@ export class ReActLoop {
         // Artımlı token takibi — her reduce() yerine sadece delta ekle
         let incrementalCharCount = workingMessages.reduce((sum, msg) => sum + estimateMessageTokensChar(msg), 0);
 
+        const loopStartTime = Date.now();
+        const MAX_LOOP_MS = 300_000; // 5 dakika toplam süre sınırı
+
         while (iterations < maxIterations) {
+            if (Date.now() - loopStartTime > MAX_LOOP_MS) {
+                logger.warn(`[Agent] ⏱️ Toplam süre sınırı aşıldı (${MAX_LOOP_MS / 1000}s), döngü sonlandırılıyor.`);
+                break;
+            }
             iterations++;
 
             // İlk iterasyonda token bilgisini logla
@@ -156,9 +163,9 @@ export class ReActLoop {
             // <think> ve <plan> etiketlerini ayıkla
             const thinkingContent = llmResponse.thinkingContent;
             const planMatch = (llmResponse.content || '').match(/<plan>([\s\S]*?)<\/plan>/i);
-            const extractedPlan = planMatch ? planMatch[1].trim() : null;
+            const extractedPlan = planMatch?.[1]?.trim() ?? null;
 
-            const cleanContent = (llmResponse.content || '')
+            let cleanContent = (llmResponse.content || '')
                 .replace(/<think>[\s\S]*?<\/think>/gi, '')
                 .replace(/<think>[\s\S]*/g, '')
                 .replace(/<plan>[\s\S]*?<\/plan>/gi, '') // Plan etiketlerini temizle
@@ -188,20 +195,31 @@ export class ReActLoop {
                         strippedContent = strippedContent.replace(matchStr, '').trim();
                     });
 
+                    // Sadece araç çağrısı varsa (açıklama yoksa) içeriği tamamen temizle
+                    if (!strippedContent.trim()) {
+                        strippedContent = '';
+                    }
+
                     llmResponse.content = strippedContent;
+                    cleanContent = strippedContent; // Sonraki kullanımlar (UI, DB) için güncelle
                     logger.warn(`[Agent] ⚠️ Fallback parser: ${fallbackResult.calls.length} araç çağrısı yakalandı — ${fallbackResult.calls.map(tc => tc.name).join(', ')}`);
                     
                     // UI içeriğini güncelle (Fallback durumunda)
+                    uiContent = lastDbContent || '';
                     uiContent = this.joinUIContent(uiContent, strippedContent);
                     onEvent?.({ type: 'replace_stream', data: { content: uiContent } });
                 }
             }
 
             // UI içeriğini güncelle ve etiketleri temizle
-            uiContent = this.joinUIContent(uiContent, cleanContent);
-            
-            // Streaming sırasında etiketler gözükmüş olabilir, replace_stream ile temizle
-            onEvent?.({ type: 'replace_stream', data: { content: uiContent } });
+            // Eğer sadece araç çağrısı varsa (cleanContent boşsa) UI'a bir şey gönderme
+            if (cleanContent.trim() || !llmResponse.toolCalls?.length) {
+                uiContent = lastDbContent || '';
+                uiContent = this.joinUIContent(uiContent, cleanContent);
+                
+                // Streaming sırasında etiketler gözükmüş olabilir, replace_stream ile temizle
+                onEvent?.({ type: 'replace_stream', data: { content: uiContent } });
+            }
 
             // Araç çağrısı varsa
             if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
@@ -217,7 +235,8 @@ export class ReActLoop {
                     // Tüm araç çağrıları filtrelendiyse normal yanıt olarak devam et
                     if (llmResponse.toolCalls.length === 0) {
                         lastDbContent = cleanContent;
-                        uiContent = this.joinUIContent(uiContent, lastDbContent);
+                        uiContent = lastDbContent || '';
+                        uiContent = this.joinUIContent(uiContent, cleanContent);
                         break;
                     }
                 }
@@ -247,18 +266,25 @@ export class ReActLoop {
                 workingMessages.push(toolMessage);
 
                 // Araç sonuçlarını veritabanına kaydet (temiz içerikle, düşünme olmadan)
-                memory.addMessage(conversationId, {
-                    role: 'assistant',
-                    content: cleanContent,
-                    timestamp: new Date(),
-                    toolCalls: llmResponse.toolCalls,
-                });
-                memory.addMessage(conversationId, {
-                    role: 'tool',
-                    content: '',
-                    timestamp: new Date(),
-                    toolResults,
-                });
+                // DB hatası olsa bile döngüyü sonlandırmaz
+                try {
+                    memory.addMessage(conversationId, {
+                        role: 'assistant',
+                        content: cleanContent,
+                        timestamp: new Date(),
+                        toolCalls: llmResponse.toolCalls,
+                    });
+                    memory.addMessage(conversationId, {
+                        role: 'tool',
+                        content: '',
+                        timestamp: new Date(),
+                        toolResults,
+                    });
+                } catch (dbErr) {
+                    logger.warn({ err: dbErr }, '[ReactLoop] Araç sonuçları DB\'ye kaydedilemedi');
+                }
+
+                lastDbContent = cleanContent;
 
                 // Artımlı token güncellemesi — sadece yeni eklenen mesajların katkısını hesapla
                 incrementalCharCount += estimateMessageTokensChar(assistantMessage);

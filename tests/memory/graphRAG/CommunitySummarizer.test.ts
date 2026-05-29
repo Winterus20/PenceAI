@@ -200,6 +200,21 @@ describe('CommunitySummarizer', () => {
     });
   });
 
+  describe('Batch community loading', () => {
+    test('loadAllCommunities tek sorguda tüm üyeleri yükler', async () => {
+      insertMemory(1, 'Test 1', 'tech');
+      insertMemory(2, 'Test 2', 'person');
+      insertMemory(3, 'Test 3', 'project');
+      insertCommunity('comm-load-a', [1, 2]);
+      insertCommunity('comm-load-b', [3]);
+
+      const summaries = await summarizer.summarizeAllCommunities();
+
+      expect(summaries.length).toBe(2);
+      expect(summaries.map(s => s.communityId).sort()).toEqual(['comm-load-a', 'comm-load-b']);
+    });
+  });
+
   describe('Batch summarization', () => {
     test('Birden fazla community özetlenir', async () => {
       insertMemory(1, 'Test 1', 'tech');

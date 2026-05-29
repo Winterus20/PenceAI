@@ -56,7 +56,7 @@ export function registerSystemJobs(taskQueue: TaskQueue, deps: SystemJobsDeps): 
     taskQueue.registerHandler('ebbinghaus_update', async (payload, signal) => {
         if (signal.aborted) return;
         try {
-            const memoryIds: number[] = payload.memoryIds ?? [];
+            const memoryIds = (payload.memoryIds as number[] | undefined) ?? [];
             if (memoryIds.length > 0) {
                 memory.executeEbbinghausUpdates(memoryIds);
             }
@@ -68,7 +68,7 @@ export function registerSystemJobs(taskQueue: TaskQueue, deps: SystemJobsDeps): 
     taskQueue.registerHandler('deep_memory_extraction', async (payload, signal) => {
         if (signal.aborted) return;
         try {
-            await agent.extractMemoriesDeep(payload.conversationId);
+            await agent.extractMemoriesDeep(payload.conversationId as string);
         } catch (err) {
             logger.error({ err }, '[Worker] Derin bellek çıkarımı hatası');
         }
@@ -77,7 +77,7 @@ export function registerSystemJobs(taskQueue: TaskQueue, deps: SystemJobsDeps): 
     taskQueue.registerHandler('conversation_summarization', async (payload, signal) => {
         if (signal.aborted) return;
         try {
-            await agent.summarizeConversation(payload.conversationId);
+            await agent.summarizeConversation(payload.conversationId as string);
         } catch (err) {
             logger.error({ err }, '[Worker] Konuşma özetleme hatası');
         }

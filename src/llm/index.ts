@@ -7,6 +7,13 @@ export { GitHubProvider } from './github.js';
 export { GroqProvider } from './groq.js';
 export { MistralProvider } from './mistral.js';
 export { NvidiaProvider } from './nvidia.js';
+export {
+    CustomOpenAIProvider,
+    normalizeOpenAICompatibleBaseUrl,
+    fetchCustomOpenAIModels,
+    parseOpenAIModelIds,
+} from './customOpenAI.js';
+export { OpenRouterProvider, OPENROUTER_BASE_URL } from './openrouter.js';
 export { CachedLLMProvider } from './cachedProvider.js';
 export { LLMCacheService, type LLMCacheConfig, type LLMCacheStats } from './llmCache.js';
 export { ResilientLLMProvider, CircuitState, type CircuitBreakerConfig, type FallbackEntry } from './resilientProvider.js';
@@ -21,6 +28,8 @@ import { GitHubProvider } from './github.js';
 import { GroqProvider } from './groq.js';
 import { MistralProvider } from './mistral.js';
 import { NvidiaProvider } from './nvidia.js';
+import { CustomOpenAIProvider } from './customOpenAI.js';
+import { OpenRouterProvider } from './openrouter.js';
 
 /**
  * Varsayılan fallback chain yapılandırması.
@@ -54,4 +63,6 @@ export function registerAllProviders(): void {
     LLMProviderFactory.register('groq', () => new GroqProvider());
     LLMProviderFactory.register('mistral', () => new MistralProvider());
     LLMProviderFactory.register('nvidia', () => new NvidiaProvider());
+    LLMProviderFactory.register('custom', () => new CustomOpenAIProvider());
+    LLMProviderFactory.register('openrouter', () => new OpenRouterProvider());
 }

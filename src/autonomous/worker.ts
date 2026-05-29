@@ -73,10 +73,13 @@ export class BackgroundWorker {
 
     public registerUserActivity(): void {
         this.lastActivityAt = Date.now();
-        // If we are currently running background tasks, GRACEFULLY INTERRUPT immediately.
         if (this.isRunning) {
             this.interrupt('User activity detected');
         }
+    }
+
+    public getActiveTaskId(): string | null {
+        return this.activeTaskId;
     }
 
     private isHardwareOverloaded(): boolean {
@@ -149,18 +152,27 @@ export class BackgroundWorker {
                 if (!task) break;
 
                 this.activeTaskId = task.id;
+                const leaseRenewTimer = setInterval(() => {
+                    if (this.activeTaskId === task.id) {
+                        this.queue.renewLease(task.id);
+                    }
+                }, 60_000);
+                if (typeof leaseRenewTimer.unref === 'function') {
+                    leaseRenewTimer.unref();
+                }
+
                 try {
                     logger.debug(`[Worker] Executing task: ${task.type} (${task.id})`);
                     if (task.execute) {
-                        // IMPORTANT: We pass the abort signal down to the task so it can stop gracefully.
                         await task.execute(this.abortController.signal);
                     } else {
                         logger.error(`[Worker] Task ${task.id} has no execution logic attached.`);
                     }
                     logger.debug(`[Worker] Task completed: ${task.id}`);
                     this.queue.markCompleted(task.id);
-                } catch (error: any) {
-                    if (error.name === 'AbortError') {
+                } catch (error: unknown) {
+                    const err = error instanceof Error ? error : new Error(String(error));
+                    if (err.name === 'AbortError') {
                         const abortCount = task.retryCount ?? 0;
                         const maxAborts = 3; // Prevent infinite abort loops
                         if (abortCount < maxAborts) {
@@ -176,25 +188,26 @@ export class BackgroundWorker {
                         const maxRetries = task.maxRetries ?? 2;
                         
                         // Check if error is transient (timeout, network, rate limit)
-                        const isTransient = error.code === 'ETIMEDOUT' || 
-                                           error.code === 'ECONNRESET' ||
-                                           error.message?.includes('timeout') ||
-                                           error.message?.includes('rate limit') ||
-                                           error.message?.includes('429') ||
-                                           error.message?.includes('503');
+                        const isTransient = (err as NodeJS.ErrnoException).code === 'ETIMEDOUT' ||
+                                           (err as NodeJS.ErrnoException).code === 'ECONNRESET' ||
+                                           err.message?.includes('timeout') ||
+                                           err.message?.includes('rate limit') ||
+                                           err.message?.includes('429') ||
+                                           err.message?.includes('503');
                         
                         if (isTransient && retryCount < maxRetries) {
-                            const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 30000); // exponential backoff, max 30s
+                            const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 30000);
                             logger.warn(`[Worker] Transient error for task ${task.id}, retry ${retryCount + 1}/${maxRetries} in ${retryDelay}ms`);
                             task.retryCount = retryCount + 1;
                             task.addedAt = Date.now() + retryDelay;
                             this.queue.enqueue(task);
                         } else {
-                            logger.error({ err: error }, `[Worker] Task execution failed (${task.id})${retryCount >= maxRetries ? ' (max retries reached)' : ''}:`);
+                            logger.error({ err }, `[Worker] Task execution failed (${task.id})${retryCount >= maxRetries ? ' (max retries reached)' : ''}:`);
                             this.queue.markFailed(task.id);
                         }
                     }
                 } finally {
+                    clearInterval(leaseRenewTimer);
                     this.activeTaskId = null;
                 }
 

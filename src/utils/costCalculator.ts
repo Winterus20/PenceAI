@@ -68,6 +68,17 @@ const PRICING_MAP: Record<string, Record<string, ModelPricing>> = {
     // Ama token sayısını kaydetmek için 0 fiyat kullanıyoruz
     'default': { promptPer1K: 0, completionPer1K: 0 },
   },
+  openrouter: {
+    // OpenRouter fiyatları modele göre değişir; yaklaşık varsayılan
+    'default': { promptPer1K: 0.001, completionPer1K: 0.003 },
+    'openai/gpt-4o': { promptPer1K: 0.0025, completionPer1K: 0.01 },
+    'openai/gpt-4o-mini': { promptPer1K: 0.00015, completionPer1K: 0.0006 },
+    'anthropic/claude-3.5-sonnet': { promptPer1K: 0.003, completionPer1K: 0.015 },
+    'meta-llama/llama-3.3-70b-instruct': { promptPer1K: 0.0003, completionPer1K: 0.0003 },
+  },
+  custom: {
+    'default': { promptPer1K: 0.001, completionPer1K: 0.003 },
+  },
 };
 
 /** Fallback fiyat — bilinmeyen provider/model için */

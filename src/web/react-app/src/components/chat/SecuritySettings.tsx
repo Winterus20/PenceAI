@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { fieldClassName, selectClassName } from '@/styles/dialog';
 
 const sectionClassName = 'section-surface rounded-xl border-border';
-const labelClassName = 'space-y-2 text-sm text-surface-strong';
+const labelClassName = 'space-y-2 text-sm text-foreground';
 
 const SettingsSection = ({ title, description, icon, children }: { title: string; description: string; icon: React.ReactNode; children: React.ReactNode }) => (
   <section className={sectionClassName}>
@@ -14,8 +14,8 @@ const SettingsSection = ({ title, description, icon, children }: { title: string
         {icon}
       </div>
       <div className="space-y-1.5">
-        <div className="text-sm font-medium tracking-[-0.01em] text-surface-emphasis">{title}</div>
-        <p className="max-w-2xl text-sm leading-6 text-surface-strong">{description}</p>
+        <div className="text-sm font-medium tracking-[-0.01em] text-foreground">{title}</div>
+        <p className="max-w-2xl text-sm leading-6 text-foreground">{description}</p>
       </div>
     </div>
     <div className="space-y-4 border-t border-border/30 px-5 py-5 sm:px-6">{children}</div>
@@ -88,10 +88,10 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
           />
           <span className="space-y-1.5">
             <span className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
-              <Shield className="h-4 w-4 text-surface" />
+              <Shield className="h-4 w-4 text-muted-foreground" />
               Shell komutlarına izin ver
             </span>
-            <span className="block text-sm leading-6 text-surface-strong">Araç çağrılarında terminal ve dosya sistemi işlemlerine yetki tanır.</span>
+            <span className="block text-sm leading-6 text-foreground">Araç çağrılarında terminal ve dosya sistemi işlemlerine yetki tanır.</span>
           </span>
         </label>
       </SettingsSection>
@@ -125,7 +125,7 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
           </div>
           <div className="max-h-[200px] overflow-y-auto rounded-md border border-border/30 bg-muted/10">
           {sensitivePaths.length === 0 ? (
-            <div className="px-4 py-6 text-center text-sm text-surface-muted">
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
               Henüz hassas dizin eklenmemiş.
             </div>
           ) : (
@@ -135,13 +135,13 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
                 key={path}
                 className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
               >
-                <span className="truncate text-sm text-surface-strong">{path}</span>
+                <span className="truncate text-sm text-foreground">{path}</span>
                 <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => onRemoveSensitivePath(path)}
                 disabled={pathLoading}
-                className="h-8 w-8 rounded-lg p-0 text-surface-muted hover:bg-red-500/10 hover:text-red-400"
+                className="h-8 w-8 rounded-lg p-0 text-muted-foreground hover:bg-red-500/10 hover:text-red-400"
                 >
                 <Trash2 className="h-4 w-4" />
                 </Button>

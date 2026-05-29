@@ -13,6 +13,16 @@ import type { WebSocketServer } from 'ws';
 import type { AppConfig } from '../config.js';
 import { z } from 'zod';
 
+/** Promise'ı belirli bir süre sonra timeout ile reject eder. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout: ${label} ${ms}ms aşıldı`)), ms)
+        ),
+    ]);
+}
+
 export interface AutonomousWorkerDeps {
     memory: MemoryManager;
     llm: LLMProvider;
@@ -98,7 +108,11 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
         logger.info(`[Worker] 🤔 Otonom düşünce başlıyor. Konu: "${thoughtResult.thought.seed.content.substring(0, 30)}..."`);
         let llmThoughtOutput = "";
         try {
-            const result = await llm.chat([{ role: 'user', content: thoughtResult.prompt }], { temperature: 0.6, maxTokens: 800 });
+            const result = await withTimeout(
+                llm.chat([{ role: 'user', content: thoughtResult.prompt }], { temperature: 0.6, maxTokens: 800 }),
+                60_000,
+                'LLM Self-Reflection'
+            );
             llmThoughtOutput = result.content;
         } catch (err) {
             logger.error({ err }, '[Worker] LLM Self-Reflection çağrısı başarısız oldu.');
@@ -160,6 +174,11 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
         // --- 5. AKSİYON AL ---
         if (decisionResult.decision === 'send') {
             logger.info(`[Worker] 🚀 PROAKTİF MESAJ GÖNDERİLİYOR: ` + llmThoughtOutput.substring(0, 100));
+            // Tek kişilik self-hosted uygulama: tüm bağlı istemcilere gönder (cihaz senkronizasyonu)
+            const clientCount = wss.clients.size;
+            if (clientCount > 1) {
+                logger.debug(`[Worker] ${clientCount} bağlı istemciye broadcast yapılıyor`);
+            }
             wss.clients.forEach((client) => {
                 if (client.readyState === WebSocket.OPEN) {
                     client.send(JSON.stringify({
@@ -178,16 +197,14 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
             });
         }
 
-        // Bir sonraki döngüyü exponential backoff ile planla
+        // Bir sonraki döngüyü karara göre planla
         const feedback = feedbackManager.getState();
-        let delayMinutes = 15;
+        let delayMinutes: number;
 
-        if (decisionResult.decision === 'send') {
-            delayMinutes = 60;
-        } else if (decisionResult.decision === 'digest') {
-            delayMinutes = 30;
-        } else {
-            delayMinutes = 15;
+        switch (decisionResult.decision) {
+            case 'send':   delayMinutes = 60; break;
+            case 'digest': delayMinutes = 30; break;
+            default:       delayMinutes = 15; break;
         }
 
         if (feedback.lastSignalAt > 0) {
@@ -209,7 +226,7 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
     // 2. Alt Ajan Merak Motoru
     taskQueue.registerHandler('subagent_research', async (payload, signal) => {
         if (signal.aborted) return;
-        const fixationTopic = payload.fixationTopic;
+        const fixationTopic = payload.fixationTopic as string | undefined;
         if (!fixationTopic) return;
 
         const task = subAgentManager.createTask({
@@ -254,7 +271,11 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
             subagentPrompt += `\\n\\nBulgular:\\n${researchContent}`;
         }
         
-        const mockReportStr = await llm.chat([{ role: 'user', content: subagentPrompt }], { temperature: 0.3, maxTokens: 400 });
+        const mockReportStr = await withTimeout(
+            llm.chat([{ role: 'user', content: subagentPrompt }], { temperature: 0.3, maxTokens: 400 }),
+            45_000,
+            'SubAgent LLM'
+        );
 
         subAgentManager.completeTask(task.id, {
             summary: mockReportStr.content,
@@ -276,12 +297,13 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
         const { TelescopicCompactor } = await import('../../memory/telescopicCompactor.js');
         const compactor = new TelescopicCompactor(memory.getDatabase(), llm);
 
-        // Aktif konuşmaları tara ve mesaj eşiğini geçenleri sıkıştır
+        // Aktif konuşmaları tara ve mesaj eşiğini geçenleri sıkıştır (maks 5 konuşma/batch)
         const conversations = memory.getRecentConversations(30);
+        const MAX_COMPACT_PER_BATCH = 5;
         let compactedCount = 0;
 
         for (const conv of conversations) {
-            if (signal.aborted) break;
+            if (signal.aborted || compactedCount >= MAX_COMPACT_PER_BATCH) break;
             const msgCount = Number(conv.message_count ?? 0);
             // 40+ mesajı olan konuşmaları sıkıştır (Level 1 threshold ile hizalı)
             if (msgCount > 40) {
@@ -296,5 +318,12 @@ export function registerAutonomousWorkerJobs(taskQueue: TaskQueue, deps: Autonom
         }
 
         logger.info(`[Worker] ✅ Telescopic Compaction scan finished. ${compactedCount} conversations compacted.`);
+    });
+
+    // 4. Memory Consolidation — Epizodik bellekleri semantik olarak damıt
+    taskQueue.registerHandler('memory_consolidation', async (payload, signal) => {
+        if (signal.aborted) return;
+        const { handleMemoryConsolidation } = await import('../../autonomous/tasks/memoryConsolidationTask.js');
+        await handleMemoryConsolidation(payload as unknown as import('../../memory/types.js').MemoryConsolidationPayload, signal, memory.getDatabase(), llm, memory);
     });
 }

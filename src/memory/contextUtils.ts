@@ -219,6 +219,7 @@ const REVIEW_PROFILE_BY_CATEGORY: Record<string, string> = {
     preference: 'strict',
     user_fact: 'strict',
     profile: 'strict',
+    skill: 'durable',
     general: 'standard',
     concept: 'durable',
     knowledge: 'durable',

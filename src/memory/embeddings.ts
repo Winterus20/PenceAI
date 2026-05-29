@@ -87,14 +87,15 @@ abstract class BaseHttpEmbedding implements EmbeddingProvider {
     }
 
     async embed(texts: string[]): Promise<number[][]> {
-        if (texts.length === 0) return [];
+        const nonEmptyTexts = texts.filter(t => t.trim().length > 0);
+        if (nonEmptyTexts.length === 0) return [];
         const response = await fetchWithRetry(`${this.baseURL}/embeddings`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${this.apiKey}`,
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ model: this.model, input: texts }),
+            body: JSON.stringify({ model: this.model, input: nonEmptyTexts }),
         });
         if (!response.ok) {
             const error = await response.text();

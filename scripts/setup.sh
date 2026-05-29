@@ -7,6 +7,7 @@ YELLOW='\033[33m'
 RED='\033[31m'
 BOLD='\033[1m'
 GRAY='\033[90m'
+DARKGRAY="$GRAY"
 RESET='\033[0m'
 
 # Global error trap: show error + pause, then exit
@@ -36,31 +37,76 @@ stream_output() {
     done
 }
 
-set_env_value() {
-    local file="$1"
-    local key="$2"
-    local value="$3"
-
-    if [ ! -f "$file" ]; then
-        echo "${key}=${value}" > "$file"
-        return
+read_from_clipboard() {
+    if command -v pbpaste &>/dev/null; then
+        pbpaste 2>/dev/null | tr -d '\r\n'
+    elif command -v wl-paste &>/dev/null; then
+        wl-paste -n 2>/dev/null
+    elif command -v xclip &>/dev/null; then
+        xclip -selection clipboard -o 2>/dev/null | tr -d '\r\n'
+    else
+        echo ""
     fi
+}
 
-    local tmp="${file}.tmp.$$"
-    local found=false
-    while IFS= read -r line || [ -n "$line" ]; do
-        if [[ "$line" == "${key}="* ]]; then
-            echo "${key}=${value}"
-            found=true
-        else
-            echo "$line"
+read_setup_line() {
+    local prompt="$1"
+    local default="${2:-}"
+    echo -e "  ${DARKGRAY}${prompt}${RESET}"
+    if [ -n "$default" ]; then
+        echo -e "  ${DARKGRAY}Yapistir + Enter — bos Enter = varsayilan (${default})${RESET}"
+    else
+        echo -e "  ${DARKGRAY}Yapistir + Enter — bos Enter = panodan otomatik oku${RESET}"
+    fi
+    read -r -p "  > " value
+    value="${value//$'\r'/}"
+    if [ -z "$value" ]; then
+        if [ -n "$default" ]; then
+            echo "$default"
+            return
         fi
-    done < "$file" > "$tmp"
-
-    if [ "$found" = false ]; then
-        echo "${key}=${value}" >> "$tmp"
+        value=$(read_from_clipboard)
     fi
-    mv "$tmp" "$file"
+    echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+read_setup_secret() {
+    local label="$1"
+    echo -e "  ${DARKGRAY}${label}${RESET}"
+    echo -e "  ${DARKGRAY}Yapistir + Enter — bos Enter = panodan otomatik oku (satir gorunur)${RESET}"
+    read -r -p "  > " value
+    value="${value//$'\r'/}"
+    if [ -z "$value" ]; then
+        value=$(read_from_clipboard)
+    fi
+    echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+apply_env_updates_from_exports() {
+    local tmp
+    tmp=$(mktemp /tmp/penceai_env.XXXXXX.json)
+    if ! python3 - "$tmp" <<'PY'
+import json, os, sys
+updates = {}
+if p := os.environ.get("PENCE_PROVIDER"):
+    updates["DEFAULT_LLM_PROVIDER"] = p
+if m := os.environ.get("PENCE_MODEL"):
+    updates["DEFAULT_LLM_MODEL"] = m
+for k, v in os.environ.items():
+    if k.startswith("PENCE_KV_") and v:
+        updates[k[9:]] = v
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    json.dump(updates, f, ensure_ascii=False)
+PY
+    then
+        rm -f "$tmp"
+        stop_with_pause ".env JSON olusturulamadi."
+    fi
+    if ! (cd "$PROJECT_ROOT" && npx tsx scripts/setup-env.ts --file "$tmp" 2>&1 | stream_output); then
+        rm -f "$tmp"
+        stop_with_pause ".env guncellemesi basarisiz (secureUpdateEnv)."
+    fi
+    rm -f "$tmp"
 }
 
 check_disk_space() {
@@ -126,7 +172,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # -- Disk space --------------------------------------------------------
-echo -e "${BOLD}[0/9] Disk alani kontrol ediliyor...${RESET}"
+echo -e "${BOLD}[0/10] Disk alani kontrol ediliyor...${RESET}"
 if ! check_disk_space 2000 "$PROJECT_ROOT"; then
     warn "Yetersiz disk alani. En az 2GB bos alan onerilir."
     echo ""
@@ -139,21 +185,22 @@ ok "Disk alani yeterli"
 
 # -- System dependencies -----------------------------------------------
 echo ""
-echo -e "${BOLD}[1/9] Sistem bagimliliklari kontrol ediliyor...${RESET}"
+echo -e "${BOLD}[1/10] Sistem bagimliliklari kontrol ediliyor...${RESET}"
 
-MISSING_SYS=()
+MISSING_CMDS=()
+MISSING_NAMES=()
 
-command -v gcc &>/dev/null  || MISSING_SYS+=("gcc (C derleyici)")
-command -v g++ &>/dev/null || MISSING_SYS+=("g++ (C++ derleyici)")
-command -v make &>/dev/null || MISSING_SYS+=("make (build araci)")
-command -v python3 &>/dev/null || MISSING_SYS+=("python3")
-command -v git &>/dev/null || MISSING_SYS+=("git")
-command -v curl &>/dev/null || MISSING_SYS+=("curl")
+command -v gcc &>/dev/null  || { MISSING_CMDS+=("gcc"); MISSING_NAMES+=("gcc (C derleyici)"); }
+command -v g++ &>/dev/null || { MISSING_CMDS+=("g++"); MISSING_NAMES+=("g++ (C++ derleyici)"); }
+command -v make &>/dev/null || { MISSING_CMDS+=("make"); MISSING_NAMES+=("make (build araci)"); }
+command -v python3 &>/dev/null || { MISSING_CMDS+=("python3"); MISSING_NAMES+=("python3"); }
+command -v git &>/dev/null || { MISSING_CMDS+=("git"); MISSING_NAMES+=("git"); }
+command -v curl &>/dev/null || { MISSING_CMDS+=("curl"); MISSING_NAMES+=("curl"); }
 
-if [ ${#MISSING_SYS[@]} -gt 0 ]; then
+if [ ${#MISSING_CMDS[@]} -gt 0 ]; then
     echo ""
     warn "Asagidaki sistem paketleri eksik:"
-    for dep in "${MISSING_SYS[@]}"; do
+    for dep in "${MISSING_NAMES[@]}"; do
         echo "    - $dep"
     done
     echo ""
@@ -233,7 +280,7 @@ if [ ${#MISSING_SYS[@]} -gt 0 ]; then
     else
         err "Paket yoneticisi bulunamadi (apt/dnf/yum/brew)."
         echo "  Asagidaki paketleri manuel olarak kurun:"
-        for dep in "${MISSING_SYS[@]}"; do
+        for dep in "${MISSING_NAMES[@]}"; do
             echo "    - $dep"
         done
         read -rp "Devam etmek istiyor musunuz? (e/H) " confirm_sys
@@ -247,7 +294,7 @@ fi
 
 # -- Node.js -----------------------------------------------------------
 echo ""
-echo -e "${BOLD}[2/9] Node.js kontrol ediliyor...${RESET}"
+echo -e "${BOLD}[2/10] Node.js kontrol ediliyor...${RESET}"
 
 NEEDS_INSTALL=false
 NEEDS_UPGRADE=false
@@ -385,7 +432,7 @@ fi
 
 # -- npm ---------------------------------------------------------------
 echo ""
-echo -e "${BOLD}[3/9] Bagimliliklar kuruluyor...${RESET}"
+echo -e "${BOLD}[3/10] Bagimliliklar kuruluyor...${RESET}"
 
 cd "$PROJECT_ROOT"
 
@@ -427,7 +474,7 @@ ok "Frontend bagimliliklari"
 
 # -- .env --------------------------------------------------------------
 echo ""
-echo -e "${BOLD}[4/9] .env dosyasi yapilandiriliyor...${RESET}"
+echo -e "${BOLD}[4/10] .env dosyasi yapilandiriliyor...${RESET}"
 
 ENV_FILE="$PROJECT_ROOT/.env"
 ENV_EXAMPLE="$PROJECT_ROOT/.env.example"
@@ -446,22 +493,25 @@ fi
 
 # -- API Key -----------------------------------------------------------
 echo ""
-echo -e "${BOLD}[5/9] LLM API anahtari yapilandiriliyor${RESET}"
+echo -e "${BOLD}[5/10] LLM saglayici yapilandiriliyor${RESET}"
+echo -e "${DARKGRAY}  (scripts/setup-providers.ts ile hizali)${RESET}"
 echo ""
 
 PROVIDERS=(
-    "OpenAI (varsayilan)|OPENAI_API_KEY|openai"
-    "Anthropic (Claude)|ANTHROPIC_API_KEY|anthropic"
-    "Groq|GROQ_API_KEY|groq"
-    "Mistral|MISTRAL_API_KEY|mistral"
-    "MiniMax|MINIMAX_API_KEY|minimax"
-    "NVIDIA|NVIDIA_API_KEY|nvidia"
-    "GitHub Models|GITHUB_TOKEN|github"
-    "Ollama (yerel)|OLLAMA_BASE_URL|ollama"
+    "OpenAI (varsayilan)|OPENAI_API_KEY|openai|gpt-4o|apiKey"
+    "Anthropic (Claude)|ANTHROPIC_API_KEY|anthropic|claude-sonnet-4-20250514|apiKey"
+    "Groq|GROQ_API_KEY|groq|llama-3.3-70b-versatile|apiKey"
+    "Mistral|MISTRAL_API_KEY|mistral|mistral-large-latest|apiKey"
+    "MiniMax|MINIMAX_API_KEY|minimax|MiniMax-Text-01|apiKey"
+    "NVIDIA|NVIDIA_API_KEY|nvidia|meta/llama-3.1-70b-instruct|apiKey"
+    "GitHub Models|GITHUB_TOKEN|github|gpt-4o|apiKey"
+    "OpenRouter|OPENROUTER_API_KEY|openrouter|openai/gpt-4o-mini|apiKey"
+    "Custom OpenAI (LiteLLM vb.)|CUSTOM_OPENAI_API_KEY|custom||custom"
+    "Ollama (yerel)|OLLAMA_BASE_URL|ollama|llama3.2|ollama"
 )
 
 for i in "${!PROVIDERS[@]}"; do
-    IFS='|' read -r name key default <<< "${PROVIDERS[$i]}"
+    IFS='|' read -r name key default _ <<< "${PROVIDERS[$i]}"
     echo "  [$((i+1))] $name"
 done
 echo ""
@@ -476,40 +526,60 @@ else
     idx=0
 fi
 
-IFS='|' read -r sel_name sel_key sel_default <<< "${PROVIDERS[$idx]}"
+IFS='|' read -r sel_name sel_key sel_default sel_model sel_kind <<< "${PROVIDERS[$idx]}"
 
 echo ""
 echo -e "  Secilen: ${CYAN}${sel_name}${RESET}"
 echo ""
 
-if [ "$sel_default" = "ollama" ]; then
-    read -p "  Ollama sunucu adresi [http://localhost:11434]: " ollama_url
-    ollama_url="${ollama_url:-http://localhost:11434}"
+export PENCE_PROVIDER="$sel_default"
+unset PENCE_MODEL
+for var in $(env | grep -E '^PENCE_KV_' | cut -d= -f1); do unset "$var"; done
 
-    set_env_value "$ENV_FILE" "OLLAMA_BASE_URL" "$ollama_url"
-    set_env_value "$ENV_FILE" "DEFAULT_LLM_PROVIDER" "ollama"
-
+if [ "$sel_kind" = "ollama" ]; then
+    ollama_url=$(read_setup_line "Ollama sunucu adresi" "http://localhost:11434")
+    export "PENCE_KV_OLLAMA_BASE_URL=$ollama_url"
     ok "Ollama yapilandirildi: $ollama_url"
+elif [ "$sel_kind" = "custom" ]; then
+    custom_base=$(read_setup_line "CUSTOM_OPENAI_BASE_URL (ornek: https://openrouter.ai/api/v1)")
+    if [ -n "$custom_base" ]; then
+        export "PENCE_KV_CUSTOM_OPENAI_BASE_URL=$custom_base"
+    fi
+    api_key=$(read_setup_secret "CUSTOM_OPENAI_API_KEY (bos birakilabilir)")
+    if [ -n "$api_key" ]; then
+        export "PENCE_KV_CUSTOM_OPENAI_API_KEY=$api_key"
+        MASKED="${api_key:0:8}..."
+        ok "API anahtari kaydedildi (CUSTOM_OPENAI_API_KEY=${MASKED})"
+    else
+        warn "API anahtari bos birakildi."
+    fi
+    sel_model="ornek-model-adi"
 else
-    echo "  ${sel_key} degerini girin: (girdiniz gizli tutulacaktir)"
-    read -s -p "  " api_key
-    echo ""
-
+    api_key=$(read_setup_secret "${sel_key} degerini girin")
     if [ -z "$api_key" ]; then
         warn "API anahtari bos birakildi. Kurulumdan sonra .env dosyasini el ile duzenleyin."
         echo -e "  ${CYAN}\$EDITOR .env${RESET}"
     else
-        set_env_value "$ENV_FILE" "$sel_key" "$api_key"
-        set_env_value "$ENV_FILE" "DEFAULT_LLM_PROVIDER" "$sel_default"
-
+        export "PENCE_KV_${sel_key}=$api_key"
         MASKED="${api_key:0:8}..."
         ok "API anahtari kaydedildi (${sel_key}=${MASKED})"
     fi
 fi
 
+model_hint="$sel_model"
+model_input=$(read_setup_line "Model adi (DEFAULT_LLM_MODEL)" "$model_hint")
+if [ -n "$model_input" ]; then
+    export PENCE_MODEL="$model_input"
+    ok "Model: $model_input"
+fi
+
+apply_env_updates_from_exports
+unset PENCE_PROVIDER PENCE_MODEL
+for var in $(env | grep -E '^PENCE_KV_' | cut -d= -f1); do unset "$var"; done
+
 # -- Build -------------------------------------------------------------
 echo ""
-echo -e "${BOLD}[6/9] Proje derleniyor...${RESET}"
+echo -e "${BOLD}[6/10] Proje derleniyor...${RESET}"
 
 step "TypeScript + Frontend build (bu birkac dakika surebilir)..."
 BUILD_LOG=$(mktemp /tmp/penceai_build.XXXXXX.log)
@@ -533,7 +603,7 @@ ok "Build tamamlandi"
 
 # -- Database directory ------------------------------------------------
 echo ""
-echo -e "${BOLD}[7/9] Veritabani dizini hazirlaniyor...${RESET}"
+echo -e "${BOLD}[7/10] Veritabani dizini hazirlaniyor...${RESET}"
 
 DB_DIR="$PROJECT_ROOT/data"
 if [ ! -d "$DB_DIR" ]; then
@@ -545,7 +615,7 @@ fi
 
 # -- Port check --------------------------------------------------------
 echo ""
-echo -e "${BOLD}[8/9] Port kontrolu yapiliyor...${RESET}"
+echo -e "${BOLD}[8/10] Port kontrolu yapiliyor...${RESET}"
 
 CONFIG_PORT=3001
 env_port_line=$(grep -E "^PORT=" "$ENV_FILE" 2>/dev/null || true)
@@ -582,9 +652,38 @@ else
     ok "Port $CONFIG_PORT musait"
 fi
 
+# -- Verification ------------------------------------------------------
+echo ""
+echo -e "${BOLD}[9/10] Kurulum dogrulaniyor...${RESET}"
+
+read -rp "LLM API baglantisi test edilsin mi? (e/H) " test_llm
+verify_args=()
+if [ "$test_llm" = "e" ] || [ "$test_llm" = "E" ]; then
+    verify_args=()
+else
+    verify_args=(--skip-llm)
+fi
+
+set +e
+verify_output=$(cd "$PROJECT_ROOT" && npx tsx scripts/setup-verify.ts "${verify_args[@]}" 2>&1)
+verify_exit=$?
+set -e
+while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    if [[ "$line" == OK* ]]; then ok "$line"
+    elif [[ "$line" == WARN* ]]; then warn "${line#WARN }"
+    elif [[ "$line" == ERR* ]]; then err "${line#ERR }"
+    else echo -e "${DARKGRAY}  $line${RESET}"
+    fi
+done <<< "$verify_output"
+if [ "$verify_exit" -ne 0 ]; then
+    warn "Dogrulama tamamlanamadi — .env ve API anahtarini kontrol edip tekrar deneyin:"
+    echo -e "  ${CYAN}npx tsx scripts/setup-verify.ts${RESET}"
+fi
+
 # -- Summary -----------------------------------------------------------
 echo ""
-echo -e "${BOLD}[9/9] Kurulum tamamlandi!${RESET}"
+echo -e "${BOLD}[10/10] Kurulum tamamlandi!${RESET}"
 echo ""
 echo "========================================"
 echo ""

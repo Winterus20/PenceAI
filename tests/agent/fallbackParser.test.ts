@@ -87,13 +87,17 @@ describe('extractFallbackToolCalls', () => {
     it('extracts JSON tool call with function wrapper (flat)', () => {
         const content = '{"type": "function", "function": {"name": "readFile"}}';
         const result = extractFallbackToolCalls(content, knownTools);
-        expect(result.calls.length).toBeGreaterThanOrEqual(0);
+        // Parser function.name wrapper'ını tanır (satır 66)
+        expect(result.calls.length).toBe(1);
+        expect(result.calls[0]?.name).toBe('readFile');
     });
 
     it('extracts JSON tool call with parameters key (flat)', () => {
         const content = '{"name": "executeShell", "parameters": "ls"}';
         const result = extractFallbackToolCalls(content, knownTools);
-        expect(result.calls.length).toBeGreaterThanOrEqual(0);
+        // Parser parameters key'ini de tanır (satır 68)
+        expect(result.calls.length).toBe(1);
+        expect(result.calls[0]?.name).toBe('executeShell');
     });
 
     it('handles greedy JSON with backslash paths (fallback to function call parsing)', () => {
@@ -107,6 +111,61 @@ describe('extractFallbackToolCalls', () => {
         const content = '{"name": "unknownTool", "arguments": {"x": 1}}';
         const result = extractFallbackToolCalls(content, knownTools);
         expect(result.calls).toHaveLength(0);
+    });
+
+    it('extracts toolName{ JSON } format (Gemma style)', () => {
+        const content = 'webSearch{ "query": "son haberler", "count": 8 }';
+        const result = extractFallbackToolCalls(content, knownTools);
+        expect(result.calls).toHaveLength(1);
+        expect(result.calls[0].name).toBe('webSearch');
+        expect(result.calls[0].arguments).toEqual({ query: 'son haberler', count: 8 });
+        expect(result.rawMatches).toHaveLength(1);
+        expect(result.rawMatches[0]).toBe('webSearch{ "query": "son haberler", "count": 8 }');
+    });
+
+    it('extracts toolName{ JSON } with surrounding text', () => {
+        const content = 'Önce arama yapayım. webSearch{ "query": "test" } Sonra özetlerim.';
+        const result = extractFallbackToolCalls(content, knownTools);
+        expect(result.calls).toHaveLength(1);
+        expect(result.calls[0].name).toBe('webSearch');
+    });
+
+    it('strips toolName{ JSON } from content via rawMatches', () => {
+        const content = 'webSearch{ "query": "test" }';
+        const result = extractFallbackToolCalls(content, knownTools);
+        expect(result.calls).toHaveLength(1);
+        let stripped = content;
+        result.rawMatches.forEach(m => { stripped = stripped.replace(m, '').trim(); });
+        expect(stripped).toBe('');
+    });
+
+    it('strips function call format from content', () => {
+        const content = 'Dosyayı okuyorum. readFile(path="/test.txt")';
+        const result = extractFallbackToolCalls(content, knownTools);
+        expect(result.calls).toHaveLength(1);
+        let stripped = content;
+        result.rawMatches.forEach(m => { stripped = stripped.replace(m, '').trim(); });
+        expect(stripped).toBe('Dosyayı okuyorum.');
+    });
+
+    it('strips tool_code block from content', () => {
+        const content = 'Komut çalıştıracağım.\n```tool_code\nexecuteShell(command="ls")\n```\nSonuçları göstereceğim.';
+        const result = extractFallbackToolCalls(content, knownTools);
+        expect(result.calls).toHaveLength(1);
+        let stripped = content;
+        result.rawMatches.forEach(m => { stripped = stripped.replace(m, '').trim(); });
+        expect(stripped).toContain('Komut çalıştıracağım.');
+        expect(stripped).toContain('Sonuçları göstereceğim.');
+        expect(stripped).not.toContain('tool_code');
+    });
+
+    it('strips multiple tool calls from content', () => {
+        const content = 'Önce okuyayım. readFile(path="/a.txt") Sonra arayayım. webSearch{ "query": "test" }';
+        const result = extractFallbackToolCalls(content, knownTools);
+        expect(result.calls).toHaveLength(2);
+        let stripped = content;
+        result.rawMatches.forEach(m => { stripped = stripped.replace(m, '').trim(); });
+        expect(stripped.replace(/\s+/g, ' ')).toBe('Önce okuyayım. Sonra arayayım.');
     });
 });
 

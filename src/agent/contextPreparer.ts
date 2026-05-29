@@ -6,6 +6,10 @@ import { buildSystemPrompt } from './prompt.js';
 import { injectFallbackToolDirectives } from './toolPromptBuilder.js';
 import { formatRecentContextMessages } from './runtimeContext.js';
 import { GraphRAGConfigManager } from '../memory/graphRAG/config.js';
+import { composePrompt } from './prompts/builders/index.js';
+import { buildGraphRAGContextFragment } from './prompts/builders/graphRAGContext.js';
+import { buildMCPContextFragment } from './prompts/builders/mcpContext.js';
+import { buildTelescopicContextFragment } from './prompts/builders/telescopicContext.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { logger } from '../utils/index.js';
 
@@ -142,44 +146,44 @@ export class ContextPreparer {
 
         const memoryRelations = this.getMemoryRelationsForPrompt(params.relevantMemories);
 
-        let systemPrompt = buildSystemPrompt(
-            params.senderName,
-            memoryStrings,
-            recentContextStrings,
-            params.conversationSummaries,
-            params.reviewMemories.map(m => m.content),
+        let systemPrompt = buildSystemPrompt({
+            userName: params.senderName,
+            memories: memoryStrings,
+            recentContext: recentContextStrings,
+            conversationSummaries: params.conversationSummaries,
+            reviewMemories: params.reviewMemories.map(m => m.content),
             memoryRelations,
-            archivalMemoryStrings,
-            params.followUpCandidates.map(m => m.content),
+            archivalMemories: archivalMemoryStrings,
+            followUpMemories: params.followUpCandidates.map(m => m.content),
+        });
+
+        const graphRAGFragment = buildGraphRAGContextFragment({
+            shouldAdd: params.shouldAddCommunitySummaries,
+            communitySummariesFormatted: params.communitySummariesFormatted,
+        });
+
+        const mcpFragment = buildMCPContextFragment({
+            mcpListPrompt: params.mcpListPrompt,
+        });
+
+        const telescopicFragment = buildTelescopicContextFragment({
+            telescopicSummaries: params.telescopicSummaries ?? [],
+        });
+
+        const { prompt: composedPrompt } = composePrompt(
+            [graphRAGFragment, mcpFragment, telescopicFragment],
+            10000,
         );
 
-        if (params.shouldAddCommunitySummaries && params.communitySummariesFormatted) {
-            systemPrompt += `\n\n## GraphRAG Community Context\nAşağıdaki topluluk özetleri, kullanıcının bellek grafiğinden otomatik olarak çıkarılmıştır:\n${params.communitySummariesFormatted}`;
-        }
+        let finalSystemPrompt = systemPrompt + composedPrompt;
 
-        if (params.mcpListPrompt) {
-            systemPrompt += params.mcpListPrompt;
-        }
-
-        let finalSystemPrompt = systemPrompt;
         if (params.requiresFallback) {
             finalSystemPrompt = injectFallbackToolDirectives(finalSystemPrompt, params.allTools);
         }
 
-        // Telescopic summaries işleme
         let historyToKeep = params.history;
-        if (params.telescopicSummaries && params.telescopicSummaries.length > 0) {
-            finalSystemPrompt += `\n\n## Önceki Konuşma Özetleri (Teleskopik)\nAşağıdaki özetler, bu konuşmanın daha eski ve sıkıştırılmış kısımlarını içerir:\n\n`;
-            let maxEndMsgId = 0;
-            for (const sum of params.telescopicSummaries) {
-                finalSystemPrompt += `[Seviye ${sum.level} Özet]: ${sum.summary}\n`;
-                if (sum.end_msg_id > maxEndMsgId) {
-                    maxEndMsgId = sum.end_msg_id;
-                }
-            }
-            if (maxEndMsgId > 0) {
-                historyToKeep = params.history.filter(h => (h.id ?? Infinity) > maxEndMsgId);
-            }
+        if (telescopicFragment.maxEndMsgId > 0) {
+            historyToKeep = params.history.filter(h => (h.id ?? Infinity) > telescopicFragment.maxEndMsgId);
         }
 
         const llmMessages: LLMMessage[] = historyToKeep.map(h => ({
@@ -204,7 +208,6 @@ export class ContextPreparer {
             }
         }
 
-        // System prompt token cache — prompt değişmediyse encode() çağrısını atla
         const promptHash = this.simpleHash(finalSystemPrompt);
         let systemPromptTokens: number;
         if (promptHash === this._cachedSystemPromptHash) {
@@ -222,7 +225,7 @@ export class ContextPreparer {
             .map(m => typeof m.content === 'string' ? m.content : '')
             .join('\n');
         const totalHistoryTokens = encode(historyText).length;
-        const pastHistoryTokens = totalHistoryTokens - userMsgTokens;
+        const pastHistoryTokens = Math.max(0, totalHistoryTokens - userMsgTokens);
 
         return {
             systemPrompt,

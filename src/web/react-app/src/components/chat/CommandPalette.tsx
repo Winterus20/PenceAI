@@ -179,6 +179,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (flatList.length === 0) return;
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();

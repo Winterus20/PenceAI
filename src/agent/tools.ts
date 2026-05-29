@@ -15,66 +15,14 @@ import { logger } from '../utils/logger.js';
 import { SmartSearchEngine } from './search/index.js';
 import { createCronTools } from './mcp/tools/cronTools.js';
 import { globalEventBus } from '../utils/index.js';
+import {
+  findDangerousCommandMatch,
+  isShellBaseCommandAllowed,
+  matchesBypassPattern,
+  SHELL_COMMAND_ALLOWLIST,
+} from './securityPatterns.js';
 
 const execAsync = promisify(exec);
-
-/** Shell komutlar için güvenli allowlist */
-const SHELL_COMMAND_ALLOWLIST = new Set([
-  'ls', 'cat', 'grep', 'find', 'git', 'npm', 'node', 'python', 'python3',
-  'echo', 'pwd', 'head', 'tail', 'wc', 'diff', 'sort', 'uniq', 'awk', 'sed',
-]);
-
-/** Tehlikeli pattern'ler — kesin engel */
-const DANGEROUS_COMMAND_PATTERNS: { pattern: RegExp; desc: string }[] = [
-  { pattern: /\brm\s+-rf\s+\/(\s|$|--no-preserve-root)/i, desc: 'rm -rf /' },
-  { pattern: /\brm\s+-r\s+\/(\s|$|--no-preserve-root)/i, desc: 'rm -r /' },
-  { pattern: /\brm\s+-rf\s+\/\*/i, desc: 'rm -rf /*' },
-  { pattern: /\brm\s+-r\s+\/\*/i, desc: 'rm -r /*' },
-  { pattern: /\bformat\s+/i, desc: 'format' },
-  { pattern: /\bdel\s+\/f\s+\/s\s+\/q/i, desc: 'del /f /s /q' },
-  { pattern: /\bdel\s+\/s\s+\/q/i, desc: 'del /s /q' },
-  { pattern: /\bmkfs\b/i, desc: 'mkfs' },
-  { pattern: /:\s*\(\s*\)\s*\{/i, desc: 'fork bomb' },
-  { pattern: /\brd\s+\/s\s+\/q/i, desc: 'rd /s /q' },
-  { pattern: /\brmdir\s+\/s\s+\/q/i, desc: 'rmdir /s /q' },
-  { pattern: /remove-item\s+-recurse\s+-force\s+c:/i, desc: 'remove-item C:' },
-  { pattern: /remove-item\s+-recurse\s+-force\s+\//i, desc: 'remove-item /' },
-  { pattern: />\s*\/dev\/sd[a-z]/i, desc: 'disk overwrite' },
-  { pattern: /\bdd\s+if=\/dev\//i, desc: 'dd from /dev' },
-  { pattern: /\bchmod\s+-r\s+000\s+\//i, desc: 'chmod -r 000 /' },
-  { pattern: /\bchmod\s+-R\s+777\s+\//i, desc: 'chmod -R 777 /' },
-  { pattern: /\bchown\s+-r\s+/i, desc: 'chown -r' },
-  { pattern: /\bshutdown\b/i, desc: 'shutdown' },
-  { pattern: /\breboot\b/i, desc: 'reboot' },
-  { pattern: /\binit\s+0\b/i, desc: 'init 0' },
-  { pattern: /\binit\s+6\b/i, desc: 'init 6' },
-  { pattern: /\breg\s+delete\b/i, desc: 'reg delete' },
-  { pattern: /\breg\s+add\b/i, desc: 'reg add' },
-  { pattern: /\bcurl\s+.*\|\s*(sh|bash|cmd|powershell|pwsh|zsh)\b/i, desc: 'curl | shell' },
-  { pattern: /\bwget\s+.*\|\s*(sh|bash|cmd|powershell|pwsh|zsh)\b/i, desc: 'wget | shell' },
-  { pattern: /\bchattr\b/i, desc: 'chattr' },
-  { pattern: /\biptables\b/i, desc: 'iptables' },
-  { pattern: /\bfdisk\b/i, desc: 'fdisk' },
-  { pattern: /\bmount\b/i, desc: 'mount' },
-  { pattern: /\bumount\b/i, desc: 'umount' },
-];
-
-/** Bypass pattern'leri */
-const BYPASS_PATTERNS = [
-  /\|\s*(sh|bash|cmd|powershell|pwsh|zsh)\b/i,
-  /\$\(.*\)/,
-  /`[^`]+`/,
-  /;\s*(rm|del|rd|format|mkfs|shutdown|reboot|chmod|chown|dd|curl|wget)\b/i,
-  /&&\s*(rm|del|rd|format|mkfs|shutdown|reboot|chmod|chown|dd|curl|wget)\b/i,
-  /\|\|\s*(rm|del|rd|format|mkfs|shutdown|reboot|chmod|chown|dd|curl|wget)\b/i,
-  /\b(cmd|powershell|pwsh)\s+\/c\b/i,
-  /\beval\s+/i,
-  />\s*\/dev\/sd[a-z]/i,
-  /\bsudo\s+rm\b/i,
-  /\bsudo\s+chmod\b/i,
-  /\bsudo\s+chown\b/i,
-  /\bsudo\s+dd\b/i,
-];
 
 // ============================================================
 // Zod Runtime Validation Schemas
@@ -237,7 +185,7 @@ const WebSearchArgsSchema = z.object({
     invalid_type_error: '"query" parametresi bir string olmalıdır',
   }).min(1, '"query" parametresi boş olamaz'),
   count: z.coerce.number().int().min(1).max(10).optional().default(5),
-  freshness: z.enum(['pd', 'pw', 'pm', 'py']).optional(),
+  freshness: z.string().optional(),
 });
 
 /**
@@ -781,21 +729,18 @@ export function createBuiltinTools(
 
           // Güvenlik kontrolü — tehlikeli komutları engelle
           const normalized = command.toLowerCase().replace(/\s+/g, ' ').trim();
-          for (const { pattern, desc } of DANGEROUS_COMMAND_PATTERNS) {
-            if (pattern.test(normalized)) {
-              return `⛔ Güvenlik: Bu komut tehlikeli olarak işaretlenmiş ve engellendi (${desc}): ${command}`;
-            }
+          const dangerousMatch = findDangerousCommandMatch(command);
+          if (dangerousMatch) {
+            return `⛔ Güvenlik: Bu komut tehlikeli olarak işaretlenmiş ve engellendi (${dangerousMatch.desc}): ${command}`;
           }
 
-          for (const pattern of BYPASS_PATTERNS) {
-            if (pattern.test(command)) {
-              return `⛔ Güvenlik: Tehlikeli komut kalıbı tespit edildi ve engellendi: ${command}`;
-            }
+          if (matchesBypassPattern(command)) {
+            return `⛔ Güvenlik: Tehlikeli komut kalıbı tespit edildi ve engellendi: ${command}`;
           }
 
           // Allowlist kontrolü — base komut listede olmalı
           const baseCmd = normalized.split(/\s+/)[0];
-          if (!baseCmd || !SHELL_COMMAND_ALLOWLIST.has(baseCmd)) {
+          if (!baseCmd || !isShellBaseCommandAllowed(baseCmd)) {
             return `⛔ Güvenlik: "${baseCmd || 'Bilinmeyen'}" komutu allowlist'te yok. İzin verilen komutlar: ${Array.from(SHELL_COMMAND_ALLOWLIST).join(', ')}`;
           }
 
@@ -888,8 +833,14 @@ export function createBuiltinTools(
             const validation = validateArgs(WebSearchArgsSchema, args);
             if (!validation.success) return validation.error;
 
-            const { query, freshness } = validation.data;
+            const { query, freshness: rawFreshness } = validation.data;
             const count = validation.data.count ?? 5;
+
+            const freshnessMap: Record<string, 'pd' | 'pw' | 'pm' | 'py'> = {
+                day: 'pd', week: 'pw', month: 'pm', year: 'py',
+                pd: 'pd', pw: 'pw', pm: 'pm', py: 'py',
+            };
+            const freshness = rawFreshness ? (freshnessMap[rawFreshness.toLowerCase()] ?? undefined) : undefined;
 
             try {
                 const searchEngine = new SmartSearchEngine({

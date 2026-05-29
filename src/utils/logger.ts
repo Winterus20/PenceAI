@@ -52,7 +52,8 @@ export interface TraceContext {
 }
 export const asyncLocalStorage = new AsyncLocalStorage<TraceContext>();
 
-// Pino Konfigürasyonu
+// Pino Konfigürasyonu — module load uses process.env to avoid circular import with config.ts.
+// Gateway bootstrap calls updateLogLevel() after loadConfig(); reloadConfig() hot-reloads on settings change.
 const isProd = process.env.NODE_ENV === 'production';
 const logLevel = process.env.LOG_LEVEL || 'info';
 

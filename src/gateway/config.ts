@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { logger, updateLogLevel } from '../utils/logger.js';
 import { z } from 'zod';
+import { DEFAULT_AUTONOMOUS_AUTO_APPROVE_TOOLS } from './securityDefaults.js';
 
 dotenv.config();
 
@@ -29,12 +30,13 @@ function booleanFromEnv(defaultValue: boolean) {
   );
 }
 
-const validLLMProviders = ['openai', 'anthropic', 'ollama', 'minimax', 'github', 'groq', 'mistral', 'nvidia'] as const;
+const validLLMProviders = ['openai', 'anthropic', 'ollama', 'minimax', 'github', 'groq', 'mistral', 'nvidia', 'custom', 'openrouter'] as const;
 const validEmbeddingProviders = ['minimax', 'openai', 'voyage', 'none'] as const;
 
 const ConfigSchema = z.object({
+  nodeEnv: z.enum(['development', 'production', 'test']).catch('development').default('development'),
   port: z.coerce.number().default(3001),
-  host: z.string().default('0.0.0.0'),
+  host: z.string().default('127.0.0.1'),
   dbPath: z.string().optional(),
   projectRoot: z.string().optional(),
   defaultUserName: z.string().default('Kullanıcı'),
@@ -49,6 +51,11 @@ const ConfigSchema = z.object({
   groqApiKey: z.string().optional(),
   mistralApiKey: z.string().optional(),
   nvidiaApiKey: z.string().optional(),
+  customOpenaiApiKey: z.string().optional(),
+  customOpenaiBaseUrl: z.string().optional(),
+  openrouterApiKey: z.string().optional(),
+  openrouterHttpReferer: z.string().optional(),
+  openrouterAppTitle: z.string().optional(),
   ollamaBaseUrl: z.string().default('http://localhost:11434'),
   enableOllamaTools: booleanFromEnv(false),
   enableNvidiaTools: booleanFromEnv(false),
@@ -76,6 +83,28 @@ const ConfigSchema = z.object({
   shellTimeout: z.coerce.number().min(5000).max(300000).catch(30000).default(30000),
   fsRootDir: z.string().optional(),
   dashboardPassword: z.string().optional(),
+  allowLocalhostWsBypass: z.preprocess(
+    (val) => {
+      if (typeof val === 'boolean') return val;
+      if (typeof val === 'string') {
+        const lower = val.trim().toLowerCase();
+        if (lower === 'true' || lower === '1' || lower === 'yes' || lower === 'on') return true;
+        if (lower === 'false' || lower === '0' || lower === 'no' || lower === 'off' || lower === '') return false;
+      }
+      const nodeEnv = process.env.NODE_ENV || 'development';
+      return nodeEnv !== 'production';
+    },
+    z.boolean(),
+  ),
+  autonomousAutoApproveTools: z.preprocess(
+    (val) => {
+      if (typeof val === 'string' && val.trim()) {
+        return val.split(',').map((s) => s.trim()).filter(Boolean);
+      }
+      return [...DEFAULT_AUTONOMOUS_AUTO_APPROVE_TOOLS];
+    },
+    z.array(z.string().min(1)),
+  ),
   braveSearchApiKey: z.string().optional(),
   jinaReaderApiKey: z.string().optional(),
   sensitivePaths: z.preprocess(
@@ -97,26 +126,26 @@ const ConfigSchema = z.object({
 
   // Advanced Settings
   systemPrompt: z.string().optional(),
-  autonomousStepLimit: z.coerce.number().default(5),
-  memoryDecayThreshold: z.coerce.number().default(30),
-  semanticSearchThreshold: z.coerce.number().default(0.7),
-  logLevel: z.enum(['debug', 'info', 'error']).catch('info').default('info'),
+  autonomousStepLimit: z.coerce.number().min(1).max(100).default(5),
+  memoryDecayThreshold: z.coerce.number().min(1).max(365).default(30),
+  semanticSearchThreshold: z.coerce.number().min(0).max(1).default(0.7),
+  logLevel: z.enum(['trace', 'debug', 'info', 'warn', 'error']).catch('info').default('info'),
   temperature: z.coerce.number().min(0).max(2).catch(0.7).default(0.7),
   maxTokens: z.coerce.number().min(256).max(128000).catch(4096).default(4096),
 
   // Hooks
-  enableHooks: z.coerce.boolean().default(true),
-  hookSecurityMonitor: z.coerce.boolean().default(true),
-  hookOutputSanitizer: z.coerce.boolean().default(true),
+  enableHooks: booleanFromEnv(true),
+  hookSecurityMonitor: booleanFromEnv(true),
+  hookOutputSanitizer: booleanFromEnv(true),
   hookConsoleLogDetector: z.enum(['ask', 'approve', 'block']).catch('ask').default('ask'),
-  hookObservationCapture: z.coerce.boolean().default(true),
-  hookDevServerBlocker: z.coerce.boolean().default(true),
-  hookContextBudgetGuard: z.coerce.boolean().default(true),
-  hookSessionSummary: z.coerce.boolean().default(true),
+  hookObservationCapture: booleanFromEnv(true),
+  hookDevServerBlocker: booleanFromEnv(true),
+  hookContextBudgetGuard: booleanFromEnv(true),
+  hookSessionSummary: booleanFromEnv(true),
   hookApprovalMode: z.enum(['ask', 'approve']).default('ask'),
 
   // Context Compaction
-  compactEnabled: z.coerce.boolean().default(true),
+  compactEnabled: booleanFromEnv(true),
   compactTokenThreshold: z.coerce.number().min(10000).max(200000).catch(100000).default(100000),
   compactPreserveRecentMessages: z.coerce.number().min(2).max(50).catch(10).default(10),
   compactPreserveFileAttachments: z.coerce.boolean().default(true),
@@ -164,6 +193,32 @@ const ConfigSchema = z.object({
   mcpTimeout: z.coerce.number().min(1000).max(300000).catch(30000).default(30000),
   mcpMaxConcurrent: z.coerce.number().min(1).max(50).catch(5).default(5),
   mcpLogging: booleanFromEnv(true),
+  mcpAllowedEnvVars: z.preprocess(
+    (val) => {
+      if (typeof val === 'string' && val.trim()) {
+        return val.split(',').map((s) => s.trim()).filter(Boolean);
+      }
+      return ['PATH', 'HOME', 'USERPROFILE', 'APPDATA', 'TEMP', 'TMP', 'SYSTEMROOT', 'COMSPEC', 'PATHEXT', 'TERM', 'LANG'];
+    },
+    z.array(z.string()).default(['PATH', 'HOME', 'USERPROFILE', 'APPDATA', 'TEMP', 'TMP', 'SYSTEMROOT', 'COMSPEC', 'PATHEXT', 'TERM', 'LANG']),
+  ),
+}).superRefine((data, ctx) => {
+  if (data.nodeEnv === 'production') {
+    const pwd = data.dashboardPassword?.trim();
+    if (!pwd) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'DASHBOARD_PASSWORD production ortamında zorunludur',
+        path: ['dashboardPassword'],
+      });
+    } else if (pwd.length < 12) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'DASHBOARD_PASSWORD production ortamında en az 12 karakter olmalıdır',
+        path: ['dashboardPassword'],
+      });
+    }
+  }
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema> & {
@@ -173,6 +228,7 @@ export type AppConfig = z.infer<typeof ConfigSchema> & {
 
 export function loadConfig(): AppConfig {
     const rawConfig = {
+        nodeEnv: process.env.NODE_ENV,
         port: process.env.PORT,
         host: process.env.HOST,
         dbPath: process.env.DB_PATH,
@@ -182,10 +238,16 @@ export function loadConfig(): AppConfig {
         openaiApiKey: process.env.OPENAI_API_KEY,
         anthropicApiKey: process.env.ANTHROPIC_API_KEY,
         minimaxApiKey: process.env.MINIMAX_API_KEY,
-        githubToken: process.env.GITHUB_TOKEN,
+        // GITHUB_MODELS_TOKEN tercih edilir (GitHub Actions ile çakışmayı önlemek için)
+        githubToken: process.env.GITHUB_MODELS_TOKEN || process.env.GITHUB_TOKEN,
         groqApiKey: process.env.GROQ_API_KEY,
         mistralApiKey: process.env.MISTRAL_API_KEY,
         nvidiaApiKey: process.env.NVIDIA_API_KEY,
+        customOpenaiApiKey: process.env.CUSTOM_OPENAI_API_KEY,
+        customOpenaiBaseUrl: process.env.CUSTOM_OPENAI_BASE_URL,
+        openrouterApiKey: process.env.OPENROUTER_API_KEY,
+        openrouterHttpReferer: process.env.OPENROUTER_HTTP_REFERER,
+        openrouterAppTitle: process.env.OPENROUTER_APP_TITLE,
         ollamaBaseUrl: process.env.OLLAMA_BASE_URL,
         enableOllamaTools: process.env.ENABLE_OLLAMA_TOOLS,
         enableNvidiaTools: process.env.ENABLE_NVIDIA_TOOLS,
@@ -201,6 +263,8 @@ export function loadConfig(): AppConfig {
         shellTimeout: process.env.SHELL_TIMEOUT,
         fsRootDir: process.env.FS_ROOT_DIR,
         dashboardPassword: process.env.DASHBOARD_PASSWORD,
+        allowLocalhostWsBypass: process.env.ALLOW_LOCALHOST_WS_BYPASS,
+        autonomousAutoApproveTools: process.env.AUTONOMOUS_AUTO_APPROVE_TOOLS,
         braveSearchApiKey: process.env.BRAVE_SEARCH_API_KEY,
         jinaReaderApiKey: process.env.JINA_READER_API_KEY,
         sensitivePaths: process.env.SENSITIVE_PATHS,
@@ -273,6 +337,7 @@ export function loadConfig(): AppConfig {
         mcpTimeout: process.env.MCP_TIMEOUT,
         mcpMaxConcurrent: process.env.MCP_MAX_CONCURRENT,
         mcpLogging: process.env.MCP_LOGGING,
+        mcpAllowedEnvVars: process.env.MCP_ALLOWED_ENV_VARS,
     };
 
     const parsed = ConfigSchema.safeParse(rawConfig);
@@ -304,6 +369,8 @@ export function getConfig(): AppConfig {
 }
 
 export function reloadConfig(): void {
+    // Re-read .env into process.env so loadConfig() sees persisted changes
+    dotenv.config({ override: true });
     _config = loadConfig();
     // Hot-reload log level when config changes
     updateLogLevel(_config.logLevel);

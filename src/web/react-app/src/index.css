@@ -37,22 +37,22 @@
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-5: hsl(var(--chart-5));
 
-  /* Surface colors for glass-panel components (light tema varsayılan) */
-  --color-surface-border: rgba(0, 0, 0, 0.10);
-  --color-surface-xs: rgba(0, 0, 0, 0.03);
-  --color-surface-sm: rgba(0, 0, 0, 0.05);
-  --color-surface: rgba(0, 0, 0, 0.06);
-  --color-surface-md: rgba(0, 0, 0, 0.08);
-  --color-surface-lg: rgba(0, 0, 0, 0.10);
-  --color-surface-xl: rgba(0, 0, 0, 0.12);
-  --color-surface-strong: rgba(0, 0, 0, 0.12);
+  /* Surface colors for glass-panel components */
+  --color-surface-border: var(--surface-border);
+  --color-surface-xs: var(--surface-xs);
+  --color-surface-sm: var(--surface-sm);
+  --color-surface: var(--surface);
+  --color-surface-md: var(--surface-md);
+  --color-surface-lg: var(--surface-lg);
+  --color-surface-xl: var(--surface-xl);
+  --color-surface-strong: var(--surface-strong);
 
-  /* Text opacity colors (light tema) */
-  --color-text-surface-subtle: rgba(0, 0, 0, 0.45);
-  --color-text-surface-muted: rgba(0, 0, 0, 0.38);
-  --color-text-surface: rgba(0, 0, 0, 0.58);
-  --color-text-surface-strong: rgba(0, 0, 0, 0.74);
-  --color-text-surface-emphasis: rgba(0, 0, 0, 0.88);
+  /* Text opacity colors */
+  --color-text-surface-subtle: var(--text-surface-subtle);
+  --color-text-surface-muted: var(--text-surface-muted);
+  --color-text-surface: var(--text-surface);
+  --color-text-surface-strong: var(--text-surface-strong);
+  --color-text-surface-emphasis: var(--text-surface-emphasis);
 
   /* Category colors for memory graph */
   --color-category-purple: #8b5cf6;
@@ -83,16 +83,16 @@
   --color-edge-part-of: #8b5cf6;
   --color-edge-has-entity: #334155;
 
-  /* Dialog field colors (light tema) */
-  --color-dialog-bg: rgba(0, 0, 0, 0.02);
-  --color-dialog-bg-hover: rgba(0, 0, 0, 0.04);
-  --color-dialog-border: rgba(0, 0, 0, 0.08);
-  --color-dialog-border-focus: rgba(0, 0, 0, 0.14);
-  --color-dialog-text: rgba(0, 0, 0, 0.88);
-  --color-dialog-text-muted: rgba(0, 0, 0, 0.38);
-  --color-dialog-text-label: rgba(0, 0, 0, 0.84);
-  --color-dialog-text-description: rgba(0, 0, 0, 0.74);
-  --color-dialog-icon-bg: rgba(0, 0, 0, 0.04);
+  /* Dialog field colors */
+  --color-dialog-bg: var(--dialog-bg);
+  --color-dialog-bg-hover: var(--dialog-bg-hover);
+  --color-dialog-border: var(--dialog-border);
+  --color-dialog-border-focus: var(--dialog-border-focus);
+  --color-dialog-text: var(--dialog-text);
+  --color-dialog-text-muted: var(--dialog-text-muted);
+  --color-dialog-text-label: var(--dialog-text-label);
+  --color-dialog-text-description: var(--dialog-text-description);
+  --color-dialog-icon-bg: var(--dialog-icon-bg);
 
   /* Font sizes */
   --text-meta: 10px;
@@ -138,6 +138,34 @@
   --radius: 1.25rem;
   
   --sidebar: 0 0% 97%;
+
+  /* Surface colors - Light */
+  --surface-border: rgba(0, 0, 0, 0.10);
+  --surface-xs: rgba(0, 0, 0, 0.03);
+  --surface-sm: rgba(0, 0, 0, 0.05);
+  --surface: rgba(0, 0, 0, 0.06);
+  --surface-md: rgba(0, 0, 0, 0.08);
+  --surface-lg: rgba(0, 0, 0, 0.10);
+  --surface-xl: rgba(0, 0, 0, 0.12);
+  --surface-strong: rgba(0, 0, 0, 0.12);
+
+  /* Text opacity colors - Light */
+  --text-surface-subtle: rgba(0, 0, 0, 0.45);
+  --text-surface-muted: rgba(0, 0, 0, 0.38);
+  --text-surface: rgba(0, 0, 0, 0.58);
+  --text-surface-strong: rgba(0, 0, 0, 0.74);
+  --text-surface-emphasis: rgba(0, 0, 0, 0.88);
+
+  /* Dialog field colors - Light */
+  --dialog-bg: rgba(0, 0, 0, 0.02);
+  --dialog-bg-hover: rgba(0, 0, 0, 0.04);
+  --dialog-border: rgba(0, 0, 0, 0.08);
+  --dialog-border-focus: rgba(0, 0, 0, 0.14);
+  --dialog-text: rgba(0, 0, 0, 0.88);
+  --dialog-text-muted: rgba(0, 0, 0, 0.38);
+  --dialog-text-label: rgba(0, 0, 0, 0.84);
+  --dialog-text-description: rgba(0, 0, 0, 0.74);
+  --dialog-icon-bg: rgba(0, 0, 0, 0.04);
 
   /* Category colors for memory graph */
   --category-preference: #8b5cf6;
@@ -186,32 +214,33 @@
   --ring: 0 0% 68%;
   --sidebar: 0 0% 6%; /* #0f0f0f */
 
-  /* Dark mode surface/dialog/text overrides */
-  --color-surface-border: rgba(255, 255, 255, 0.06);
-  --color-surface-xs: rgba(255, 255, 255, 0.01);
-  --color-surface-sm: rgba(255, 255, 255, 0.015);
-  --color-surface: rgba(255, 255, 255, 0.02);
-  --color-surface-md: rgba(255, 255, 255, 0.025);
-  --color-surface-lg: rgba(255, 255, 255, 0.028);
-  --color-surface-xl: rgba(255, 255, 255, 0.04);
+  /* Surface colors - Dark */
+  --surface-border: rgba(255, 255, 255, 0.06);
+  --surface-xs: rgba(255, 255, 255, 0.01);
+  --surface-sm: rgba(255, 255, 255, 0.015);
+  --surface: rgba(255, 255, 255, 0.02);
+  --surface-md: rgba(255, 255, 255, 0.025);
+  --surface-lg: rgba(255, 255, 255, 0.028);
+  --surface-xl: rgba(255, 255, 255, 0.04);
+  --surface-strong: rgba(255, 255, 255, 0.06);
 
-  --color-text-surface-subtle: rgba(255, 255, 255, 0.50);
-  --color-text-surface-muted: rgba(255, 255, 255, 0.42);
-  --color-text-surface: rgba(255, 255, 255, 0.62);
-  --color-text-surface-strong: rgba(255, 255, 255, 0.78);
-  --color-text-surface-emphasis: rgba(255, 255, 255, 0.92);
+  /* Text opacity colors - Dark */
+  --text-surface-subtle: rgba(255, 255, 255, 0.50);
+  --text-surface-muted: rgba(255, 255, 255, 0.42);
+  --text-surface: rgba(255, 255, 255, 0.62);
+  --text-surface-strong: rgba(255, 255, 255, 0.78);
+  --text-surface-emphasis: rgba(255, 255, 255, 0.92);
 
-  --color-surface-strong: rgba(255, 255, 255, 0.06);
-
-  --color-dialog-bg: rgba(255, 255, 255, 0.02);
-  --color-dialog-bg-hover: rgba(255, 255, 255, 0.028);
-  --color-dialog-border: rgba(255, 255, 255, 0.06);
-  --color-dialog-border-focus: rgba(255, 255, 255, 0.12);
-  --color-dialog-text: rgba(255, 255, 255, 0.92);
-  --color-dialog-text-muted: rgba(255, 255, 255, 0.42);
-  --color-dialog-text-label: rgba(255, 255, 255, 0.88);
-  --color-dialog-text-description: rgba(255, 255, 255, 0.78);
-  --color-dialog-icon-bg: rgba(255, 255, 255, 0.04);
+  /* Dialog field colors - Dark */
+  --dialog-bg: rgba(255, 255, 255, 0.02);
+  --dialog-bg-hover: rgba(255, 255, 255, 0.028);
+  --dialog-border: rgba(255, 255, 255, 0.06);
+  --dialog-border-focus: rgba(255, 255, 255, 0.12);
+  --dialog-text: rgba(255, 255, 255, 0.92);
+  --dialog-text-muted: rgba(255, 255, 255, 0.42);
+  --dialog-text-label: rgba(255, 255, 255, 0.88);
+  --dialog-text-description: rgba(255, 255, 255, 0.78);
+  --dialog-icon-bg: rgba(255, 255, 255, 0.04);
 }
 
 @layer base {

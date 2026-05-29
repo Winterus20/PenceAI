@@ -221,10 +221,8 @@ export class AnthropicProvider extends LLMProvider {
                     thinkingContent += (event.delta as { thinking: string }).thinking;
                 } else if (event.delta.type === 'text_delta') {
                     content += event.delta.text;
-                    if (!hasToolCalls) {
-                        onToken(event.delta.text);
-                        tokensEmitted = true;
-                    }
+                    onToken(event.delta.text);
+                    tokensEmitted = true;
                 } else if (event.delta.type === 'input_json_delta' && currentToolUse) {
                     currentToolUse.inputStr += event.delta.partial_json;
                 }
@@ -242,7 +240,24 @@ export class AnthropicProvider extends LLMProvider {
             }
         }
 
-        return { content, thinkingContent: thinkingContent || undefined, toolCalls: toolCalls.length ? toolCalls : undefined, finishReason: toolCalls.length ? 'tool_calls' : 'stop' };
+        // Stream usage bilgisini al (finalMessage ile)
+        let usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
+        try {
+            const finalMsg = await stream.finalMessage();
+            if (finalMsg?.usage) {
+                const promptTokens = finalMsg.usage.input_tokens;
+                const completionTokens = finalMsg.usage.output_tokens;
+                usage = {
+                    promptTokens,
+                    completionTokens,
+                    totalTokens: promptTokens + completionTokens,
+                };
+            }
+        } catch {
+            // finalMessage başarısız olursa usage undefined kalır
+        }
+
+        return { content, thinkingContent: thinkingContent || undefined, toolCalls: toolCalls.length ? toolCalls : undefined, finishReason: toolCalls.length ? 'tool_calls' : 'stop', usage };
     }
 
     async healthCheck(): Promise<boolean> {
@@ -254,10 +269,11 @@ export class AnthropicProvider extends LLMProvider {
             });
             return true;
         } catch (err: unknown) {
-            // 401 = gecersiz API key, 403 = yetkisiz
-            // Diger hatalar (rate limit, network) false doner
+            // 401 = geçersiz API key, 403 = yetkisiz, 429 = rate limit → false
+            // Ağ hataları da false döner
             if (err instanceof Error && 'status' in err) {
-                return (err as any).status !== 401 && (err as any).status !== 403;
+                const status = (err as unknown as Record<string, number>).status;
+                return status !== 401 && status !== 403 && status !== 429;
             }
             return false;
         }

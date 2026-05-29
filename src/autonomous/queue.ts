@@ -1,24 +1,40 @@
+import { randomUUID } from 'crypto';
 import { logger } from '../utils/logger.js';
 import type Database from 'better-sqlite3';
 
-export type TaskExecutor = (payload: any, signal: AbortSignal) => Promise<void>;
+export const DEFAULT_TASK_LEASE_MS = 15 * 60 * 1000;
+
+export type TaskPayload = Record<string, unknown>;
+
+export type TaskExecutor = (payload: TaskPayload, signal: AbortSignal) => Promise<void>;
 
 export enum TaskPriority {
-    P1_CRITICAL = 1, // Conflict resolution, user direct requests
-    P2_HIGH = 2,     // Semantic routing fallback, initial graph extraction
-    P3_NORMAL = 3,   // Routine memory consolidation, decay processing
-    P4_LOW = 4       // Deep philosophical analysis, slow background tasks
+    P1_CRITICAL = 1,
+    P2_HIGH = 2,
+    P3_NORMAL = 3,
+    P4_LOW = 4,
 }
 
 export interface AutonomousTask {
     id: string;
     type: string;
     priority: TaskPriority;
-    payload: any;
+    payload: TaskPayload;
     addedAt: number;
     execute?: (signal: AbortSignal) => Promise<void>;
-    retryCount?: number;       // How many times retried
-    maxRetries?: number;       // Maximum retries allowed (default: 2)
+    retryCount?: number;
+    maxRetries?: number;
+    leaseToken?: string;
+}
+
+interface DbTaskRow {
+    id: string;
+    type: string;
+    priority: number;
+    payload: string;
+    added_at: string;
+    retry_count?: number | null;
+    max_retries?: number | null;
 }
 
 export class TaskQueue {
@@ -34,98 +50,211 @@ export class TaskQueue {
         this.registry.set(type, handler);
     }
 
+    /**
+     * Crash sonrası DB'de 'running' kalan görevleri pending'e çevirir.
+     */
+    public recoverStaleTasksOnStartup(): number {
+        if (!this.db) return 0;
+        try {
+            const result = this.db.prepare(`
+                UPDATE autonomous_tasks
+                SET status = 'pending',
+                    lease_token = NULL,
+                    lease_expires_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'running'
+            `).run();
+            if (result.changes > 0) {
+                logger.info(`[TaskQueue] 🔄 Recovered ${result.changes} stale running task(s) → pending`);
+            }
+            return result.changes;
+        } catch (err) {
+            logger.warn({ err }, '[TaskQueue] Failed to recover stale tasks on startup');
+            return 0;
+        }
+    }
+
     public loadPendingTasks(): void {
         if (!this.db) return;
+        this.recoverStaleTasksOnStartup();
         try {
             const rows = this.db.prepare(`
-                SELECT id, type, priority, payload, added_at 
-                FROM autonomous_tasks 
-                WHERE status = 'pending' OR status = 'running'
+                SELECT id, type, priority, payload, added_at, retry_count, max_retries
+                FROM autonomous_tasks
+                WHERE status = 'pending'
                 ORDER BY priority ASC, added_at ASC
-            `).all() as any[];
+            `).all() as DbTaskRow[];
 
             let loadedCount = 0;
             for (const row of rows) {
-                const handler = this.registry.get(row.type);
-                if (!handler) {
-                    logger.warn(`[TaskQueue] ⚠️ No handler registered for task type: ${row.type}. Skipping task ${row.id}.`);
-                    continue;
-                }
-
-                let parsedPayload = {};
-                try {
-                    parsedPayload = JSON.parse(row.payload);
-                } catch (e) {
-                    logger.debug({ taskId: row.id, err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to parse task payload, using empty object');
-                }
-
-                this.queue.push({
-                    id: row.id,
-                    type: row.type,
-                    priority: row.priority,
-                    payload: parsedPayload,
-                    addedAt: new Date(row.added_at).getTime(),
-                    execute: async (signal) => {
-                        await handler(parsedPayload, signal);
-                    }
-                });
+                if (this.queue.some((task) => task.id === row.id)) continue;
+                if (!this.rehydrateTaskFromRow(row)) continue;
                 loadedCount++;
             }
 
-            logger.info(`[TaskQueue] 💾 Checkpoint: Found ${rows.length} pending/running tasks, rehydrated ${loadedCount} tasks into memory.`);
+            logger.info(`[TaskQueue] 💾 Checkpoint: Found ${rows.length} pending tasks, rehydrated ${loadedCount} into memory.`);
         } catch (err) {
             logger.warn({ err }, '[TaskQueue] ❌ Failed to load pending tasks from DB.');
         }
     }
 
-    private syncToDb(task: AutonomousTask, status: 'pending' | 'running' | 'completed' | 'failed', payloadStr?: string): void {
+    /**
+     * Süresi dolmuş lease'leri geri alır. Aktif worker görevini atlar.
+     */
+    public sweepExpiredLeases(skipTaskId?: string | null): { requeued: number; failed: number } {
+        if (!this.db) return { requeued: 0, failed: 0 };
+
+        const now = new Date().toISOString();
+        const skipId = skipTaskId ?? null;
+
+        try {
+            const failed = this.db.prepare(`
+                UPDATE autonomous_tasks
+                SET status = 'failed',
+                    lease_token = NULL,
+                    lease_expires_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'running'
+                  AND lease_expires_at IS NOT NULL
+                  AND lease_expires_at < ?
+                  AND COALESCE(retry_count, 0) >= COALESCE(max_retries, 2)
+                  AND (? IS NULL OR id != ?)
+            `).run(now, skipId, skipId).changes;
+
+            const requeuedRows = this.db.prepare(`
+                UPDATE autonomous_tasks
+                SET status = 'pending',
+                    retry_count = COALESCE(retry_count, 0) + 1,
+                    lease_token = NULL,
+                    lease_expires_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'running'
+                  AND lease_expires_at IS NOT NULL
+                  AND lease_expires_at < ?
+                  AND COALESCE(retry_count, 0) < COALESCE(max_retries, 2)
+                  AND (? IS NULL OR id != ?)
+                RETURNING id, type, priority, payload, added_at, retry_count, max_retries
+            `).all(now, skipId, skipId) as DbTaskRow[];
+
+            let rehydrated = 0;
+            for (const row of requeuedRows) {
+                if (this.rehydrateTaskFromRow(row)) {
+                    rehydrated++;
+                }
+            }
+
+            return { requeued: rehydrated, failed };
+        } catch (err) {
+            logger.warn({ err }, '[TaskQueue] Failed to sweep expired leases');
+            return { requeued: 0, failed: 0 };
+        }
+    }
+
+    public renewLease(taskId: string): boolean {
+        if (!this.db) return false;
+        try {
+            const expiresAt = new Date(Date.now() + DEFAULT_TASK_LEASE_MS).toISOString();
+            const result = this.db.prepare(`
+                UPDATE autonomous_tasks
+                SET lease_expires_at = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'running'
+            `).run(expiresAt, taskId);
+            return result.changes > 0;
+        } catch (err) {
+            logger.warn({ err, taskId }, '[TaskQueue] Failed to renew lease');
+            return false;
+        }
+    }
+
+    private rehydrateTaskFromRow(row: DbTaskRow): boolean {
+        const handler = this.registry.get(row.type);
+        if (!handler) {
+            logger.warn(`[TaskQueue] ⚠️ No handler registered for task type: ${row.type}. Skipping task ${row.id}.`);
+            return false;
+        }
+
+        let parsedPayload: TaskPayload = {};
+        try {
+            parsedPayload = JSON.parse(row.payload);
+        } catch (e) {
+            logger.debug({ taskId: row.id, err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to parse task payload, using empty object');
+        }
+
+        const task: AutonomousTask = {
+            id: row.id,
+            type: row.type,
+            priority: row.priority as TaskPriority,
+            payload: parsedPayload,
+            addedAt: new Date(row.added_at).getTime(),
+            retryCount: row.retry_count ?? 0,
+            maxRetries: row.max_retries ?? 2,
+            execute: async (signal) => {
+                await handler(parsedPayload, signal);
+            },
+        };
+
+        this.insertSorted(task);
+        return true;
+    }
+
+    private syncToDb(
+        task: AutonomousTask,
+        status: 'pending' | 'running' | 'completed' | 'failed',
+        payloadStr?: string,
+        lease?: { token: string; expiresAt: string } | null,
+    ): void {
         if (!this.db) return;
         try {
             const currentPayload = payloadStr ?? JSON.stringify(task.payload);
             const addedAtDate = new Date(task.addedAt).toISOString();
 
             this.db.prepare(`
-                INSERT INTO autonomous_tasks (id, type, priority, payload, status, added_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(id) DO UPDATE SET 
-                    status = excluded.status, 
+                INSERT INTO autonomous_tasks (
+                    id, type, priority, payload, status, added_at, updated_at,
+                    lease_token, lease_expires_at, retry_count, max_retries
+                )
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    status = excluded.status,
                     payload = excluded.payload,
-                    updated_at = CURRENT_TIMESTAMP
-            `).run(task.id, task.type, task.priority, currentPayload, status, addedAtDate);
+                    updated_at = CURRENT_TIMESTAMP,
+                    lease_token = excluded.lease_token,
+                    lease_expires_at = excluded.lease_expires_at,
+                    retry_count = COALESCE(excluded.retry_count, autonomous_tasks.retry_count, 0),
+                    max_retries = COALESCE(excluded.max_retries, autonomous_tasks.max_retries, 2)
+            `).run(
+                task.id,
+                task.type,
+                task.priority,
+                currentPayload,
+                status,
+                addedAtDate,
+                lease?.token ?? null,
+                lease?.expiresAt ?? null,
+                task.retryCount ?? 0,
+                task.maxRetries ?? 2,
+            );
         } catch (err) {
             logger.error({ err }, `[TaskQueue] ❌ Failed to sync task ${task.id} to DB.`);
         }
     }
 
-    public updateTaskPayload(taskId: string, newPayload: any): void {
+    public updateTaskPayload(taskId: string, newPayload: TaskPayload): void {
         const t = this.queue.find(x => x.id === taskId);
         if (t) {
             t.payload = newPayload;
-            this.syncToDb(t, 'running'); // Just an update
-        } else {
-            // Task might not be in memory queue but we can still update DB
-            if (this.db) {
-                try {
-                    this.db.prepare(`UPDATE autonomous_tasks SET payload = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-                        .run(JSON.stringify(newPayload), taskId);
-                } catch (e) {
-                    logger.warn({ taskId, err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to update task payload in DB');
-                }
+            this.syncToDb(t, 'running');
+        } else if (this.db) {
+            try {
+                this.db.prepare(`UPDATE autonomous_tasks SET payload = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+                    .run(JSON.stringify(newPayload), taskId);
+            } catch (e) {
+                logger.warn({ taskId, err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to update task payload in DB');
             }
         }
     }
 
-    enqueue(task: AutonomousTask): void {
-        if (!task.execute && task.type) {
-            const handler = this.registry.get(task.type);
-            if (handler) {
-                task.execute = async (signal) => {
-                    await handler(task.payload, signal);
-                };
-            }
-        }
-
-        // Binary insertion — O(log N) arama + O(N) splice, her seferinde O(N log N) sort yerine
+    private insertSorted(task: AutonomousTask): void {
         let lo = 0;
         let hi = this.queue.length;
         while (lo < hi) {
@@ -138,27 +267,49 @@ export class TaskQueue {
             else hi = mid;
         }
         this.queue.splice(lo, 0, task);
+    }
 
+    enqueue(task: AutonomousTask): void {
+        if (!task.execute && task.type) {
+            const handler = this.registry.get(task.type);
+            if (handler) {
+                const payload = task.payload;
+                task.execute = async (signal) => {
+                    await handler(payload, signal);
+                };
+            }
+        }
+
+        this.insertSorted(task);
         this.syncToDb(task, 'pending');
         logger.debug(`[TaskQueue] Enqueued task ${task.type} (${task.id}) with priority P${task.priority}`);
     }
 
     dequeue(): AutonomousTask | undefined {
-        // Queue is already sorted by priority and addedAt, check first element only
         const now = Date.now();
         if (this.queue.length === 0) return undefined;
         const task = this.queue[0]!;
-        if (task.addedAt > now) return undefined; // Not yet ready
+        if (task.addedAt > now) return undefined;
 
-        this.queue.shift(); // Remove first element
-        this.syncToDb(task, 'running');
+        this.queue.shift();
+        const leaseToken = randomUUID();
+        const leaseExpiresAt = new Date(Date.now() + DEFAULT_TASK_LEASE_MS).toISOString();
+        task.leaseToken = leaseToken;
+        this.syncToDb(task, 'running', undefined, { token: leaseToken, expiresAt: leaseExpiresAt });
         return task;
     }
 
     markCompleted(taskId: string): void {
         if (!this.db) return;
         try {
-            this.db.prepare(`UPDATE autonomous_tasks SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(taskId);
+            this.db.prepare(`
+                UPDATE autonomous_tasks
+                SET status = 'completed',
+                    lease_token = NULL,
+                    lease_expires_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `).run(taskId);
         } catch (e) {
             logger.warn({ taskId, err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to mark task completed in DB');
         }
@@ -167,7 +318,14 @@ export class TaskQueue {
     markFailed(taskId: string): void {
         if (!this.db) return;
         try {
-            this.db.prepare(`UPDATE autonomous_tasks SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(taskId);
+            this.db.prepare(`
+                UPDATE autonomous_tasks
+                SET status = 'failed',
+                    lease_token = NULL,
+                    lease_expires_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            `).run(taskId);
         } catch (e) {
             logger.warn({ taskId, err: e instanceof Error ? e.message : e }, '[TaskQueue] Failed to mark task failed in DB');
         }

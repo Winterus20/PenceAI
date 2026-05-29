@@ -12,7 +12,8 @@ export function cn(...inputs: ClassValue[]) {
  */
 export function normalizeTimestamp(value?: string): string {
   if (!value) return new Date().toISOString();
-  if (value.endsWith('Z')) return value;
+  // Zaten timezone bilgisi varsa (Z, +HH:MM, -HH:MM) dokunma
+  if (value.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(value)) return value;
   return value.includes('T') ? `${value}Z` : value.replace(' ', 'T') + 'Z';
 }
 
@@ -22,7 +23,8 @@ export function normalizeTimestamp(value?: string): string {
  * @returns Formatlanmış dosya boyutu string'i (örn: "1.5 MB")
  */
 export function formatFileSize(bytes?: number): string {
-  if (!bytes) return '';
+  if (bytes === undefined || bytes === null) return '';
+  if (bytes === 0) return '0 B';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -75,6 +77,22 @@ export function stripOuterBackticks(text: string): string {
   }
   
   return current;
+}
+
+/**
+ * Markdown içindeki boş veya sadece artifact (text, Kopyala, copy) içeren
+ * code block'ları temizler. Fallback parser sonrası kalan kalıntıları siler.
+ */
+export function stripEmptyCodeBlocks(text: string): string {
+  if (!text) return '';
+  return text
+    // ```text\nKopyala\n``` veya ```text\ncopy\n``` gibi artifact blokları
+    .replace(/```[a-zA-Z]*\s*\n\s*(?:Kopyala|copy|text)\s*\n```/gi, '')
+    // ```text\n[boşluk]\n``` gibi boş blokları
+    .replace(/```[a-zA-Z]*\s*\n\s*\n```/gi, '')
+    // ```text\n``` gibi tek satırlı boş blokları
+    .replace(/```[a-zA-Z]*\s*\n```/gi, '')
+    .trim();
 }
 
 /**

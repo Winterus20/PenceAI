@@ -6,47 +6,69 @@ import { extractThinkingFromTags } from '../utils/thinkTags.js';
 import { logger } from '../utils/logger.js';
 import { LLMError } from '../errors/LLMError.js';
 
+/**
+ * Varsayılan olarak strict mode'a girecek modeller.
+ * Bu modeller native OpenAI tool calling formatını desteklemez.
+ * Alt provider'lar getStrictModels() ile bu listeyi override edebilir.
+ */
+export const DEFAULT_STRICT_MODELS = new Set([
+    // Gemma — tool calling desteklemez
+    'gemma',
+    // Eski Mistral/Mixtral versiyonları — native tool yok
+    'mixtral-8x22b',
+    'codestral-22b-instruct-v0.1',
+    // OpenAI OSS — tool calling yok
+    'gpt-oss',
+    // Eski Llama versiyonları (Ollama local)
+    'llama3.3',
+    'llama3.1',
+    'codellama',
+]);
+
 interface NormalizedMessage {
     role: 'user' | 'assistant';
     content: string;
-    toolCalls?: ToolCall[];
     imageBlocks?: ImageBlock[];
 }
 
 /**
  * OpenAI mesajlarini normalize eder — ardisik rolleri birlestirir,
  * tool response'larini user'a cevirir, strict alternating roles saglar.
+ *
+ * @param providerName - Provider adı (örn. 'openai', 'groq', 'nvidia')
+ * @param strictModelsOverride - Provider'a özel strict model listesi (opsiyonel)
  */
 function normalizeOpenAIMessages(
     messages: LLMMessage[],
     systemPrompt?: string,
     model?: string,
     tools?: LLMToolDefinition[],
+    providerName?: string,
+    strictModelsOverride?: ReadonlySet<string>,
 ): { messages: OpenAI.Chat.ChatCompletionMessageParam[]; effectiveTools: OpenAI.Chat.ChatCompletionTool[] | undefined } {
-    const needsStrictMode = model ? (model.includes('gemma') || model.includes('llama') || model.includes('mistral')) : false;
+    const strictModels = strictModelsOverride ?? DEFAULT_STRICT_MODELS;
+    const needsStrictMode = model ? strictModels.has(model) || [...strictModels].some(s => model.includes(s)) : false;
 
     // --- Strict mode normalization ---
     if (needsStrictMode) {
         const normalized: NormalizedMessage[] = [];
         let currentRole: string | null = null;
         let currentContent = '';
-        let currentToolCalls: ToolCall[] | undefined;
         let currentImageBlocks: ImageBlock[] | undefined;
 
         for (const msg of messages) {
             let roleToUse = msg.role;
             let contentToAdd = msg.content || '';
-            let toolCallsToAdd: ToolCall[] | undefined;
             let imageBlocksToAdd: ImageBlock[] | undefined;
 
             if (msg.role === 'tool' && msg.toolResults) {
                 roleToUse = 'user';
                 contentToAdd = msg.toolResults.map(r => `[Araç Sonucu - ${r.toolCallId}]:\n${r.result}`).join('\n\n');
             } else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
-                if (!contentToAdd) {
-                    contentToAdd = `[Araç Kullanıldı: ${msg.toolCalls.map(tc => tc.name).join(', ')}]`;
-                }
-                toolCallsToAdd = msg.toolCalls;
+                const toolNames = msg.toolCalls.map(tc => tc.name).join(', ');
+                contentToAdd = contentToAdd
+                    ? `${contentToAdd}\n[Araç Kullanıldı: ${toolNames}]`
+                    : `[Araç Kullanıldı: ${toolNames}]`;
             } else if (msg.role === 'user' && msg.imageBlocks && msg.imageBlocks.length > 0) {
                 imageBlocksToAdd = msg.imageBlocks;
             }
@@ -60,16 +82,15 @@ function normalizeOpenAIMessages(
                 }
             } else {
                 if (currentRole && currentRole !== 'system') {
-                    normalized.push({ role: currentRole as 'user' | 'assistant', content: currentContent, toolCalls: currentToolCalls, imageBlocks: currentImageBlocks });
+                    normalized.push({ role: currentRole as 'user' | 'assistant', content: currentContent, imageBlocks: currentImageBlocks });
                 }
                 currentRole = roleToUse;
                 currentContent = contentToAdd;
-                currentToolCalls = toolCallsToAdd;
                 currentImageBlocks = imageBlocksToAdd;
             }
         }
         if (currentRole && currentRole !== 'system') {
-            normalized.push({ role: currentRole as 'user' | 'assistant', content: currentContent, toolCalls: currentToolCalls, imageBlocks: currentImageBlocks });
+            normalized.push({ role: currentRole as 'user' | 'assistant', content: currentContent, imageBlocks: currentImageBlocks });
         }
 
         // Ilk mesaj assistant ise user'a cevir
@@ -112,22 +133,9 @@ function normalizeOpenAIMessages(
                 return userMsg;
             }
 
-            if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
-                const assistantMsg: OpenAI.Chat.ChatCompletionAssistantMessageParam = {
-                    role: 'assistant',
-                    content: msg.content || null,
-                    tool_calls: msg.toolCalls.map(tc => ({
-                        id: tc.id,
-                        type: 'function' as const,
-                        function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
-                    })),
-                };
-                return assistantMsg;
-            }
-
             const textMsg: OpenAI.Chat.ChatCompletionUserMessageParam | OpenAI.Chat.ChatCompletionAssistantMessageParam = {
                 role: msg.role,
-                content: msg.content,
+                content: msg.content || '',
             };
             return textMsg;
         });
@@ -181,12 +189,24 @@ export class OpenAIProvider extends LLMProvider {
     readonly name: string = 'openai';
     readonly supportedModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo', 'o1', 'o1-mini'];
 
+    /**
+     * Bu provider için strict mode'a girecek modeller.
+     * Alt provider'lar bunu override ederek kendi model listelerini tanımlayabilir.
+     * Boş set dönerse hiçbir model strict mode'a girmez.
+     */
+    protected getStrictModels(): ReadonlySet<string> {
+        return DEFAULT_STRICT_MODELS;
+    }
+
+    /**
+     * Native tool calling desteği — strict olmayan modeller için true.
+     */
     get supportsNativeToolCalling(): boolean {
         const config = getConfig();
         const model = config.defaultLLMModel || this.defaultModel;
         const currentModel = model.toLowerCase();
-        // Strict modeller için fallback gerekiyor
-        return !(currentModel.includes('gemma') || currentModel.includes('llama') || currentModel.includes('mistral'));
+        const strictModels = this.getStrictModels();
+        return !strictModels.has(currentModel) && ![...strictModels].some(s => currentModel.includes(s));
     }
 
     protected client: OpenAI;
@@ -250,6 +270,14 @@ export class OpenAIProvider extends LLMProvider {
             }
             return result;
         } catch (error) {
+            if (error instanceof OpenAI.APIError) {
+                logger.warn({
+                    status: error.status,
+                    message: error.message,
+                    rawError: (error as unknown as { error?: unknown }).error,
+                    model: reqOpts.model,
+                }, `[OpenAI] API Hatası (${error.status}) — detay:`);
+            }
             if (reqOpts.tools && reqOpts.tools.length > 0 && this.isToolRelatedError(error)) {
                 this.onToolError();
                 const { tools: _, tool_choice: __, ...fallbackReqOpts } = reqOpts;
@@ -274,6 +302,14 @@ export class OpenAIProvider extends LLMProvider {
             }
             return result;
         } catch (error) {
+            if (error instanceof OpenAI.APIError) {
+                logger.warn({
+                    status: error.status,
+                    message: error.message,
+                    rawError: (error as unknown as { error?: unknown }).error,
+                    model: reqOpts.model,
+                }, `[OpenAI] Stream API Hatası (${error.status}) — detay:`);
+            }
             if (!this.isToolsCircuitOpen() && reqOpts?.tools && reqOpts.tools.length > 0 && this.isToolRelatedError(error)) {
                 this.onToolError();
                 const { tools: _, tool_choice: __, ...fallbackReqOpts } = reqOpts;
@@ -283,7 +319,11 @@ export class OpenAIProvider extends LLMProvider {
         }
     }
 
-    constructor(customBaseUrl?: string, customApiKey?: string) {
+    constructor(
+        customBaseUrl?: string,
+        customApiKey?: string,
+        clientOptions?: { defaultHeaders?: Record<string, string> },
+    ) {
         super();
         const config = getConfig();
         const apiKey = customApiKey || config.openaiApiKey;
@@ -295,6 +335,7 @@ export class OpenAIProvider extends LLMProvider {
             baseURL: customBaseUrl,
             timeout: 45000, // 45 saniye timeout - NVIDIA/OpenAI API için makul limit (önceden 120s)
             maxRetries: 1,   // Network hatalarında 1 retry (önceden 2 - gereksiz gecikmeyi önler)
+            defaultHeaders: clientOptions?.defaultHeaders,
         });
 
         this.client = baseClient;
@@ -305,6 +346,7 @@ export class OpenAIProvider extends LLMProvider {
 
         const { messages: openaiMessages, effectiveTools } = normalizeOpenAIMessages(
             messages, options?.systemPrompt, model, options?.tools,
+            this.name, this.getStrictModels(),
         );
 
         const reqOpts: OpenAI.Chat.ChatCompletionCreateParams = {
@@ -364,6 +406,7 @@ export class OpenAIProvider extends LLMProvider {
         const model = this.resolveModel(options?.model);
         const { messages: openaiMessages, effectiveTools } = normalizeOpenAIMessages(
             messages, options?.systemPrompt, model, options?.tools,
+            this.name, this.getStrictModels(),
         );
 
         const reqOpts: OpenAI.Chat.ChatCompletionCreateParamsStreaming = {
@@ -384,7 +427,6 @@ export class OpenAIProvider extends LLMProvider {
 
         let content = '';
         let hasToolCalls = false;
-        let tokensEmitted = false;
         const toolCallsAccum = new Map<number, { id: string; name: string; argsStr: string }>();
 
         for await (const chunk of stream) {
@@ -392,10 +434,7 @@ export class OpenAIProvider extends LLMProvider {
             if (!delta) continue;
             if (delta.content) {
                 content += delta.content;
-                if (!hasToolCalls) {
-                    onToken(delta.content);
-                    tokensEmitted = true;
-                }
+                onToken(delta.content);
             }
             if (delta.tool_calls) {
                 hasToolCalls = true;

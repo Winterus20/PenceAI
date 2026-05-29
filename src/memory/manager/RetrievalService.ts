@@ -124,11 +124,15 @@ export class RetrievalService {
     const [queryEmbedding] = await this.deps.embeddingProvider.embed([query]);
     if (!queryEmbedding) throw new Error('Embedding failed');
 
-    // Cache'e kaydet
+    // Cache'e kaydet + eski girdileri temizle (24 saatten eski)
     try {
       this.deps.db.prepare(
         'INSERT OR REPLACE INTO embedding_cache (query_hash, embedding) VALUES (?, ?)'
       ).run(queryHash, Buffer.from(new Float32Array(queryEmbedding).buffer));
+      // Pruning: 24 saatten eski cache girdilerini sil
+      this.deps.db.prepare(
+        "DELETE FROM embedding_cache WHERE created_at < datetime('now', '-24 hours')"
+      ).run();
     } catch (err) {
       logger.warn({ msg: '[EmbeddingCache] Failed to save to cache', err });
     }

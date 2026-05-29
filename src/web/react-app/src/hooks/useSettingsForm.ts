@@ -16,6 +16,9 @@ export interface SettingsForm {
   groqApiKey: string;
   mistralApiKey: string;
   nvidiaApiKey: string;
+  customOpenaiApiKey: string;
+  customOpenaiBaseUrl: string;
+  openrouterApiKey: string;
   ollamaBaseUrl: string;
   systemPrompt: string;
   allowShellExecution: boolean;
@@ -49,6 +52,9 @@ const emptyForm: SettingsForm = {
   groqApiKey: '',
   mistralApiKey: '',
   nvidiaApiKey: '',
+  customOpenaiApiKey: '',
+  customOpenaiBaseUrl: '',
+  openrouterApiKey: '',
   ollamaBaseUrl: 'http://localhost:11434',
   systemPrompt: '',
   allowShellExecution: false,

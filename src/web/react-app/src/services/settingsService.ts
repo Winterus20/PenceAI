@@ -11,6 +11,9 @@ export interface AppConfig {
   groqApiKey: string;
   mistralApiKey: string;
   nvidiaApiKey: string;
+  customOpenaiApiKey: string;
+  customOpenaiBaseUrl: string;
+  openrouterApiKey: string;
   ollamaBaseUrl: string;
   systemPrompt: string;
   baseSystemPrompt?: string;
@@ -45,4 +48,8 @@ export const settingsService = {
   addSensitivePath: (path: string) => api.post<{ path: string }, string[]>('/settings/sensitive-paths', { path }),
   removeSensitivePath: (path: string) => api.delete<{ path: string }, string[]>('/settings/sensitive-paths', { path }),
   getLLMProviders: () => api.get<LLMProvider[]>('/llm/providers'),
+  discoverCustomModels: (data?: { baseUrl?: string; apiKey?: string }) =>
+    api.post<{ baseUrl?: string; apiKey?: string }, { models: string[] }>('/llm/custom/models', data ?? {}),
+  discoverOpenRouterModels: (data?: { apiKey?: string }) =>
+    api.post<{ apiKey?: string }, { models: string[] }>('/llm/openrouter/models', data ?? {}),
 };

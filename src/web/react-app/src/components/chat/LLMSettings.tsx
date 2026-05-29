@@ -1,11 +1,12 @@
 import React from 'react';
-import { Bot, KeyRound, UserRound, Thermometer } from 'lucide-react';
+import { Bot, KeyRound, RefreshCw, UserRound, Thermometer } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { fieldClassName, selectClassName, textareaClassName } from '@/styles/dialog';
 
 const sectionClassName = 'section-surface rounded-xl border-border';
-const labelClassName = 'space-y-2 text-sm text-surface-strong';
+const labelClassName = 'space-y-2 text-sm text-foreground';
 
 const SettingsSection = ({ title, description, icon, children }: { title: string; description: string; icon: React.ReactNode; children: React.ReactNode }) => (
   <section className={sectionClassName}>
@@ -14,8 +15,8 @@ const SettingsSection = ({ title, description, icon, children }: { title: string
         {icon}
       </div>
       <div className="space-y-1.5">
-        <div className="text-sm font-medium tracking-[-0.01em] text-surface-emphasis">{title}</div>
-        <p className="max-w-2xl text-sm leading-6 text-surface-strong">{description}</p>
+        <div className="text-sm font-medium tracking-[-0.01em] text-foreground">{title}</div>
+        <p className="max-w-2xl text-sm leading-6 text-foreground">{description}</p>
       </div>
     </div>
     <div className="space-y-4 border-t border-border/30 px-5 py-5 sm:px-6">{children}</div>
@@ -43,6 +44,9 @@ export interface LLMSettingsProps {
     groqApiKey: string;
     mistralApiKey: string;
     nvidiaApiKey: string;
+    customOpenaiApiKey: string;
+    customOpenaiBaseUrl: string;
+    openrouterApiKey: string;
     braveSearchApiKey: string;
     temperature: string;
     maxTokens: string;
@@ -50,6 +54,10 @@ export interface LLMSettingsProps {
   providers: Array<{ name: string; models: string[] }>;
   modelOptions: string[];
   updateField: (key: string, value: string) => void;
+  onDiscoverCustomModels?: () => void;
+  onDiscoverOpenRouterModels?: () => void;
+  customModelsLoading?: boolean;
+  customModelsError?: string;
 }
 
 export const LLMSettings: React.FC<LLMSettingsProps> = ({
@@ -57,7 +65,15 @@ export const LLMSettings: React.FC<LLMSettingsProps> = ({
   providers,
   modelOptions,
   updateField,
+  onDiscoverCustomModels,
+  onDiscoverOpenRouterModels,
+  customModelsLoading = false,
+  customModelsError,
 }) => {
+  const isDynamicModelProvider =
+    form.defaultLLMProvider === 'custom' || form.defaultLLMProvider === 'openrouter';
+  const onDiscoverModels =
+    form.defaultLLMProvider === 'openrouter' ? onDiscoverOpenRouterModels : onDiscoverCustomModels;
   return (
     <div className="space-y-6">
       <SettingsSection
@@ -67,13 +83,24 @@ export const LLMSettings: React.FC<LLMSettingsProps> = ({
       >
         <div className="grid gap-4 md:grid-cols-2">
           <label className={labelClassName}>
-            <span className="inline-flex items-center gap-2"><UserRound className="h-4 w-4 text-surface" /> Kullanıcı adı</span>
+            <span className="inline-flex items-center gap-2"><UserRound className="h-4 w-4 text-muted-foreground" /> Kullanıcı adı</span>
             <Input className={fieldClassName} value={form.defaultUserName} onChange={(e) => updateField('defaultUserName', e.target.value)} />
           </label>
           <label className={labelClassName}>
             <span>Ollama URL</span>
             <Input className={fieldClassName} value={form.ollamaBaseUrl} onChange={(e) => updateField('ollamaBaseUrl', e.target.value)} />
           </label>
+          {form.defaultLLMProvider === 'custom' ? (
+            <label className={`${labelClassName} md:col-span-2`}>
+              <span>OpenAI uyumlu endpoint (…/v1)</span>
+              <Input
+                className={fieldClassName}
+                placeholder="https://openrouter.ai/api/v1"
+                value={form.customOpenaiBaseUrl}
+                onChange={(e) => updateField('customOpenaiBaseUrl', e.target.value)}
+              />
+            </label>
+          ) : null}
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <label className={labelClassName}>
@@ -89,17 +116,59 @@ export const LLMSettings: React.FC<LLMSettingsProps> = ({
             </select>
           </label>
           <label className={labelClassName}>
-            <span>Model</span>
-            <select
-              className={selectClassName}
-              value={form.defaultLLMModel}
-              onChange={(e) => updateField('defaultLLMModel', e.target.value)}
-            >
-              {modelOptions.map((model, index) => (
-                <option key={`${model}-${index}`} value={model}>{model}</option>
-              ))}
-              {!modelOptions.length ? <option value="">Model bulunamadı</option> : null}
-            </select>
+            <span className="flex flex-wrap items-center justify-between gap-2">
+              <span>Model</span>
+              {isDynamicModelProvider && onDiscoverModels ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  disabled={customModelsLoading}
+                  onClick={onDiscoverModels}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${customModelsLoading ? 'animate-spin' : ''}`} />
+                  Modelleri yükle
+                </Button>
+              ) : null}
+            </span>
+            {isDynamicModelProvider && !modelOptions.length ? (
+              <Input
+                className={fieldClassName}
+                placeholder={
+                  form.defaultLLMProvider === 'openrouter'
+                    ? 'örn. openai/gpt-4o-mini'
+                    : 'örn. meta-llama/llama-3.3-70b-instruct'
+                }
+                value={form.defaultLLMModel}
+                onChange={(e) => updateField('defaultLLMModel', e.target.value)}
+              />
+            ) : isDynamicModelProvider || modelOptions.length ? (
+              <select
+                className={selectClassName}
+                value={form.defaultLLMModel}
+                onChange={(e) => updateField('defaultLLMModel', e.target.value)}
+              >
+                {modelOptions.map((model, index) => (
+                  <option key={`${model}-${index}`} value={model}>{model}</option>
+                ))}
+                {isDynamicModelProvider && form.defaultLLMModel && !modelOptions.includes(form.defaultLLMModel) ? (
+                  <option value={form.defaultLLMModel}>{form.defaultLLMModel}</option>
+                ) : null}
+                {!modelOptions.length ? <option value="">Önce modelleri yükleyin</option> : null}
+              </select>
+            ) : (
+              <Input
+                className={fieldClassName}
+                value={form.defaultLLMModel}
+                onChange={(e) => updateField('defaultLLMModel', e.target.value)}
+              />
+            )}
+            {customModelsError ? (
+              <span className="text-xs text-destructive">{customModelsError}</span>
+            ) : isDynamicModelProvider && modelOptions.length > 0 ? (
+              <span className="text-[11px] text-muted-foreground">{modelOptions.length} model yüklendi</span>
+            ) : null}
           </label>
         </div>
         <label className={labelClassName}>
@@ -126,6 +195,8 @@ export const LLMSettings: React.FC<LLMSettingsProps> = ({
           <SecretField label="Groq" value={form.groqApiKey} onChange={(value) => updateField('groqApiKey', value)} />
           <SecretField label="Mistral" value={form.mistralApiKey} onChange={(value) => updateField('mistralApiKey', value)} />
           <SecretField label="NVIDIA" value={form.nvidiaApiKey} onChange={(value) => updateField('nvidiaApiKey', value)} />
+          <SecretField label="OpenRouter" value={form.openrouterApiKey} onChange={(value) => updateField('openrouterApiKey', value)} />
+          <SecretField label="OpenAI uyumlu (özel)" value={form.customOpenaiApiKey} onChange={(value) => updateField('customOpenaiApiKey', value)} />
           <SecretField label="Brave Search" value={form.braveSearchApiKey} onChange={(value) => updateField('braveSearchApiKey', value)} />
         </div>
       </SettingsSection>
@@ -139,7 +210,7 @@ export const LLMSettings: React.FC<LLMSettingsProps> = ({
           <label className={labelClassName}>
             <span className="flex items-center justify-between">
               <span>Temperature</span>
-              <span className="rounded-lg bg-surface-xl px-2.5 py-1 text-xs font-medium text-surface">{form.temperature}</span>
+              <span className="rounded-lg bg-surface-xl px-2.5 py-1 text-xs font-medium text-muted-foreground">{form.temperature}</span>
             </span>
             <input
               type="range"
@@ -150,7 +221,7 @@ export const LLMSettings: React.FC<LLMSettingsProps> = ({
               onChange={(e) => updateField('temperature', e.target.value)}
               className="slider-surface h-2.5 w-full cursor-pointer appearance-none rounded-full bg-muted/50 transition-all"
             />
-            <div className="flex justify-between text-[11px] text-surface-muted">
+            <div className="flex justify-between text-[11px] text-muted-foreground">
               <span>Kesin (0.0)</span>
               <span>Yaratıcı (2.0)</span>
             </div>
@@ -166,7 +237,7 @@ export const LLMSettings: React.FC<LLMSettingsProps> = ({
               value={form.maxTokens}
               onChange={(e) => updateField('maxTokens', e.target.value)}
             />
-            <span className="text-[11px] text-surface-muted">Yanıt başına maksimum token sayısı (256-128000)</span>
+            <span className="text-[11px] text-muted-foreground">Yanıt başına maksimum token sayısı (256-128000)</span>
           </label>
         </div>
       </SettingsSection>

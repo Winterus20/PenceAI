@@ -5,6 +5,9 @@ import { LLMError } from '../errors/LLMError.js';
 /**
  * Groq LLM Provider — OpenAI-uyumlu API kullanır.
  * OpenAIProvider'ı extend ederek kod tekrarını önler.
+ *
+ * Groq platformundaki tüm modeller native tool calling destekler.
+ * Bu nedenle strict mode listesi boş bırakılmıştır.
  */
 export class GroqProvider extends OpenAIProvider {
     readonly name = 'groq';
@@ -22,6 +25,16 @@ export class GroqProvider extends OpenAIProvider {
         'qwen/qwen3-32b',                 // Qwen3 32B — 400 tps, 131K ctx
         'moonshotai/kimi-k2-instruct-0905', // Kimi K2 — 200 tps, 262K ctx
     ];
+
+    /**
+     * Groq resmi dokümantasyonu: "All models hosted on Groq support tool use"
+     * (https://console.groq.com/docs/tool-use)
+     * gpt-oss dahil tüm Groq modelleri native tool calling destekler.
+     * Strict mode listesi boş — hiçbir model strict mode'a girmez.
+     */
+    protected getStrictModels(): ReadonlySet<string> {
+        return new Set();
+    }
 
     constructor() {
         const config = getConfig();

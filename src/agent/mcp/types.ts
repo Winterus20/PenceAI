@@ -23,13 +23,23 @@ export const MCPServerConfigSchema = z.object({
     invalid_type_error: '"name" alanı bir string olmalıdır',
   }).min(1, 'Server adı boş olamaz').regex(/^[a-zA-Z0-9_-]+$/, 'Server adı sadece harf, rakam, tire ve alt çizgi içerebilir'),
 
-  /** Çalıştırılacak komut (örn: "npx", "node", "python") */
+  /** Çalıştırılacak komut (örn: "npx", "node", "python") veya SSE URL */
   command: z.string({
     required_error: 'MCP server "command" alanı zorunludur',
     invalid_type_error: '"command" alanı bir string olmalıdır',
   }).min(1, 'Komut boş olamaz').refine(
-    (cmd) => (ALLOWED_COMMANDS as readonly string[]).includes(cmd),
-    { message: `Komut allowlist'te olmalı: ${ALLOWED_COMMANDS.join(', ')}` }
+    (cmd) => {
+      // Stdio transport: allowlist'teki komutlar
+      if ((ALLOWED_COMMANDS as readonly string[]).includes(cmd)) return true;
+      // SSE transport: HTTP/HTTPS URL'ler
+      try {
+        const url = new URL(cmd);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+      } catch {
+        return false;
+      }
+    },
+    { message: `Komut allowlist'te olmalı veya geçerli bir HTTP/HTTPS URL olmalı: ${ALLOWED_COMMANDS.join(', ')}` }
   ),
 
   /** Komut argümanları */
@@ -38,8 +48,11 @@ export const MCPServerConfigSchema = z.object({
   /** Ortam değişkenleri (opsiyonel) */
   env: z.record(z.string(), z.string()).optional(),
 
-  /** Çalışma dizini (opsiyonel) */
-  cwd: z.string().optional(),
+  /** Çalışma dizini (opsiyonel) — path traversal engellenir */
+  cwd: z.string().refine(
+    (val) => !val.includes('..'),
+    { message: 'cwd dizininde path traversal (..) kullanılamaz' }
+  ).optional(),
 
   /** Timeout (ms) — varsayılan 30000 */
   timeout: z.number().int().min(1000).max(300000).optional().default(30000),

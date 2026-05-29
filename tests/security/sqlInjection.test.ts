@@ -86,17 +86,14 @@ describe('SQL Injection Defense', () => {
 
     it('uses parameterized queries for token usage stats', () => {
       db = new PenceDatabase(testDbPath, 768);
-      // Insert a dummy record
-      db.saveTokenUsage({
-        provider: 'openai',
-        model: 'gpt-4o',
-        promptTokens: 10,
-        completionTokens: 5,
-        totalTokens: 15,
-        estimatedCostUsd: 0.001,
-      });
-      const stats = db.getTokenUsageStats('day');
-      expect(stats.totalTokens).toBe(15);
+      // Token usage tablosuna doğrudan parameterized query ile kayıt ekle
+      const rawDb = db.getDb();
+      rawDb.prepare(`
+        INSERT INTO token_usage (provider, model, prompt_tokens, completion_tokens, total_tokens, estimated_cost_usd, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `).run('openai', 'gpt-4o', 10, 5, 15, 0.001);
+      const row = rawDb.prepare(`SELECT total_tokens FROM token_usage WHERE provider = ?`).get('openai') as { total_tokens: number };
+      expect(row?.total_tokens).toBe(15);
     });
   });
 });

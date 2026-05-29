@@ -10,7 +10,7 @@ function Stop-WithPause($msg) {
     Write-Err $msg
     Write-Host ""
     Write-Host "Pencere kapanmasin diye bekleniyor..." -ForegroundColor Yellow
-    Read-Host "Cikmak icin Enter'a basin"
+    Read-Host "Cikmak icin Enter tusuna basin"
     exit 1
 }
 
@@ -19,32 +19,78 @@ function Test-Command($cmd) {
     catch { return $false }
 }
 
-function Set-EnvValue {
+function Normalize-SetupInput {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return "" }
+    return ($Value.Trim() -replace '^\s*:\s*', '')
+}
+
+function Read-FromClipboard {
+    try {
+        $clip = (Get-Clipboard -Raw)
+        if ($null -ne $clip) { return (Normalize-SetupInput $clip) }
+    } catch {
+        Write-Warn "Pano okunamadi: $($_.Exception.Message)"
+    }
+    return ""
+}
+
+function Read-SetupLine {
     param(
-        [string]$FilePath,
-        [string]$Key,
-        [string]$Value
+        [string]$Prompt,
+        [string]$Default = ""
     )
-    if (-not (Test-Path $FilePath)) {
-        [System.IO.File]::WriteAllLines($FilePath, @("${Key}=${Value}"))
-        return
+    Write-Host "  $Prompt" -ForegroundColor DarkGray
+    if ($Default) {
+        Write-Host "  Ctrl+V ile yapistir ve Enter - bos Enter = varsayilan ($Default)" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  Ctrl+V ile yapistir ve Enter - bos Enter = panodan otomatik oku" -ForegroundColor DarkGray
     }
-    $lines = [System.IO.File]::ReadAllLines($FilePath)
-    $newLines = [System.Collections.ArrayList]::new()
-    $prefix = "${Key}="
-    $found = $false
-    foreach ($line in $lines) {
-        if ($line.StartsWith($prefix)) {
-            $newLines.Add("${Key}=${Value}") | Out-Null
-            $found = $true
-        } else {
-            $newLines.Add($line) | Out-Null
+    $value = Read-Host "  > "
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        if ($Default) { return $Default }
+        return Read-FromClipboard
+    }
+    return (Normalize-SetupInput $value)
+}
+
+function Read-SetupSecret {
+    param([string]$Label)
+    Write-Host "  $Label" -ForegroundColor DarkGray
+    Write-Host "  Ctrl+V ile yapistir ve Enter - bos Enter = panodan otomatik oku" -ForegroundColor DarkGray
+    Write-Host "  (Kurulum sirasinda satir ekranda gorunur)" -ForegroundColor DarkGray
+    $value = Read-Host "  > "
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = Read-FromClipboard
+    }
+    return (Normalize-SetupInput $value)
+}
+
+function Write-Utf8JsonFile {
+    param(
+        [string]$Path,
+        [string]$Json
+    )
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($Path, $Json, $utf8NoBom)
+}
+
+function Invoke-SetupEnvUpdates {
+    param([hashtable]$Updates)
+    if ($Updates.Count -eq 0) { return }
+    $jsonPath = Join-Path $env:TEMP "penceai_env_$([guid]::NewGuid()).json"
+    try {
+        $json = $Updates | ConvertTo-Json -Compress
+        Write-Utf8JsonFile -Path $jsonPath -Json $json
+        Push-Location $ProjectRoot
+        npx tsx scripts/setup-env.ts --file $jsonPath 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+        if ($LASTEXITCODE -ne 0) {
+            Stop-WithPause ".env guncellemesi basarisiz (secureUpdateEnv)."
         }
+    } finally {
+        Remove-Item $jsonPath -Force -ErrorAction SilentlyContinue
+        Pop-Location
     }
-    if (-not $found) {
-        $newLines.Add("${Key}=${Value}") | Out-Null
-    }
-    [System.IO.File]::WriteAllLines($FilePath, $newLines)
 }
 
 function Check-DiskSpace {
@@ -80,46 +126,31 @@ function Invoke-NpmStream {
         [string]$WorkingDir,
         [string]$LogPath
     )
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "cmd.exe"
-    $psi.Arguments = "/c npm install"
-    $psi.WorkingDirectory = $WorkingDir
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
+    Push-Location $WorkingDir
+    try {
+        $output = & npm install 2>&1
+        $output | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+        $output | Out-File -FilePath $LogPath -Encoding utf8
+        return $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+}
 
-    $proc = [System.Diagnostics.Process]::new()
-    $proc.StartInfo = $psi
-
-    $stdoutLines = [System.Collections.ArrayList]::new()
-    $stderrLines = [System.Collections.ArrayList]::new()
-
-    $proc.OutputDataReceived.Add_DataReceived({
-        param($sender, $e)
-        if ($e.Data) {
-            $stdoutLines.Add($e.Data) | Out-Null
-            Write-Host "    $($e.Data)"
-        }
-    }) | Out-Null
-
-    $proc.ErrorDataReceived.Add_DataReceived({
-        param($sender, $e)
-        if ($e.Data) {
-            $stderrLines.Add($e.Data) | Out-Null
-            Write-Host "    $($e.Data)" -ForegroundColor DarkGray
-        }
-    }) | Out-Null
-
-    $proc.Start() | Out-Null
-    $proc.BeginOutputReadLine()
-    $proc.BeginErrorReadLine()
-    $proc.WaitForExit()
-
-    $allLines = $stdoutLines + $stderrLines
-    $allLines | Out-File -FilePath $LogPath -Encoding UTF8
-
-    return $proc.ExitCode
+function Invoke-BuildStream {
+    param(
+        [string]$WorkingDir,
+        [string]$LogPath
+    )
+    Push-Location $WorkingDir
+    try {
+        $output = & npm run build 2>&1
+        $output | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+        $output | Out-File -FilePath $LogPath -Encoding utf8
+        return $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
 }
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -134,12 +165,12 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
 if (-not $isAdmin) {
     Write-Warn "Script Yonetici (Administrator) olarak calistirilmiyor."
     Write-Host "  Sistem paketleri kurulurken veya port islemlerinde yetki hatalari olusabilir." -ForegroundColor DarkGray
-    Write-Host "  Hata alirsaniz PowerShell'i 'Yonetici Olarak Calistir' secenegiyle acip tekrar deneyin." -ForegroundColor DarkGray
+    Write-Host "  Hata alirsaniz PowerShelli Yonetici Olarak Calistir ile acip tekrar deneyin." -ForegroundColor DarkGray
     Write-Host ""
 }
 
 # -- Disk space --------------------------------------------------------
-Write-Host "[0/9] Disk alani kontrol ediliyor..." -ForegroundColor White
+Write-Host "[0/10] Disk alani kontrol ediliyor..." -ForegroundColor White
 if (-not (Check-DiskSpace -RequiredMB 2000)) {
     Write-Warn "Yetersiz disk alani. En az 2GB bos alan onerilir."
     Write-Host ""
@@ -152,9 +183,10 @@ Write-Ok "Disk alani yeterli"
 
 # -- System dependencies -----------------------------------------------
 Write-Host ""
-Write-Host "[1/9] Sistem bagimliliklari kontrol ediliyor..." -ForegroundColor White
+Write-Host "[1/10] Sistem bagimliliklari kontrol ediliyor..." -ForegroundColor White
 
-$missingSys = @()
+$missingCmds = @()
+$missingNames = @()
 $sysChecks = @(
     @{ Cmd = "gcc";     Name = "gcc (C derleyici)" },
     @{ Cmd = "g++";     Name = "g++ (C++ derleyici)" },
@@ -166,32 +198,30 @@ $sysChecks = @(
 
 foreach ($check in $sysChecks) {
     if (-not (Test-Command $check.Cmd)) {
-        $missingSys += $check.Name
+        $missingCmds += $check.Cmd
+        $missingNames += $check.Name
     }
 }
 
-if ($missingSys.Count -gt 0) {
+if ($missingCmds.Count -gt 0) {
     Write-Host ""
     Write-Warn "Asagidaki sistem paketleri eksik:"
-    foreach ($dep in $missingSys) {
+    foreach ($dep in $missingNames) {
         Write-Host "    - $dep"
     }
     Write-Host ""
     Write-Step "Eksik paketler yukleniyor..."
 
-    $pkgMap = @{
-        "gcc"             = "gcc"
-        "g++"             = "g++"
-        "make"            = "make"
-        "python3"         = "python3"
-        "git"             = "git"
-        "curl"            = "curl"
+    $wingetMap = @{
+        "git"     = "Git.Git"
+        "python3" = "Python.Python.3.12"
+        "curl"    = "curl.curl"
     }
-
-    $toInstall = @()
-    foreach ($dep in $missingSys) {
-        $pkgName = $pkgMap[$dep]
-        if ($pkgName) { $toInstall += $pkgName }
+    $chocoMap = @{
+        "make"    = "make"
+        "python3" = "python"
+        "git"     = "git"
+        "curl"    = "curl"
     }
 
     $installed = $false
@@ -199,37 +229,46 @@ if ($missingSys.Count -gt 0) {
     if (Test-Command "winget") {
         Write-Step "winget ile yukleniyor..."
         $failed = @()
-        foreach ($pkg in $toInstall) {
-            Write-Step "winget install $pkg ..."
+        foreach ($cmd in $missingCmds) {
+            $wingetId = $wingetMap[$cmd]
+            if (-not $wingetId) { continue }
+            Write-Step "winget install $wingetId ..."
             try {
-                winget install $pkg --accept-source-agreements --accept-package-agreements 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
-                if ($LASTEXITCODE -ne 0) { $failed += $pkg }
-            } catch { $failed += $pkg }
+                winget install $wingetId --accept-source-agreements --accept-package-agreements 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+                if ($LASTEXITCODE -ne 0) { $failed += $wingetId }
+            } catch { $failed += $wingetId }
         }
-        if ($failed.Count -eq 0) {
+        if ($failed.Count -eq 0 -and ($missingCmds | Where-Object { $wingetMap.ContainsKey($_) }).Count -gt 0) {
             $installed = $true
             Write-Ok "Sistem paketleri winget ile yuklendi"
-        } else {
+        } elseif ($failed.Count -gt 0) {
             Write-Warn "Bazi paketler yuklenemedi: $($failed -join ', ')"
         }
     }
 
     if (-not $installed -and (Test-Command "choco")) {
         Write-Step "choco ile yukleniyor..."
-        try {
-            choco install $toInstall -y 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
-            if ($LASTEXITCODE -eq 0) {
-                $installed = $true
-                Write-Ok "Sistem paketleri choco ile yuklendi"
-            }
-        } catch {}
+        $chocoPkgs = @()
+        foreach ($cmd in $missingCmds) {
+            $pkg = $chocoMap[$cmd]
+            if ($pkg -and $chocoPkgs -notcontains $pkg) { $chocoPkgs += $pkg }
+        }
+        if ($chocoPkgs.Count -gt 0) {
+            try {
+                choco install $chocoPkgs -y 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+                if ($LASTEXITCODE -eq 0) {
+                    $installed = $true
+                    Write-Ok "Sistem paketleri choco ile yuklendi"
+                }
+            } catch {}
+        }
     }
 
     if (-not $installed) {
         Write-Host ""
         Write-Err "Otomatik paket kurulumu yapilamadi!"
         Write-Host "  Asagidaki paketleri manuel olarak kurun:"
-        foreach ($dep in $missingSys) {
+        foreach ($dep in $missingNames) {
             Write-Host "    - $dep"
         }
         Write-Host ""
@@ -250,7 +289,7 @@ if ($missingSys.Count -gt 0) {
 
 # -- Node.js -----------------------------------------------------------
 Write-Host ""
-Write-Host "[2/9] Node.js kontrol ediliyor..." -ForegroundColor White
+Write-Host "[2/10] Node.js kontrol ediliyor..." -ForegroundColor White
 
 $needsInstall = $false
 $needsUpgrade = $false
@@ -259,7 +298,7 @@ if (-not (Test-Command "node")) {
     Write-Err "Node.js bulunamadi!"
     $needsInstall = $true
 } else {
-    $nodeVersion = (node -v) -replace '^v', ''
+    $nodeVersion = (node -v) -replace '^v', ""
     $nodeMajor = [int]($nodeVersion.Split('.')[0])
     if ($nodeMajor -lt 22) {
         Write-Err "Node.js $nodeVersion bulundu - 22.0.0 veya uzeri gerekiyor."
@@ -267,7 +306,7 @@ if (-not (Test-Command "node")) {
     } elseif ($nodeMajor -gt 22) {
         Write-Warn "Node.js $nodeVersion bulundu - Node.js 22 LTS onerilir (bazı native modullerin prebuilt binary si yok)"
         Write-Host ""
-        $confirmNode = Read-Host "Node.js 22 LTS'ye gecmek ister misiniz? (e/H)"
+        $confirmNode = Read-Host "Node.js 22 LTS surumune gecmek ister misiniz? (e/H)"
         if ($confirmNode -eq "e" -or $confirmNode -eq "E") {
             $needsUpgrade = $true
         } else {
@@ -289,7 +328,7 @@ if ($needsInstall -or $needsUpgrade) {
     if ($needsInstall) {
         Write-Step "Node.js 22 otomatik olarak yukleniyor..."
     } else {
-        Write-Step "Node.js 22'ye yukseltiliyor..."
+        Write-Step "Node.js 22 surumune yukseltiliyor..."
     }
 
     $installed = $false
@@ -341,7 +380,7 @@ if ($needsInstall -or $needsUpgrade) {
     }
 
     # Verify
-    $nodeVersion = (node -v) -replace '^v', ''
+    $nodeVersion = (node -v) -replace '^v', ""
     $nodeMajor = [int]($nodeVersion.Split('.')[0])
     if ($nodeMajor -lt 22) {
         Write-Err "Yukleme sonrasi versiyon kontrolu basarisiz: v$nodeVersion"
@@ -351,12 +390,12 @@ if ($needsInstall -or $needsUpgrade) {
 }
 
 # -- Build tools for native modules ------------------------------------
-$nodeVersion = (node -v) -replace '^v', ''
+$nodeVersion = (node -v) -replace '^v', ""
 $nodeMajor = [int]($nodeVersion.Split('.')[0])
 
 if ($nodeMajor -gt 22) {
     Write-Host ""
-    Write-Host "[2.5/9] Native modul derleme araclari kontrol ediliyor..." -ForegroundColor White
+    Write-Host "[2.5/10] Native modul derleme araclari kontrol ediliyor..." -ForegroundColor White
     Write-Warn "Node.js $nodeMajor icin prebuilt binary bulunamadi, derleme gerekli"
 
     $needBuildTools = $false
@@ -415,7 +454,7 @@ if ($nodeMajor -gt 22) {
 
 # -- npm ---------------------------------------------------------------
 Write-Host ""
-Write-Host "[3/9] Bagimliliklar kuruluyor..." -ForegroundColor White
+Write-Host "[3/10] Bagimliliklar kuruluyor..." -ForegroundColor White
 
 Set-Location $ProjectRoot
 
@@ -447,7 +486,7 @@ Write-Ok "Frontend bagimliliklari"
 
 # -- .env --------------------------------------------------------------
 Write-Host ""
-Write-Host "[4/9] .env dosyasi yapilandiriliyor..." -ForegroundColor White
+Write-Host "[4/10] .env dosyasi yapilandiriliyor..." -ForegroundColor White
 
 $envFile = Join-Path $ProjectRoot ".env"
 $envExample = Join-Path $ProjectRoot ".env.example"
@@ -466,18 +505,21 @@ if (-not (Test-Path $envFile)) {
 
 # -- API Key -----------------------------------------------------------
 Write-Host ""
-Write-Host "[5/9] LLM API anahtari yapilandiriliyor" -ForegroundColor White
+Write-Host "[5/10] LLM saglayici yapilandiriliyor" -ForegroundColor White
+Write-Host "  (scripts/setup-providers.ts ile hizali)" -ForegroundColor DarkGray
 Write-Host ""
 
 $providers = @(
-    @{ Name = "OpenAI (varsayilan)"; Key = "OPENAI_API_KEY"; Default = "openai" },
-    @{ Name = "Anthropic (Claude)";   Key = "ANTHROPIC_API_KEY"; Default = "anthropic" },
-    @{ Name = "Groq";                 Key = "GROQ_API_KEY"; Default = "groq" },
-    @{ Name = "Mistral";              Key = "MISTRAL_API_KEY"; Default = "mistral" },
-    @{ Name = "MiniMax";              Key = "MINIMAX_API_KEY"; Default = "minimax" },
-    @{ Name = "NVIDIA";               Key = "NVIDIA_API_KEY"; Default = "nvidia" },
-    @{ Name = "GitHub Models";        Key = "GITHUB_TOKEN"; Default = "github" },
-    @{ Name = "Ollama (yerel)";       Key = "OLLAMA_BASE_URL"; Default = "ollama" }
+    @{ Name = "OpenAI (varsayilan)"; Key = "OPENAI_API_KEY"; Default = "openai"; DefaultModel = "gpt-4o"; Kind = "apiKey" },
+    @{ Name = "Anthropic (Claude)"; Key = "ANTHROPIC_API_KEY"; Default = "anthropic"; DefaultModel = "claude-sonnet-4-20250514"; Kind = "apiKey" },
+    @{ Name = "Groq"; Key = "GROQ_API_KEY"; Default = "groq"; DefaultModel = "llama-3.3-70b-versatile"; Kind = "apiKey" },
+    @{ Name = "Mistral"; Key = "MISTRAL_API_KEY"; Default = "mistral"; DefaultModel = "mistral-large-latest"; Kind = "apiKey" },
+    @{ Name = "MiniMax"; Key = "MINIMAX_API_KEY"; Default = "minimax"; DefaultModel = "MiniMax-Text-01"; Kind = "apiKey" },
+    @{ Name = "NVIDIA"; Key = "NVIDIA_API_KEY"; Default = "nvidia"; DefaultModel = "meta/llama-3.1-70b-instruct"; Kind = "apiKey" },
+    @{ Name = "GitHub Models"; Key = "GITHUB_TOKEN"; Default = "github"; DefaultModel = "gpt-4o"; Kind = "apiKey" },
+    @{ Name = "OpenRouter"; Key = "OPENROUTER_API_KEY"; Default = "openrouter"; DefaultModel = "openai/gpt-4o-mini"; Kind = "apiKey" },
+    @{ Name = "Custom OpenAI (LiteLLM vb.)"; Key = "CUSTOM_OPENAI_API_KEY"; Default = "custom"; DefaultModel = ""; Kind = "custom" },
+    @{ Name = "Ollama (yerel)"; Key = "OLLAMA_BASE_URL"; Default = "ollama"; DefaultModel = "llama3.2"; Kind = "ollama" }
 )
 
 for ($i = 0; $i -lt $providers.Count; $i++) {
@@ -501,79 +543,59 @@ Write-Host ""
 Write-Host "  Secilen: $($selected.Name)" -ForegroundColor Cyan
 Write-Host ""
 
-if ($selected.Default -eq "ollama") {
-    $ollamaUrl = Read-Host "  Ollama sunucu adresi [http://localhost:11434]"
-    if ([string]::IsNullOrWhiteSpace($ollamaUrl)) { $ollamaUrl = "http://localhost:11434" }
+$envUpdates = @{ "DEFAULT_LLM_PROVIDER" = $selected.Default }
 
-    Set-EnvValue -FilePath $envFile -Key "OLLAMA_BASE_URL" -Value $ollamaUrl
-    Set-EnvValue -FilePath $envFile -Key "DEFAULT_LLM_PROVIDER" -Value "ollama"
-
+if ($selected.Kind -eq "ollama") {
+    $ollamaUrl = Read-SetupLine -Prompt "Ollama sunucu adresi" -Default "http://localhost:11434"
+    $envUpdates["OLLAMA_BASE_URL"] = $ollamaUrl
     Write-Ok "Ollama yapilandirildi: $ollamaUrl"
+} elseif ($selected.Kind -eq "custom") {
+    $baseUrl = Read-SetupLine -Prompt "CUSTOM_OPENAI_BASE_URL (ornek: https://openrouter.ai/api/v1)"
+    if (-not [string]::IsNullOrWhiteSpace($baseUrl)) {
+        $envUpdates["CUSTOM_OPENAI_BASE_URL"] = $baseUrl
+    }
+    $apiKey = Read-SetupSecret -Label "CUSTOM_OPENAI_API_KEY (bos birakilabilir)"
+    if (-not [string]::IsNullOrWhiteSpace($apiKey)) {
+        $envUpdates["CUSTOM_OPENAI_API_KEY"] = $apiKey
+        $masked = $apiKey.Substring(0, [Math]::Min(8, $apiKey.Length)) + "..."
+        Write-Ok "API anahtari kaydedildi (CUSTOM_OPENAI_API_KEY=$masked)"
+    } else {
+        Write-Warn "API anahtari bos birakildi."
+    }
 } else {
-    Write-Host "  $($selected.Key) degerini girin: (girdiniz gizli tutulacaktir)" -ForegroundColor DarkGray
-    $secureKey = Read-Host "  " -AsSecureString
-    $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
-    $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
-    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
-
+    $apiKey = Read-SetupSecret -Label "$($selected.Key) degerini girin"
     if ([string]::IsNullOrWhiteSpace($apiKey)) {
         Write-Warn "API anahtari bos birakildi. Kurulumdan sonra .env dosyasini el ile duzenleyin."
         Write-Host "  notepad $envFile" -ForegroundColor Cyan
     } else {
-        Set-EnvValue -FilePath $envFile -Key $selected.Key -Value $apiKey
-        Set-EnvValue -FilePath $envFile -Key "DEFAULT_LLM_PROVIDER" -Value $selected.Default
-
+        $envUpdates[$selected.Key] = $apiKey
         $masked = $apiKey.Substring(0, [Math]::Min(8, $apiKey.Length)) + "..."
         Write-Ok "API anahtari kaydedildi ($($selected.Key)=$masked)"
     }
 }
 
+$modelHint = $selected.DefaultModel
+if ($selected.Kind -eq "custom") {
+    $modelHint = "ornek-model-adi"
+}
+$modelInput = Read-SetupLine -Prompt "Model adi (DEFAULT_LLM_MODEL)" -Default $modelHint
+if (-not [string]::IsNullOrWhiteSpace($modelInput)) {
+    $envUpdates["DEFAULT_LLM_MODEL"] = $modelInput
+    Write-Ok "Model: $modelInput"
+}
+
+Invoke-SetupEnvUpdates -Updates $envUpdates
+
 # -- Build -------------------------------------------------------------
 Write-Host ""
-Write-Host "[6/9] Proje derleniyor..." -ForegroundColor White
+Write-Host "[6/10] Proje derleniyor..." -ForegroundColor White
 
 Write-Step "TypeScript + Frontend build (bu birkac dakika surebilir)..."
 $buildLog = Join-Path $env:TEMP "penceai_build.log"
 try {
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "cmd.exe"
-    $psi.Arguments = "/c npm run build"
-    $psi.WorkingDirectory = $ProjectRoot
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-
-    $proc = [System.Diagnostics.Process]::new()
-    $proc.StartInfo = $psi
-
-    $buildLines = [System.Collections.ArrayList]::new()
-
-    $proc.OutputDataReceived.Add_DataReceived({
-        param($sender, $e)
-        if ($e.Data) {
-            Write-Host "    $($e.Data)"
-            $buildLines.Add($e.Data) | Out-Null
-        }
-    }) | Out-Null
-
-    $proc.ErrorDataReceived.Add_DataReceived({
-        param($sender, $e)
-        if ($e.Data) {
-            Write-Host "    $($e.Data)" -ForegroundColor DarkGray
-            $buildLines.Add($e.Data) | Out-Null
-        }
-    }) | Out-Null
-
-    $proc.Start() | Out-Null
-    $proc.BeginOutputReadLine()
-    $proc.BeginErrorReadLine()
-    $proc.WaitForExit()
-
-    [System.IO.File]::WriteAllLines($buildLog, $buildLines)
-
-    if ($proc.ExitCode -ne 0) {
-        Write-Err "Build basarisiz oldu (cikis kodu: $($proc.ExitCode))"
+    $buildExit = Invoke-BuildStream -WorkingDir $ProjectRoot -LogPath $buildLog
+    if ($buildExit -ne 0) {
+        Write-Err "Build basarisiz oldu (cikis kodu: $buildExit)"
         Write-Host ""
         Write-Host "  Gelistirme modunda baslatmayi deneyebilirsiniz:"
         Write-Host "  npm run dev" -ForegroundColor Cyan
@@ -586,7 +608,7 @@ Write-Ok "Build tamamlandi"
 
 # -- Database directory ------------------------------------------------
 Write-Host ""
-Write-Host "[7/9] Veritabani dizini hazirlaniyor..." -ForegroundColor White
+Write-Host "[7/10] Veritabani dizini hazirlaniyor..." -ForegroundColor White
 
 $dbDir = Join-Path $ProjectRoot "data"
 if (-not (Test-Path $dbDir)) {
@@ -598,12 +620,12 @@ if (-not (Test-Path $dbDir)) {
 
 # -- Port check --------------------------------------------------------
 Write-Host ""
-Write-Host "[8/9] Port kontrolu yapiliyor..." -ForegroundColor White
+Write-Host "[8/10] Port kontrolu yapiliyor..." -ForegroundColor White
 
 $configPort = 3001
 $envPortLine = Select-String -Path $envFile -Pattern "^PORT=" -ErrorAction SilentlyContinue
 if ($envPortLine) {
-    $configPort = [int](($envPortLine.Line -replace '^PORT=', '').Trim())
+    $configPort = [int](($envPortLine.Line -replace '^PORT=', "").Trim())
 }
 
 if (-not (Test-PortAvailable -Port $configPort)) {
@@ -640,9 +662,33 @@ if (-not (Test-PortAvailable -Port $configPort)) {
     Write-Ok "Port $configPort musait"
 }
 
+# -- Verification ------------------------------------------------------
+Write-Host ""
+Write-Host "[9/10] Kurulum dogrulaniyor..." -ForegroundColor White
+
+$testLlm = Read-Host "LLM API baglantisi test edilsin mi? (e/H)"
+$verifyArgs = if ($testLlm -eq "e" -or $testLlm -eq "E") { @() } else { @("--skip-llm") }
+
+Push-Location $ProjectRoot
+try {
+    npx tsx scripts/setup-verify.ts @verifyArgs 2>&1 | ForEach-Object {
+        $line = "$_"
+        if ($line.StartsWith("OK ")) { Write-Host "  $line" -ForegroundColor Green }
+        elseif ($line.StartsWith("WARN ")) { Write-Warn $line.Substring(5) }
+        elseif ($line.StartsWith("ERR ")) { Write-Err $line.Substring(4) }
+        else { Write-Host "  $line" }
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Dogrulama tamamlanamadi - .env ve API anahtarini kontrol edip tekrar deneyin:"
+        Write-Host "  npx tsx scripts/setup-verify.ts" -ForegroundColor Cyan
+    }
+} finally {
+    Pop-Location
+}
+
 # -- Summary -----------------------------------------------------------
 Write-Host ""
-Write-Host "[9/9] Kurulum tamamlandi!" -ForegroundColor White
+Write-Host "[10/10] Kurulum tamamlandi!" -ForegroundColor White
 Write-Host ""
 Write-Host "========================================"
 Write-Host ""
@@ -661,4 +707,4 @@ Write-Host ""
 Write-Host "========================================"
 Write-Host ""
 Write-Host "Pencere kapanmasin diye bekleniyor..." -ForegroundColor Yellow
-Read-Host "Cikmak icin Enter'a basin"
+Read-Host "Cikmak icin Enter tusuna basin"

@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, lazy, Suspense, type ReactNode } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { ChatWindow } from './components/chat/ChatWindow';
 import { useAgentStore } from './store/agentStore';
@@ -16,6 +16,16 @@ const SuspenseFallback = () => (
   <div className="flex items-center justify-center h-full text-muted-foreground">Yükleniyor...</div>
 );
 
+function LazyViewBoundary({ children }: { children: ReactNode }) {
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<SuspenseFallback />}>
+        {children}
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
 function App() {
   const activeView = useAgentStore((state) => state.activeView);
   const theme = useAgentStore((state) => state.theme);
@@ -30,63 +40,81 @@ function App() {
     }
   }, [theme]);
 
-  // View bazlı render — chat eager, diğerleri lazy
+  // View bazlı render — chat eager, diğerleri lazy + view-level error boundary
   const renderView = () => {
     switch (activeView) {
       case 'channels':
-        return <Suspense fallback={<SuspenseFallback />}><ChannelsView /></Suspense>;
+        return (
+          <LazyViewBoundary>
+            <ChannelsView />
+          </LazyViewBoundary>
+        );
       case 'mcp-marketplace':
-        return <Suspense fallback={<SuspenseFallback />}><MCPMarketplace /></Suspense>;
+        return (
+          <LazyViewBoundary>
+            <MCPMarketplace />
+          </LazyViewBoundary>
+        );
       case 'metrics':
-        return <Suspense fallback={<SuspenseFallback />}><MetricsPage /></Suspense>;
+        return (
+          <LazyViewBoundary>
+            <MetricsPage />
+          </LazyViewBoundary>
+        );
       case 'logs':
-        return <Suspense fallback={<SuspenseFallback />}><SystemLogsView /></Suspense>;
+        return (
+          <LazyViewBoundary>
+            <SystemLogsView />
+          </LazyViewBoundary>
+        );
       case 'chat':
       default:
-        return <ChatWindow />;
+        return (
+          <ErrorBoundary>
+            <ChatWindow />
+          </ErrorBoundary>
+        );
     }
   };
 
   return (
     <QueryProvider>
-      <ErrorBoundary>
-        <div className="min-h-screen w-full bg-background text-foreground font-sans selection:bg-primary/20">
-          <main className="flex flex-col h-screen w-full overflow-hidden">
-            {renderView()}
-          </main>
-          <Toaster
-        position="bottom-right"
-        toastOptions={{
-          duration: 4000,
-          style: {
-            background: 'hsl(var(--card))',
-            color: 'hsl(var(--foreground))',
-            border: '1px solid hsl(var(--border))',
-          },
-          error: {
+      <div className="min-h-screen w-full bg-background text-foreground font-sans selection:bg-primary/20">
+        <main className="flex flex-col h-screen w-full overflow-hidden">
+          {renderView()}
+        </main>
+        <Toaster
+          position="bottom-right"
+          toastOptions={{
+            duration: 4000,
             style: {
-              background: 'hsl(0 84.2% 60.2% / 0.1)',
-              border: '1px solid hsl(0 84.2% 60.2% / 0.3)',
+              background: 'hsl(var(--card))',
+              color: 'hsl(var(--foreground))',
+              border: '1px solid hsl(var(--border))',
             },
-            iconTheme: {
-              primary: '#ff4b4b',
-              secondary: 'hsl(var(--foreground))',
+            error: {
+              style: {
+                background: 'hsl(0 84.2% 60.2% / 0.1)',
+                border: '1px solid hsl(0 84.2% 60.2% / 0.3)',
+              },
+              iconTheme: {
+                primary: '#ff4b4b',
+                secondary: 'hsl(var(--foreground))',
+              },
             },
-          },
-          success: {
-            style: {
-              background: 'hsl(142 76% 36% / 0.1)',
-              border: '1px solid hsl(142 76% 36% / 0.3)',
+            success: {
+              style: {
+                background: 'hsl(142 76% 36% / 0.1)',
+                border: '1px solid hsl(142 76% 36% / 0.3)',
+              },
+              iconTheme: {
+                primary: '#4caf50',
+                secondary: 'hsl(var(--foreground))',
+              },
             },
-            iconTheme: {
-              primary: '#4caf50',
-              secondary: 'hsl(var(--foreground))',
-            },
-          },
-        }}
-      />
-        </div>
-      </ErrorBoundary>
+          }}
+        />
+      </div>
     </QueryProvider>
   );
 }

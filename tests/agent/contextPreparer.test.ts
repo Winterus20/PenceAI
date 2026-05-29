@@ -211,8 +211,8 @@ describe('ContextPreparer', () => {
                 communitySummariesFormatted: '- **Community1**: Test summary',
             }));
 
-            expect(result.systemPrompt).toContain('GraphRAG Community Context');
-            expect(result.systemPrompt).toContain('Test summary');
+            expect(result.finalSystemPrompt).toContain('GraphRAG Community Context');
+            expect(result.finalSystemPrompt).toContain('Test summary');
         });
 
         it('does not append community summaries when flag is false', () => {
@@ -229,7 +229,7 @@ describe('ContextPreparer', () => {
                 mcpListPrompt: '\n## MCP Tools\n- tool1',
             }));
 
-            expect(result.systemPrompt).toContain('MCP Tools');
+            expect(result.finalSystemPrompt).toContain('MCP Tools');
         });
 
         it('injects fallback directives when requiresFallback is true', () => {

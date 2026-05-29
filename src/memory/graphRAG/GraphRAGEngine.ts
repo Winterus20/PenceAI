@@ -134,7 +134,7 @@ const DEFAULT_CONFIG: GraphRAGConfig = {
   useCache: true,
   tokenBudget: 32000,
   communitySummaryBudget: 8000,
-  timeoutMs: 5000,
+  timeoutMs: 20000,
   fallbackToStandardSearch: true,
   rrfKConstant: 60,
   memoryImportanceWeight: 0.5,
@@ -144,9 +144,6 @@ const DEFAULT_CONFIG: GraphRAGConfig = {
   globalSearchTopK: 5,
   globalSearchLevel: 1,
 };
-
-/** Feature flag */
-let GRAPH_RAG_ENABLED = true;
 
 /**
  * Token budget dağılımını hesapla.
@@ -170,6 +167,7 @@ export class GraphRAGEngine {
   private config: GraphRAGConfig;
   private tokenPruner: TokenPruner;
   private globalSearchEngine: GlobalSearchEngine;
+  private static _enabled = true;
 
   constructor(
     private db: Database.Database,
@@ -202,14 +200,18 @@ export class GraphRAGEngine {
   }
 
   /**
-   * Feature flag kontrolü.
+   * Feature flag kontrolü (instance-level, test izolasyonu sağlar).
    */
+  isEnabled(): boolean {
+    return (this.constructor as typeof GraphRAGEngine)._enabled;
+  }
+
   static isEnabled(): boolean {
-    return GRAPH_RAG_ENABLED;
+    return GraphRAGEngine._enabled;
   }
 
   static setEnabled(enabled: boolean): void {
-    GRAPH_RAG_ENABLED = enabled;
+    GraphRAGEngine._enabled = enabled;
     logger.info(`[GraphRAGEngine] GraphRAG ${enabled ? 'enabled' : 'disabled'}`);
   }
 
@@ -226,7 +228,7 @@ export class GraphRAGEngine {
     const phaseTimings: Record<string, number> = {};
 
     // Feature flag kontrolü
-    if (!GRAPH_RAG_ENABLED) {
+    if (!GraphRAGEngine._enabled) {
       return this.fallbackToStandard(query, config, startTime, true);
     }
 
@@ -257,9 +259,16 @@ export class GraphRAGEngine {
         return this.buildEmptyResult(startTime, false);
       }
 
+      // Kalan timeout bütçesi
+      const remainingTimeout = () => Math.max(1000, config.timeoutMs - (Date.now() - startTime));
+
       // Phase 2: Graph expansion
       const phase2Start = Date.now();
-      const expansion = await this.runExpansion(initialResults, config, startTime);
+      const expansion = await this.runWithTimeout(
+        () => this.runExpansion(initialResults, config, startTime),
+        remainingTimeout(),
+        'expansion',
+      );
       phaseTimings.expansion = Date.now() - phase2Start;
       logger.info(`[GraphRAGEngine] ⏱️ Phase 2 (expansion): ${phaseTimings.expansion}ms (success: ${expansion.success})`);
       if (!expansion.success) {
@@ -268,7 +277,11 @@ export class GraphRAGEngine {
 
       // Phase 3: PageRank scoring
       const phase3Start = Date.now();
-      const scoring = await this.runScoring(expansion.result, config, startTime);
+      const scoring = await this.runWithTimeout(
+        () => this.runScoring(expansion.result, config, startTime),
+        remainingTimeout(),
+        'scoring',
+      );
       phaseTimings.scoring = Date.now() - phase3Start;
       logger.info(`[GraphRAGEngine] ⏱️ Phase 3 (scoring): ${phaseTimings.scoring}ms (success: ${scoring.success})`);
       if (!scoring.success) {
@@ -277,7 +290,11 @@ export class GraphRAGEngine {
 
       // Phase 4: Community detection
       const phase4Start = Date.now();
-      const community = await this.runCommunityDetection(scoring.result, expansion.result, config, startTime);
+      const community = await this.runWithTimeout(
+        () => this.runCommunityDetection(scoring.result, expansion.result, config, startTime),
+        remainingTimeout(),
+        'community',
+      );
       phaseTimings.community = Date.now() - phase4Start;
       logger.info(`[GraphRAGEngine] ⏱️ Phase 4 (community): ${phaseTimings.community}ms (success: ${community.success})`);
       if (!community.success) {
@@ -287,7 +304,11 @@ export class GraphRAGEngine {
 
       // Phase 5: Summary generation
       const phase5Start = Date.now();
-      const summary = await this.runSummarization(community.result, config, startTime);
+      const summary = await this.runWithTimeout(
+        () => this.runSummarization(community.result, config, startTime, remainingTimeout()),
+        remainingTimeout(),
+        'summary',
+      );
       phaseTimings.summary = Date.now() - phase5Start;
       logger.info(`[GraphRAGEngine] ⏱️ Phase 5 (summary): ${phaseTimings.summary}ms (success: ${summary.success})`);
       if (!summary.success) {
@@ -296,17 +317,21 @@ export class GraphRAGEngine {
 
       // Phase 6: Token pruning ve fusion
       const phase6Start = Date.now();
-      const fusionResult = await this.runFusion(
-        query,
-        {
-          initialResults,
-          expansion: expansion.result,
-          scoring: scoring.result,
-          community: community.result ?? { communities: [], cacheHit: false },
-          summary: summary.result ?? { summaries: [] },
-        },
-        config,
-        startTime,
+      const fusionResult = await this.runWithTimeout(
+        () => this.runFusion(
+          query,
+          {
+            initialResults,
+            expansion: expansion.result,
+            scoring: scoring.result,
+            community: community.result ?? { communities: [], cacheHit: false },
+            summary: summary.result ?? { summaries: [] },
+          },
+          config,
+          startTime,
+        ),
+        remainingTimeout(),
+        'fusion',
       );
       phaseTimings.fusion = Date.now() - phase6Start;
       logger.info(`[GraphRAGEngine] ⏱️ Phase 6 (fusion): ${phaseTimings.fusion}ms`);
@@ -617,6 +642,7 @@ export class GraphRAGEngine {
     community: CommunityResult,
     config: GraphRAGConfig,
     startTime: number,
+    remainingTimeout?: number,
   ): Promise<{ success: boolean; result: SummaryResult }> {
     if (!config.useCommunities || community.communities.length === 0) {
       return {
@@ -631,6 +657,11 @@ export class GraphRAGEngine {
       // İlk 3 community için summary getir/oluştur — paralel çalıştır
       const communitiesToSummarize = community.communities.slice(0, 3);
 
+      // Her community için ayrı timeout budget (min 2sn)
+      const perCommunityTimeout = remainingTimeout
+        ? Math.max(2000, Math.floor(remainingTimeout / communitiesToSummarize.length))
+        : undefined;
+
       const summaryPromises = communitiesToSummarize.map(async (comm) => {
         let summary = this.communitySummarizer.getSummary(comm.id);
 
@@ -639,7 +670,15 @@ export class GraphRAGEngine {
           logger.debug(
             `[GraphRAGEngine] Summary not cached for community ${comm.id}, generating on-demand`,
           );
-          summary = await this.communitySummarizer.summarizeCommunity(comm.id);
+          if (perCommunityTimeout) {
+            summary = await this.runWithTimeout(
+              () => this.communitySummarizer.summarizeCommunity(comm.id),
+              perCommunityTimeout,
+              `summarizeCommunity(${comm.id})`,
+            );
+          } else {
+            summary = await this.communitySummarizer.summarizeCommunity(comm.id);
+          }
         }
 
         return summary;
@@ -935,11 +974,26 @@ export class GraphRAGEngine {
     timeoutMs: number,
     phase: string,
   ): Promise<T> {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error(`${phase} timeout after ${timeoutMs}ms`)), timeoutMs);
-    });
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`${phase} timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
 
-    return Promise.race([fn(), timeoutPromise]);
+      try {
+        fn()
+          .then(result => {
+            clearTimeout(timer);
+            resolve(result);
+          })
+          .catch(err => {
+            clearTimeout(timer);
+            reject(err);
+          });
+      } catch (syncErr) {
+        clearTimeout(timer);
+        reject(syncErr);
+      }
+    });
   }
 
   // ========== Global Search Integration ==========

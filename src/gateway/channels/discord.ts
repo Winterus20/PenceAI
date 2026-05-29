@@ -3,6 +3,7 @@ import { Client, GatewayIntentBits, Partials, AttachmentBuilder } from 'discord.
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../../utils/logger.js';
 import type { Channel, UnifiedMessage, MessageResponse, Attachment } from '../../router/types.js';
+import { DiscordTypingKeepalive } from './discordTypingKeepalive.js';
 
 export class DiscordChannel implements Channel {
     public readonly type = 'discord';
@@ -13,6 +14,7 @@ export class DiscordChannel implements Channel {
     private messageHandler?: (message: UnifiedMessage) => Promise<void>;
     private readonly token: string;
     private readonly allowedUsers: string[];
+    private readonly activeTypingKeepalives = new Set<DiscordTypingKeepalive>();
     
     // Arka plan bağlamı (sessiz dinleme) için son aktif kanal takibi
     private lastActiveChannelId: string | null = null;
@@ -78,18 +80,13 @@ export class DiscordChannel implements Channel {
                 const authorName = message.author.globalName || message.author.username;
                 cleanContent = `[Kullanıcı: ${authorName}] ${cleanContent}`;
 
-                // Kullanıcıya botun mesajı işlediğini belli etmek için "yazıyor..." (typing) indicator gönder
-                if ('sendTyping' in message.channel) {
-                    try {
-                        const targetChannel = message.channel as any;
-                        await targetChannel.sendTyping();
-                    } catch (e) {
-                         logger.warn({ err: e }, '[Discord] Typing trigger failed');
-                    }
+                const typingKeepalive = this.startTypingKeepalive(message);
+                try {
+                    const unifiedMsg = await this.convertToUnifiedMessage(message, cleanContent);
+                    await this.messageHandler(unifiedMsg);
+                } finally {
+                    this.stopTypingKeepalive(typingKeepalive);
                 }
-
-                const unifiedMsg = await this.convertToUnifiedMessage(message, cleanContent);
-                await this.messageHandler(unifiedMsg);
             } 
             // Arka plan bağlamı ("Sessiz Dinleme") - Sadece en son aktif kanalda, hedef alınmayan mesajlarda
             else if (!isDM && message.channel.id === this.lastActiveChannelId) {
@@ -165,10 +162,32 @@ export class DiscordChannel implements Channel {
     }
 
     public async disconnect(): Promise<void> {
+        for (const keepalive of this.activeTypingKeepalives) {
+            keepalive.stop();
+        }
+        this.activeTypingKeepalives.clear();
+
         if (this.isConnected) {
             this.client.destroy();
             this.isConnected = false;
         }
+    }
+
+    private startTypingKeepalive(message: Message): DiscordTypingKeepalive | null {
+        if (!('sendTyping' in message.channel)) return null;
+
+        const keepalive = new DiscordTypingKeepalive(
+            message.channel as { sendTyping(): Promise<unknown> },
+        );
+        this.activeTypingKeepalives.add(keepalive);
+        keepalive.start();
+        return keepalive;
+    }
+
+    private stopTypingKeepalive(keepalive: DiscordTypingKeepalive | null): void {
+        if (!keepalive) return;
+        keepalive.stop();
+        this.activeTypingKeepalives.delete(keepalive);
     }
 
     public async sendMessage(channelId: string, response: MessageResponse): Promise<void> {
@@ -197,6 +216,14 @@ export class DiscordChannel implements Channel {
                 // If content is completely missing and no files, skip
                 const hasFiles = Array.isArray(msgPayload.files) && msgPayload.files.length > 0;
                 if (!msgPayload.content && !hasFiles) continue;
+
+                // İlk parça, tetikleyen kullanıcı mesajına reply olarak gider
+                if (i === 0 && response.replyToId) {
+                    msgPayload.reply = {
+                        messageReference: response.replyToId,
+                        failIfNotExists: false,
+                    };
+                }
 
                 const targetChannel = discordChannel as any;
                 await targetChannel.send(msgPayload);

@@ -27,6 +27,15 @@ export class GitHubProvider extends OpenAIProvider {
         'deepseek/DeepSeek-R1',
     ];
 
+    /**
+     * GitHub Models'daki Llama ve Mistral modelleri native tool calling destekler.
+     * Sadece OpenAI OSS modelleri strict mode'a girmeli (eğer eklenirse).
+     * Şu anki listede strict model yok.
+     */
+    protected getStrictModels(): ReadonlySet<string> {
+        return new Set();
+    }
+
     constructor() {
         const config = getConfig();
         if (!config.githubToken) {

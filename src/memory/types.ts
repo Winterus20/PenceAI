@@ -157,7 +157,7 @@ export interface ReconsolidationGuardrailSnapshot {
 export interface ReconsolidationDecision {
     pilotActive: boolean;
     eligible: boolean;
-    action: 'update' | 'append' | 'skip';
+    action: 'update' | 'append' | 'skip' | 'insert_new';
     reason: string;
     safetyReasons: string[];
     preferredContent: 'existing' | 'incoming' | 'longer';
@@ -193,6 +193,11 @@ export interface ConversationBranchInfo {
 export interface ForkConversationResponse {
     conversationId: string;
     messages: ConversationMessage[];
+}
+
+export interface MemoryConsolidationPayload {
+    category: string;
+    threshold: number;
 }
 
 // ========== Memory Graph Interfaces ==========

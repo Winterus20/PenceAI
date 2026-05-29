@@ -85,6 +85,13 @@ export abstract class LLMProvider {
      * Provider'ın erişilebilir olup olmadığını kontrol eder.
      */
     abstract healthCheck(): Promise<boolean>;
+
+    /**
+     * Kullanılabilir model listesi. Statik listede yoksa uzak API'den doldurulabilir.
+     */
+    async listAvailableModels(): Promise<string[]> {
+        return this.supportedModels;
+    }
 }
 
 export interface ChatOptions {

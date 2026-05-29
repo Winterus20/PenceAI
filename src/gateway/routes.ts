@@ -6,10 +6,11 @@
 import type { Express, Request, Response, NextFunction, RequestHandler } from 'express';
 import type { MemoryManager } from '../memory/manager.js';
 import type { MessageRouter } from '../router/index.js';
-import { LLMProviderFactory } from '../llm/index.js';
+import { LLMProviderFactory, fetchCustomOpenAIModels, OPENROUTER_BASE_URL } from '../llm/index.js';
 import type { LLMProvider } from '../llm/provider.js';
+import { CachedLLMProvider, ResilientLLMProvider, LLMCacheService, buildDefaultFallbackChain } from '../llm/index.js';
 import { readEnv, secureUpdateEnv } from './envUtils.js';
-import { reloadConfig } from './config.js';
+import { reloadConfig, getConfig } from './config.js';
 import { AppError } from '../errors/AppError.js';
 import { BASE_SYSTEM_PROMPT } from '../agent/prompt.js';
 import { logger } from '../utils/logger.js';
@@ -20,6 +21,7 @@ import { BehaviorDiscoveryShadow } from '../memory/graphRAG/BehaviorDiscoverySha
 import { createMCPController } from './controllers/mcpController.js';
 import { createMemoryController } from './controllers/memoryController.js';
 import { metricsCollector } from '../observability/metricsCollector.js';
+import { APP_VERSION } from '../version.js';
 import {
   validateBody, validateQuery,
   SensitivePathSchema, FeedbackSchema, OnboardingSchema,
@@ -61,6 +63,26 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         return key.substring(0, 4) + '••••' + key.substring(key.length - 4);
     };
 
+    /**
+     * Kritik write endpoint'leri için parola politikası.
+     * Production: DASHBOARD_PASSWORD zorunlu (config başlangıcında doğrulanır).
+     * Development/test: parola yoksa localhost güvenlik modeliyle yazmaya izin verilir.
+     * Parola tanımlıysa createDashboardAuthMiddleware kimlik doğrulaması yeterlidir.
+     */
+    const requireDashboardPassword: RequestHandler = (_req, res, next) => {
+        const config = getConfig();
+        if (!config.dashboardPassword) {
+            if (config.nodeEnv === 'production') {
+                res.status(403).json({
+                    error: 'Bu işlem için DASHBOARD_PASSWORD ayarlanmalıdır. Lütfen .env dosyasında DASHBOARD_PASSWORD tanımlayın.',
+                });
+                return;
+            }
+            return next();
+        }
+        next();
+    };
+
     // ============ REST API ============
 
     // ============ Controllers ============
@@ -69,30 +91,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
 
     // ============ Karpathy LLM Wiki API (Madde 9) ============
 
-    app.put('/api/memories/:id', asyncHandler(async (req, res) => {
-        const memoryId = parseInt(req.params.id as string, 10);
-        const { content, category, importance } = req.body;
-        if (isNaN(memoryId)) {
-            return res.status(400).json({ error: 'Invalid memory id' });
-        }
-        let editSuccess = false;
-        if (typeof content === 'string' && typeof category === 'string' && typeof importance === 'number') {
-            editSuccess = await memory.editMemory(memoryId, content, category, importance);
-        } else if (typeof content === 'string' && typeof category === 'string') {
-            editSuccess = await memory.editMemory(memoryId, content, category);
-        } else if (typeof content === 'string' && typeof importance === 'number') {
-            editSuccess = await memory.editMemory(memoryId, content, undefined, importance);
-        } else if (typeof content === 'string') {
-            editSuccess = await memory.editMemory(memoryId, content);
-        } else {
-            return res.status(400).json({ error: 'At least content field is required' });
-        }
-        const success = editSuccess;
-        if (!success) {
-            return res.status(404).json({ error: 'Memory not found or no changes' });
-        }
-        return res.json({ success: true, memoryId });
-    }));
+    // PUT /api/memories/:id — memoryController.ts'de Zod validasyonlu olarak tanımlı
 
     app.get('/api/memories/contradictions', asyncHandler(async (_req, res) => {
         const rows = memory.getOpenContradictions();
@@ -128,6 +127,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         const llmHealthy = await llm.healthCheck();
         res.json({
             status: 'ok',
+            version: APP_VERSION,
             llm: { provider: llm.name, healthy: llmHealthy },
             channels: router.getChannelStatus(),
             stats: memory.getStats(),
@@ -175,6 +175,9 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
         groqApiKey: maskKey(env.GROQ_API_KEY),
         mistralApiKey: maskKey(env.MISTRAL_API_KEY),
         nvidiaApiKey: maskKey(env.NVIDIA_API_KEY),
+        customOpenaiApiKey: maskKey(env.CUSTOM_OPENAI_API_KEY),
+        customOpenaiBaseUrl: env.CUSTOM_OPENAI_BASE_URL || '',
+        openrouterApiKey: maskKey(env.OPENROUTER_API_KEY),
         ollamaBaseUrl: env.OLLAMA_BASE_URL || 'http://localhost:11434',
         allowShellExecution: env.ALLOW_SHELL_EXECUTION === 'true',
         systemPrompt: env.SYSTEM_PROMPT || '',
@@ -197,8 +200,11 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       });
     });
 
-    app.post('/api/settings', async (req: Request, res: Response, next: NextFunction) => {
+    app.post('/api/settings', requireDashboardPassword, asyncHandler(async (req: Request, res: Response) => {
     const body = req.body;
+    if (!body || typeof body !== 'object') {
+      return res.status(400).json({ error: 'Geçersiz istek gövdesi' });
+    }
     const updates: Record<string, string> = {};
 
     const map: Record<string, string> = {
@@ -212,6 +218,9 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       groqApiKey: 'GROQ_API_KEY',
       mistralApiKey: 'MISTRAL_API_KEY',
       nvidiaApiKey: 'NVIDIA_API_KEY',
+      customOpenaiApiKey: 'CUSTOM_OPENAI_API_KEY',
+      customOpenaiBaseUrl: 'CUSTOM_OPENAI_BASE_URL',
+      openrouterApiKey: 'OPENROUTER_API_KEY',
       ollamaBaseUrl: 'OLLAMA_BASE_URL',
       allowShellExecution: 'ALLOW_SHELL_EXECUTION',
       systemPrompt: 'SYSTEM_PROMPT',
@@ -228,38 +237,60 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
       hookApprovalMode: 'HOOK_APPROVAL_MODE',
     };
   
-    // LLM provider/model değişiklikleri runtime'ı etkilemez (startup'ta oluşturulur)
     const llmKeys = new Set(['DEFAULT_LLM_PROVIDER', 'DEFAULT_LLM_MODEL']);
-    let requiresRestart = false;
-  
+    let llmChanged = false;
+
     for (const [key, val] of Object.entries(body)) {
       if (map[key]) {
         if (typeof val === 'string' && (val.includes('***') || val.includes('••••'))) continue;
         updates[map[key]] = String(val);
-        if (llmKeys.has(map[key])) requiresRestart = true;
+        if (llmKeys.has(map[key])) llmChanged = true;
       }
     }
-  
+
     try {
       await secureUpdateEnv(updates);
-  
-      // process.env'i güncelle — reloadConfig() process.env üzerinden okur
-      for (const [key, value] of Object.entries(updates)) {
-        process.env[key] = value;
-      }
-  
       reloadConfig();
       logger.info('[Gateway] ⚙️ Ayarlar güncellendi.');
-  
-      if (requiresRestart) {
-        res.json({ success: true, requiresRestart: true, message: 'LLM provider/model değişiklikleri yeniden başlatma gerektirir.' });
-      } else {
-        res.json({ success: true, requiresRestart: false });
+
+      // ── LLM Hot-Reload ──
+      // Yeniden başlatma gerektirmeden provider/model değişikliğini runtime'a yansıt
+      if (llmChanged) {
+        try {
+          const config = getConfig();
+          const rawProvider = LLMProviderFactory.create(config.defaultLLMProvider);
+          logger.info(`[Gateway] 🔄 Hot-reloading LLM provider → ${rawProvider.name} / ${config.defaultLLMModel}`);
+
+          let cachedProvider: LLMProvider = rawProvider;
+          if (config.llmCacheEnabled) {
+            const cache = new LLMCacheService(deps.memory.getDb(), {
+              enabled: true,
+              ttlHours: config.llmCacheTtlHours,
+              maxEntries: config.llmCacheMaxEntries,
+            });
+            cachedProvider = new CachedLLMProvider(rawProvider, cache, config.defaultLLMProvider);
+          }
+
+          const fallbackChain = buildDefaultFallbackChain(cachedProvider);
+          const resilientProvider = new ResilientLLMProvider(fallbackChain);
+
+          deps.agent.setLLM(resilientProvider);
+          logger.info('[Gateway] ✅ LLM hot-reload tamamlandı');
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          logger.error({ err }, `[Gateway] ❌ LLM hot-reload başarısız: ${errMsg}`);
+          return res.status(500).json({
+            success: false,
+            error: `Ayarlar kaydedildi ama LLM yenilenemedi: ${errMsg}`,
+          });
+        }
       }
+
+      return res.json({ success: true, requiresRestart: false });
     } catch (error) {
-      next(error instanceof Error ? error : new AppError(String(error), 500));
+      throw error instanceof Error ? error : new AppError(String(error), 500);
     }
-  });
+  }));
 
     // ============ Onboarding Bio İşleme API ============
 
@@ -282,19 +313,75 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
 
         for (const name of available) {
             try {
-                const p = await LLMProviderFactory.create(name);
-                providers.push({
-                    name: p.name,
-                    models: p.supportedModels || []
-                });
-            } catch (e) {
-                providers.push({
-                    name: name,
-                    models: []
-                });
+                const p = LLMProviderFactory.create(name);
+                let models = p.supportedModels ?? [];
+                if (models.length === 0) {
+                    try {
+                        const remote = await p.listAvailableModels();
+                        if (remote.length > 0) models = remote;
+                    } catch (err) {
+                        logger.debug({ err, provider: name }, '[API] Uzak model listesi alınamadı');
+                    }
+                }
+                providers.push({ name: p.name, models });
+            } catch {
+                providers.push({ name, models: [] });
             }
         }
         res.json(providers);
+    }));
+
+    app.post('/api/llm/custom/models', requireDashboardPassword, asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as { baseUrl?: string; apiKey?: string } | undefined;
+        const config = getConfig();
+
+        let baseUrl = typeof body?.baseUrl === 'string' ? body.baseUrl.trim() : config.customOpenaiBaseUrl?.trim();
+        let apiKey = typeof body?.apiKey === 'string' ? body.apiKey.trim() : config.customOpenaiApiKey;
+
+        if (body?.apiKey && (body.apiKey.includes('***') || body.apiKey.includes('••••'))) {
+            apiKey = config.customOpenaiApiKey;
+        }
+
+        if (!baseUrl || !apiKey) {
+            return res.status(400).json({
+                error: 'CUSTOM_OPENAI_BASE_URL ve CUSTOM_OPENAI_API_KEY gerekli (formda doldurun veya .env)',
+            });
+        }
+
+        try {
+            const models = await fetchCustomOpenAIModels(baseUrl, apiKey);
+            return res.json({ models });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.warn({ err }, '[API] Özel OpenAI endpoint model listesi alınamadı');
+            return res.status(502).json({ error: message });
+        }
+    }));
+
+    app.post('/api/llm/openrouter/models', requireDashboardPassword, asyncHandler(async (req: Request, res: Response) => {
+        const body = req.body as { apiKey?: string } | undefined;
+        const config = getConfig();
+
+        let apiKey = typeof body?.apiKey === 'string' ? body.apiKey.trim() : config.openrouterApiKey;
+
+        if (body?.apiKey && (body.apiKey.includes('***') || body.apiKey.includes('••••'))) {
+            apiKey = config.openrouterApiKey;
+        }
+
+        if (!apiKey) {
+            return res.status(400).json({
+                error: 'OPENROUTER_API_KEY gerekli (formda doldurun veya .env)',
+            });
+        }
+
+        try {
+            const models = await fetchCustomOpenAIModels(OPENROUTER_BASE_URL, apiKey);
+            return res.json({ models });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.warn({ err }, '[API] OpenRouter model listesi alınamadı');
+            return res.status(502).json({ error: message });
+        }
     }));
 
     // ============ Feedback API ============
@@ -347,7 +434,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     });
 
     // POST /api/graphrag/advance-phase — Phase'i ilerlet
-    app.post('/api/graphrag/advance-phase', (_req, res, next) => {
+    app.post('/api/graphrag/advance-phase', requireDashboardPassword, (_req, res, next) => {
       try {
         const newPhase = GraphRAGConfigManager.advancePhase();
         res.json({
@@ -361,7 +448,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     });
 
     // POST /api/graphrag/set-phase — Belirli bir phase'e set et
-    app.post('/api/graphrag/set-phase', validateBody(GraphRAGSetPhaseSchema), (req, res, next) => {
+    app.post('/api/graphrag/set-phase', requireDashboardPassword, validateBody(GraphRAGSetPhaseSchema), (req, res, next) => {
       const { phase: phaseNum } = req.body;
 
       try {
@@ -393,14 +480,14 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     });
 
     // POST /api/behavior-discovery/config — BehaviorDiscovery konfigürasyonunu güncelle
-    app.post('/api/behavior-discovery/config', validateBody(BehaviorDiscoveryConfigSchema), (req, res) => {
+    app.post('/api/behavior-discovery/config', requireDashboardPassword, validateBody(BehaviorDiscoveryConfigSchema), (req, res) => {
       const shadow = getBehaviorDiscoveryShadow();
       shadow.updateConfig(req.body);
       res.json({ success: true, config: shadow.getConfig() });
     });
 
     // POST /api/behavior-discovery/clear — Comparisons'ı temizle
-    app.post('/api/behavior-discovery/clear', (_req, res) => {
+    app.post('/api/behavior-discovery/clear', requireDashboardPassword, (_req, res) => {
       const shadow = getBehaviorDiscoveryShadow();
       shadow.clear();
       res.json({ success: true });
@@ -409,7 +496,7 @@ export function registerRoutes(app: Express, deps: RouteDeps): void {
     // ============ Live Logs API ============
 
     // GET /api/logs — Son log kayıtlarını getir (Ring Buffer)
-    app.get('/api/logs', (req, res, next) => {
+    app.get('/api/logs', requireDashboardPassword, (req, res, next) => {
       try {
         const limit = parseInt(req.query.limit as string) || 1000;
         const logs = logRingBuffer.getLogs(Math.min(limit, 1000));

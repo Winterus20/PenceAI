@@ -18,8 +18,11 @@ import { useSettings } from '@/hooks/queries/useSettings';
 import { useLLMProviders } from '@/hooks/queries/useLLMProviders';
 import { useSensitivePaths } from '@/hooks/queries/useSensitivePaths';
 import { useUpdateSettings } from '@/hooks/mutations/useUpdateSettings';
+import { useDiscoverCustomModels } from '@/hooks/mutations/useDiscoverCustomModels';
+import { useDiscoverOpenRouterModels } from '@/hooks/mutations/useDiscoverOpenRouterModels';
 import { useAddSensitivePath } from '@/hooks/mutations/useAddSensitivePath';
 import { useRemoveSensitivePath } from '@/hooks/mutations/useRemoveSensitivePath';
+import { ApiError } from '@/lib/api-client';
 
 type SettingsForm = {
   defaultLLMProvider: string;
@@ -32,6 +35,9 @@ type SettingsForm = {
   groqApiKey: string;
   mistralApiKey: string;
   nvidiaApiKey: string;
+  customOpenaiApiKey: string;
+  customOpenaiBaseUrl: string;
+  openrouterApiKey: string;
   ollamaBaseUrl: string;
   systemPrompt: string;
   allowShellExecution: boolean;
@@ -59,6 +65,9 @@ const emptyForm: SettingsForm = {
   groqApiKey: '',
   mistralApiKey: '',
   nvidiaApiKey: '',
+  customOpenaiApiKey: '',
+  customOpenaiBaseUrl: '',
+  openrouterApiKey: '',
   ollamaBaseUrl: 'http://localhost:11434',
   systemPrompt: '',
   allowShellExecution: false,
@@ -79,6 +88,8 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
   const [form, setForm] = useState<SettingsForm>(emptyForm);
   const [statusText, setStatusText] = useState<string>('');
   const [newSensitivePath, setNewSensitivePath] = useState<string>('');
+  const [customModelsOverride, setCustomModelsOverride] = useState<string[]>([]);
+  const [customModelsError, setCustomModelsError] = useState<string>('');
 
   // Query hooks
   const { data: settings, isLoading: settingsLoading } = useSettings();
@@ -87,6 +98,8 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
 
   // Mutation hooks
   const updateSettings = useUpdateSettings();
+  const discoverCustomModels = useDiscoverCustomModels();
+  const discoverOpenRouterModels = useDiscoverOpenRouterModels();
   const addSensitivePath = useAddSensitivePath();
   const removeSensitivePath = useRemoveSensitivePath();
 
@@ -124,10 +137,32 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
     }
   }, [settings]);
 
+  const isDynamicModelProvider =
+    form.defaultLLMProvider === 'custom' || form.defaultLLMProvider === 'openrouter';
+
   const modelOptions = useMemo(() => {
+    if (isDynamicModelProvider && customModelsOverride.length > 0) {
+      return customModelsOverride;
+    }
     const models = providers.find((provider) => provider.name === form.defaultLLMProvider)?.models ?? [];
     return models.filter((model, index) => models.indexOf(model) === index);
-  }, [providers, form.defaultLLMProvider]);
+  }, [providers, form.defaultLLMProvider, customModelsOverride, isDynamicModelProvider]);
+
+  useEffect(() => {
+    if (!isDynamicModelProvider) {
+      setCustomModelsOverride([]);
+      setCustomModelsError('');
+    }
+  }, [form.defaultLLMProvider, isDynamicModelProvider]);
+
+  useEffect(() => {
+    if (isDynamicModelProvider) {
+      const fromProviders = providers.find((p) => p.name === form.defaultLLMProvider)?.models ?? [];
+      if (fromProviders.length > 0) {
+        setCustomModelsOverride(fromProviders);
+      }
+    }
+  }, [form.defaultLLMProvider, providers, isDynamicModelProvider]);
 
   // NOT: Kullanıcının model seçimi otomatik olarak değiştirilmez.
   // localStorage'dan gelen seçim her zaman korunur.
@@ -151,6 +186,43 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
       
       return updated;
     });
+  };
+
+  const handleDiscoverCustomModels = async () => {
+    setCustomModelsError('');
+    try {
+      const payload: { baseUrl?: string; apiKey?: string } = {};
+      if (form.customOpenaiBaseUrl.trim()) payload.baseUrl = form.customOpenaiBaseUrl.trim();
+      if (form.customOpenaiApiKey.trim() && !form.customOpenaiApiKey.includes('***') && !form.customOpenaiApiKey.includes('••••')) {
+        payload.apiKey = form.customOpenaiApiKey.trim();
+      }
+      const result = await discoverCustomModels.mutateAsync(payload);
+      setCustomModelsOverride(result.models);
+      if (result.models.length > 0 && !result.models.includes(form.defaultLLMModel)) {
+        updateLLMField('defaultLLMModel', result.models[0]!);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Model listesi alınamadı';
+      setCustomModelsError(message);
+    }
+  };
+
+  const handleDiscoverOpenRouterModels = async () => {
+    setCustomModelsError('');
+    try {
+      const payload: { apiKey?: string } = {};
+      if (form.openrouterApiKey.trim() && !form.openrouterApiKey.includes('***') && !form.openrouterApiKey.includes('••••')) {
+        payload.apiKey = form.openrouterApiKey.trim();
+      }
+      const result = await discoverOpenRouterModels.mutateAsync(payload);
+      setCustomModelsOverride(result.models);
+      if (result.models.length > 0 && !result.models.includes(form.defaultLLMModel)) {
+        updateLLMField('defaultLLMModel', result.models[0]!);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Model listesi alınamadı';
+      setCustomModelsError(message);
+    }
   };
 
   const updateSecurityField = (key: string, value: string | boolean) => {
@@ -193,7 +265,13 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
       }
     } catch (error) {
       console.error(error);
-      setStatusText('Kaydetme sırasında hata oluştu.');
+      const detail =
+        error instanceof ApiError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : 'Kaydetme sırasında hata oluştu.';
+      setStatusText(detail);
     }
   };
 
@@ -230,6 +308,10 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
               providers={providers}
               modelOptions={modelOptions}
               updateField={updateLLMField}
+              onDiscoverCustomModels={handleDiscoverCustomModels}
+              onDiscoverOpenRouterModels={handleDiscoverOpenRouterModels}
+              customModelsLoading={discoverCustomModels.isPending || discoverOpenRouterModels.isPending}
+              customModelsError={customModelsError}
             />
 
             <div className="space-y-6">
@@ -256,7 +338,7 @@ export const SettingsDialog = ({ open, onOpenChange, inline = false }: { open: b
       )}
 
       <div className="flex flex-col gap-4 border-t border-border/30 bg-muted/10 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-7">
-        <div className="max-w-3xl text-sm leading-6 text-surface-strong">
+        <div className="max-w-3xl text-sm leading-6 text-foreground">
           {statusText || 'Kaydettiğiniz değişiklikler anında uygulanır. LLM provider/model değişiklikleri yeniden başlatma gerektirir.'}
         </div>
         <Button onClick={handleSave} disabled={settingsLoading || providersLoading || pathsLoading || updateSettings.isPending} className="min-w-[190px] px-5">

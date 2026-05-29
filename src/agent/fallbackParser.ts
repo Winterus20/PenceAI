@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import type { ToolCall } from '../router/types.js';
 import { logger } from '../utils/logger.js';
 
@@ -10,6 +11,7 @@ export function extractFallbackToolCalls(content: string, knownToolNames: Set<st
     const results: ToolCall[] = [];
     const rawMatches: string[] = [];
 
+    // 1. tool_code blocks
     const toolCodeBlockRegex = /```tool_code\s*([\s\S]*?)```/gi;
     for (const m of content.matchAll(toolCodeBlockRegex)) {
         if (m[1]) {
@@ -21,21 +23,41 @@ export function extractFallbackToolCalls(content: string, knownToolNames: Set<st
         }
     }
 
+    // 2. tool_code inline
     const toolCodeInlineRegex = /tool_code\s*\[?\s*([\s\S]*?)\s*\]?\s*(?:\n|$)/gi;
-    if (results.length === 0) {
-        for (const m of content.matchAll(toolCodeInlineRegex)) {
-            if (m[1]) {
-                const innerCalls = parseFunctionCallsFromText(m[1], knownToolNames);
-                results.push(...innerCalls.calls);
-            }
-            if (m[0]) {
-                rawMatches.push(m[0]);
+    for (const m of content.matchAll(toolCodeInlineRegex)) {
+        if (m[1]) {
+            const innerCalls = parseFunctionCallsFromText(m[1], knownToolNames);
+            results.push(...innerCalls.calls);
+        }
+        if (m[0]) {
+            rawMatches.push(m[0]);
+        }
+    }
+
+    // 3. toolName{ JSON } format (Gemma style)
+    const toolJsonRegex = /(\w+)\s*(\{[\s\S]*?\})/g;
+    for (const m of content.matchAll(toolJsonRegex)) {
+        const potentialToolName = m[1];
+        const jsonStr = m[2];
+        if (potentialToolName && knownToolNames.has(potentialToolName) && jsonStr) {
+            try {
+                const parsed = JSON.parse(jsonStr);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    results.push({
+                        id: `call_${crypto.randomUUID()}`,
+                        name: potentialToolName,
+                        arguments: parsed,
+                    });
+                    rawMatches.push(m[0]);
+                }
+            } catch (err) {
+                logger.debug({ err: err instanceof Error ? err.message : err }, '[FallbackParser] ToolName+JSON parse failed');
             }
         }
     }
 
-    if (results.length > 0) return { calls: results, rawMatches };
-
+    // 4. JSON block format {"name": "toolName", ...}
     const jsonBlockRegex = /\{[^{}]*\}/g;
     for (const m of content.matchAll(jsonBlockRegex)) {
         try {
@@ -45,7 +67,7 @@ export function extractFallbackToolCalls(content: string, knownToolNames: Set<st
                 if (toolName && knownToolNames.has(toolName)) {
                     const toolArgs = parsed.arguments || parsed.parameters || parsed.function?.arguments || {};
                     results.push({
-                        id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                        id: `call_${crypto.randomUUID()}`,
                         name: toolName,
                         arguments: typeof toolArgs === 'string' ? safeJsonParse(toolArgs) : toolArgs,
                     });
@@ -57,37 +79,32 @@ export function extractFallbackToolCalls(content: string, knownToolNames: Set<st
         }
     }
 
-    if (results.length === 0) {
-        const greedyJsonRegex = /\{[\s\S]*?\}/g;
-        for (const m of content.matchAll(greedyJsonRegex)) {
-            try {
-                const escaped = m[0].replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
-                const parsed = JSON.parse(escaped);
-                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                    const toolName = parsed.name || (parsed.type === 'function' && parsed.function?.name);
-                    if (toolName && knownToolNames.has(toolName)) {
-                        const toolArgs = parsed.arguments || parsed.parameters || parsed.function?.arguments || {};
-                        results.push({
-                            id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-                            name: toolName,
-                            arguments: typeof toolArgs === 'string' ? safeJsonParse(toolArgs) : toolArgs,
-                        });
-                        rawMatches.push(m[0]);
-                    }
-                }
-            } catch (err) {
-                logger.debug({ err: err instanceof Error ? err.message : err }, '[FallbackParser] Greedy JSON parse failed');
-            }
-        }
-    }
-
-    if (results.length > 0) return { calls: results, rawMatches };
-
+    // 5. Function call format: toolName(args) — always try as last resort
     const functionResult = parseFunctionCallsFromText(content, knownToolNames);
     results.push(...functionResult.calls);
     rawMatches.push(...functionResult.rawMatches);
 
-    return { calls: results, rawMatches };
+    // Deduplicate: aynı araç çağrısı birden fazla format tarafından yakalanmış olabilir
+    const seen = new Set<string>();
+    const uniqueCalls: ToolCall[] = [];
+    const uniqueRawMatches: string[] = [];
+
+    for (const call of results) {
+        const key = `${call.name}:${JSON.stringify(call.arguments)}`;
+        if (!seen.has(key)) {
+            seen.add(key);
+            uniqueCalls.push(call);
+        }
+    }
+
+    // rawMatches için de duplicate temizleme
+    for (const match of rawMatches) {
+        if (!uniqueRawMatches.includes(match)) {
+            uniqueRawMatches.push(match);
+        }
+    }
+
+    return { calls: uniqueCalls, rawMatches: uniqueRawMatches };
 }
 
 export function parseFunctionCallsFromText(text: string, knownToolNames: Set<string>): FallbackToolCallResult {
@@ -116,7 +133,7 @@ export function parseFunctionCallsFromText(text: string, knownToolNames: Set<str
             const parsedArgs = parseFallbackArgs(toolName, argsString);
 
             results.push({
-                id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                id: `call_${crypto.randomUUID()}`,
                 name: toolName,
                 arguments: parsedArgs
             });

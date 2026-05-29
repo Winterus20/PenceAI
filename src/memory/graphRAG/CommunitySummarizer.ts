@@ -566,42 +566,81 @@ Lütfen aşağıdaki formatta JSON olarak özet üret:
     }
   }
 
+  /** Community satır tipi (DB) */
+  private static readonly COMMUNITY_ROW_FIELDS = `
+    id, modularity_score, dominant_relation_types, created_at
+  ` as const;
+
+  private static readonly COMMUNITY_ROW_TYPE = {} as {
+    id: string;
+    modularity_score: number | null;
+    dominant_relation_types: string | null;
+    created_at: string;
+  };
+
+  /**
+   * Birden fazla community için üye node_id'lerini tek sorguda yükler.
+   */
+  private loadMembersByCommunityIds(communityIds: string[]): Map<string, number[]> {
+    const membersMap = new Map<string, number[]>();
+    if (communityIds.length === 0) return membersMap;
+
+    const placeholders = communityIds.map(() => '?').join(',');
+    try {
+      const rows = this.db.prepare(`
+        SELECT community_id, node_id FROM graph_community_members
+        WHERE community_id IN (${placeholders})
+      `).all(...communityIds) as Array<{ community_id: string; node_id: number }>;
+
+      for (const row of rows) {
+        const existing = membersMap.get(row.community_id);
+        if (existing) {
+          existing.push(row.node_id);
+        } else {
+          membersMap.set(row.community_id, [row.node_id]);
+        }
+      }
+    } catch (err) {
+      logger.warn({ err }, '[CommunitySummarizer] loadMembersByCommunityIds hatası:');
+    }
+
+    return membersMap;
+  }
+
+  private buildCommunityFromRow(
+    row: typeof CommunitySummarizer.COMMUNITY_ROW_TYPE,
+    memberNodeIds: number[],
+    level: number,
+  ): Community {
+    return {
+      id: row.id,
+      memberNodeIds,
+      modularityScore: row.modularity_score ?? 0,
+      dominantRelationTypes: row.dominant_relation_types
+        ? JSON.parse(row.dominant_relation_types)
+        : [],
+      createdAt: new Date(row.created_at),
+      level,
+      parentId: null,
+    };
+  }
+
   /**
    * Tüm community'leri yükle.
    */
   private loadAllCommunities(): Community[] {
     try {
       const communities = this.db.prepare(`
-        SELECT id, modularity_score, dominant_relation_types, created_at
+        SELECT ${CommunitySummarizer.COMMUNITY_ROW_FIELDS}
         FROM graph_communities
         ORDER BY modularity_score DESC
-      `).all() as Array<{
-        id: string;
-        modularity_score: number | null;
-        dominant_relation_types: string | null;
-        created_at: string;
-      }>;
+      `).all() as Array<typeof CommunitySummarizer.COMMUNITY_ROW_TYPE>;
 
-      const result: Community[] = [];
-      for (const row of communities) {
-        const members = this.db.prepare(`
-          SELECT node_id FROM graph_community_members WHERE community_id = ?
-        `).all(row.id) as Array<{ node_id: number }>;
+      const membersMap = this.loadMembersByCommunityIds(communities.map(c => c.id));
 
-        result.push({
-          id: row.id,
-          memberNodeIds: members.map(m => m.node_id),
-          modularityScore: row.modularity_score ?? 0,
-          dominantRelationTypes: row.dominant_relation_types
-            ? JSON.parse(row.dominant_relation_types)
-            : [],
-          createdAt: new Date(row.created_at),
-          level: 0,
-          parentId: null,
-        });
-      }
-
-      return result;
+      return communities.map(row =>
+        this.buildCommunityFromRow(row, membersMap.get(row.id) ?? [], 0),
+      );
     } catch (err) {
       logger.warn({ err }, '[CommunitySummarizer] loadAllCommunities hatası:');
       return [];
@@ -626,37 +665,17 @@ Lütfen aşağıdaki formatta JSON olarak özet üret:
   private loadCommunitiesByLevel(level: number): Community[] {
     try {
       const communities = this.db.prepare(`
-        SELECT id, modularity_score, dominant_relation_types, created_at
+        SELECT ${CommunitySummarizer.COMMUNITY_ROW_FIELDS}
         FROM graph_communities
         WHERE level = ?
         ORDER BY modularity_score DESC
-      `).all(level) as Array<{
-        id: string;
-        modularity_score: number | null;
-        dominant_relation_types: string | null;
-        created_at: string;
-      }>;
+      `).all(level) as Array<typeof CommunitySummarizer.COMMUNITY_ROW_TYPE>;
 
-      const result: Community[] = [];
-      for (const row of communities) {
-        const members = this.db.prepare(`
-          SELECT node_id FROM graph_community_members WHERE community_id = ?
-        `).all(row.id) as Array<{ node_id: number }>;
+      const membersMap = this.loadMembersByCommunityIds(communities.map(c => c.id));
 
-        result.push({
-          id: row.id,
-          memberNodeIds: members.map(m => m.node_id),
-          modularityScore: row.modularity_score ?? 0,
-          dominantRelationTypes: row.dominant_relation_types
-            ? JSON.parse(row.dominant_relation_types)
-            : [],
-          createdAt: new Date(row.created_at),
-          level,
-          parentId: null,
-        });
-      }
-
-      return result;
+      return communities.map(row =>
+        this.buildCommunityFromRow(row, membersMap.get(row.id) ?? [], level),
+      );
     } catch (err) {
       logger.warn({ err }, '[CommunitySummarizer] loadCommunitiesByLevel hatası:');
       return [];
